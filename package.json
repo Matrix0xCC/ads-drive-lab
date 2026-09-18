@@ -1,0 +1,24 @@
+{
+  "name": "ads",
+  "version": "1.0.0",
+  "description": "",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "typecheck": "tsc --noEmit",
+    "watch": "tsc --watch",
+    "test": "tsc && node --test dist/js/test/plan/"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@types/three": "^0.185.1",
+    "typescript": "^7.0.2"
+  },
+  "dependencies": {
+    "three": "^0.160.0"
+  }
+}

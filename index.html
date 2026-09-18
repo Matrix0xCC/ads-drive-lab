@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>2D 自动驾驶 - 3D 俯视</title>
+  <style>
+    body { margin: 0; background: #111; overflow: hidden; }
+    #canvas-container { position: relative; width: 1800px; height: 800px; margin: 20px auto; }
+    canvas { display: block; }
+
+    #hud {
+      position: absolute; top: 10px; left: 15px;
+      color: #fff; font-family: monospace; font-size: 13px;
+      pointer-events: none; z-index: 10;
+      line-height: 1.6;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.8);
+    }
+    #hud .state-normal  { color: #44ff44; font-weight: bold; }
+    #hud .state-avoid  { color: #ff4444; font-weight: bold; }
+
+    #map-select {
+      position: absolute; top: 10px; right: 15px;
+      z-index: 20; pointer-events: all; display: flex; gap: 8px; align-items: center;
+    }
+    #map-select select, #map-select button {
+      background: #333; color: #fff; border: 1px solid #666;
+      padding: 6px 10px; font-family: monospace; font-size: 13px;
+      border-radius: 4px; cursor: pointer;
+    }
+    #map-select button:hover { background: #444; }
+
+    #hud-instructions {
+      position: absolute; bottom: 10px; left: 15px;
+      z-index: 10; pointer-events: none;
+      color: #888; font-family: monospace; font-size: 11px;
+    }
+  </style>
+</head>
+<body>
+  <div id="canvas-container">
+    <canvas id="canvas"></canvas>
+
+    <!-- 地图选择 -->
+    <div id="map-select">
+      <select id="map-dropdown">
+        <option value="oval">Oval</option>
+        <option value="hairpin">Hairpin</option>
+        <option value="highway">Highway</option>
+        <option value="tech_circuit">Tech Circuit</option>
+      </select>
+      <button id="btn-reset-view" title="重置视角 (R)">&#8634;</button>
+      <button id="btn-export" title="导出记录">&#128190;</button>
+      <button id="btn-import" title="导入记录">&#128194;</button>
+      <button id="btn-pause" title="暂停/继续 (Space)">&#9208;</button>
+    </div>
+
+    <!-- HUD -->
+    <div id="hud">
+      <div>地图: <span id="hud-map">---</span></div>
+      <div>前方: <span id="hud-front">---</span></div>
+      <div>速度: <span id="hud-speed">---</span></div>
+      <div class="state-normal"  id="hud-state">状态: NORMAL 巡航中</div>
+      <div>转向: <span id="hud-steer">---</span> rad | 油门: <span id="hud-throttle">---</span></div>
+      <div style="color:#888;font-size:10px;margin-top:4px;">
+        LiDAR: <span id="hud-rays">0</span> 条射线 |
+        障碍物: <span id="hud-obstacles">0</span> 个
+      </div>
+      <div id="hud-obstacle-info" style="color:#ffaa00;font-size:11px;margin-top:2px;min-height:16px;"></div>
+      <div id="hud-route" style="color:#ffaa00;font-size:11px;margin-top:2px;min-height:16px;">路线: 点击赛道设置</div>
+      <div id="hud-gps" style="color:#8888ff;font-size:10px;margin-top:2px;min-height:14px;">GPS: ---</div>
+    </div>
+
+    <div id="hud-instructions">
+      左键点击物体查看尺寸 | 右键赛道设置路线 | Space 暂停
+    </div>
+
+    <!-- 物体点击提示 -->
+    <div id="object-tooltip" style="display:none;position:fixed;z-index:100;pointer-events:none;
+      color:#fff;font-family:monospace;font-size:11px;background:rgba(0,0,0,0.85);
+      padding:5px 8px;border-radius:3px;line-height:1.5;white-space:nowrap;">
+    </div>
+
+    <!-- Inspect 面板 -->
+    <div id="inspect-panel" style="position:absolute;bottom:10px;right:15px;
+      z-index:20;pointer-events:none;color:#0f0;font-family:monospace;font-size:10px;
+      background:rgba(0,0,0,0.85);padding:8px 10px;border-radius:4px;line-height:1.4;
+      max-height:400px;overflow-y:auto;width:280px;">
+    </div>
+  </div>
+
+  <!-- Three.js import map -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./node_modules/three/build/three.module.js",
+      "three/addons/": "./node_modules/three/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module" src="dist/js/main.js"></script>
+</body>
+</html>
