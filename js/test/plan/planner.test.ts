@@ -39,14 +39,14 @@ function makeClearLidar(): LidarScan {
   return { angles, distances, rawDistances, confidences: new Array(61).fill(1), timestamp: 0 };
 }
 
-function makeBlockedLidar(blockedAngles: number[], blockedDist: number): LidarScan {
+function makeBlockedLidar(blockedAngles: number[], blockedDist: number, arcHalf = 0.05): LidarScan {
   const n = 61;
   const angles: any[] = [];
   const distances: any[] = [];
   for (let i = 0; i < n; i++) {
     const a = -Math.PI / 3 + (i / (n - 1)) * 2 * Math.PI / 3;
     angles.push(rad(a));
-    const blocked = blockedAngles.some(ba => Math.abs(a - ba) < 0.05);
+    const blocked = blockedAngles.some(ba => Math.abs(a - ba) < arcHalf);
     distances.push(blocked ? px(blockedDist) : MAX_SENSOR_DIST);
   }
   const rawDistances = [...distances];
@@ -66,7 +66,7 @@ describe('planner 巡航', () => {
 
   it('前方 75m 障碍 → 提前选侧避让（120m 视程下横移有充分距离）', () => {
     const car = makeCar(100, 0, 0, 120);
-    const traj = plan(makeSnapshot(car), makeBlockedLidar([0], 300));
+    const traj = plan(makeSnapshot(car), makeBlockedLidar([0], 300, 0.025));   // 单射线（现实尺寸）
     assert.ok(traj.type !== 'lane_keep');
     assert.ok(traj.type !== 'emergency');
   });
@@ -79,7 +79,7 @@ describe('planner 巡航', () => {
 
   it('远处 200px 障碍物 → 不触发紧急', () => {
     const car = makeCar(100, 0, 0, 120);
-    const traj = plan(makeSnapshot(car), makeBlockedLidar([0], 200));
+    const traj = plan(makeSnapshot(car), makeBlockedLidar([0], 200, 0.025));   // 单射线
     assert.ok(traj.type !== 'emergency');
   });
 });
@@ -113,7 +113,7 @@ describe('planner 一致性', () => {
 
   it('30 帧内避障方向切换 ≤2 次', () => {
     const car = makeCar(100, 0, 0, 120);
-    const lidar = makeBlockedLidar([0], 300);
+    const lidar = makeBlockedLidar([0], 300, 0.025);   // 单射线
     let switches = 0;
     let lastType = '';
     for (let i = 0; i < 30; i++) {

@@ -72,8 +72,8 @@ describe('路径层：碰撞判定与选路', () => {
     assert.ok(Math.abs((r.best.targetL as number) - LO) > 2 * 4, '应选侧向路径'); // >2m
     const inLane = r.ranked.find(p => Math.abs((p.targetL as number) - LO) < 1);
     assert.ok(inLane && inLane.blocked, '本车道应被判阻塞');
-    // 判阻塞发生在"越过命中点+margin(19.85)"之后：sBlock ≈ 100 + 20~60
-    assert.ok(inLane.sBlock >= 90 && inLane.sBlock <= 170, `sBlock 应≈100-160，实际 ${inLane.sBlock}`);
+    // 判阻塞发生在"路径进入命中点 CLEAR(2.5m) 范围内"处：sBlock ≈ 60-130
+    assert.ok(inLane.sBlock >= 60 && inLane.sBlock <= 130, `sBlock 应≈60-130，实际 ${inLane.sBlock}`);
   });
 
   it('近距宽障碍（60u）全阻塞：allBlocked=true，按最晚碰撞排序', () => {
