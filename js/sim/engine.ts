@@ -51,7 +51,7 @@ export interface WorldConfig {
   gpsConfig?: Partial<LocalizationConfig>;
 }
 
-export type RouteState = 'NONE' | 'SETTING_START' | 'SETTING_GOAL' | 'ACTIVE' | 'ARRIVED';
+export type RouteState = 'NONE' | 'ACTIVE' | 'ARRIVED';
 
 function emptyScan(): LidarScan {
   const d = new Array(SCAN_RAY_COUNT).fill(MAX_SENSOR_DIST) as Px[];

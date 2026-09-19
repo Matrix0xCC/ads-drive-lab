@@ -55,8 +55,8 @@ requestAnimationFrame 主循环 (~60Hz)
 - `js/algo/` — 感知（perception）、规划（plan/）、控制（control）、全局路径（routePlanner）
 - `js/sim/` — SimEngine 共用核心（浏览器/headless 同一管线装配）+ 场景加载（scenario.ts）
 - `js/headless/` — headless CLI（run.ts）、归档（archive.ts）、检测器（detector.ts + checks/）、报告（report.ts）
-- `js/shared/` — 接口契约（types/interfaces/，含归档记录 schema）、量纲系统（dimensions.ts）、rng、debug、recorder
-- `js/ui.ts` / `js/replay.ts` — DOM 交互与回放控制器；`js/env/renderer/` — Three.js 渲染
+- `js/shared/` — 接口契约（types/interfaces/，含归档记录 schema）、量纲系统（dimensions.ts）、rng、debug
+- `js/ui/` — UI 层（`state.ts` 纯状态机 + `controller.ts` 副作用边界 + toolbar/hud/inspector/interactions/replayPanel 面板模块）；`js/replay.ts` — 回放控制器；`js/env/renderer/` — Three.js 渲染
 - `scenarios/` — 场景用例（入库）；新增场景需登记 `scenarios/index.json` 才会出现在浏览器场景下拉；`runs/` — 运行归档（gitignore）
 - `js/test/` — node:test 单元测试（`.test.ts`，编译后运行）
 
@@ -67,6 +67,7 @@ requestAnimationFrame 主循环 (~60Hz)
 3. **传感器驱动** — 规划器只信任 LiDAR 做碰撞检测，禁止直接使用障碍物列表（真实系统中规划器不知道障碍物绝对坐标）
 4. **量纲安全** — `dimensions.ts` 品牌类型（Px, Radians, PxPerSec, DimLess...）编译时防量纲错误，编译后完全擦除。工厂函数（`px()`, `m()`, `rad()`...）是唯一 unsafe cast 点，只允许在模块边界使用
 5. **单位系统** — 所有物理量配置用 `m()` / `mps()` / `mps2()` 书写（`SIM_UNITS_PER_METER = 4`，改比例尺只需改这一个常量），不要硬编码 px 值
+6. **UI 状态单一来源** — 所有 UI 行为经 `ui/state.ts` 的纯函数 reduce 驱动，DOM 只是状态的渲染投影；`ui/controller.ts` 是"状态变化 → 副作用"的唯一边界；main 只通过 `UiDeps.actions` 改世界。快捷键：Space 暂停/回放播放、Esc 取消选点/退出回放、R 视角、I 折叠 Inspect
 
 ### 规划器（js/algo/plan/）
 
@@ -91,7 +92,7 @@ Pure Pursuit：δ = atan2(2·L·sin α, ld)，预瞄距离 = clamp(0.4×speed, 1
 ### 调试与记录
 
 - `shared/debug.ts` — 跨模块共享调试对象，各模块写入内部状态，ui.ts 的 inspect 面板读取展示
-- `shared/recorder.ts` — 15Hz 录像、导出/导入 JSON、`analyzeRecording()` 检测 emergency/近距/摇摆帧
+- 运行归档的导出/导入统一走 headless 格式：浏览器 💾 导出 `.run.json` 归档包（`sim/records.ts` 收集 + `headless/bundle.ts` 组装检测/报告），📂 导入后直接在回放器打开；`.run.json` 包与磁盘 `runs/<id>/` 归档内容同构
 
 ### Headless 运行与归档（AI 自助测试流程）
 

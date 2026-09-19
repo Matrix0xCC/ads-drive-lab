@@ -46,3 +46,11 @@ export function updateInspectPanel(dt: number) {
   }
   body.innerHTML = html;   // 只更新内容区，保留标题栏（折叠按钮）
 }
+
+/** 折叠/展开 inspect 面板（控制内容区显隐与按钮箭头） */
+export function setInspectorOpen(open: boolean): void {
+  const body = document.getElementById('inspect-body');
+  const btn = document.getElementById('btn-inspect-toggle');
+  if (body) body.style.display = open ? 'block' : 'none';
+  if (btn) btn.textContent = open ? '▾' : '▸';
+}

@@ -1,4 +1,4 @@
-// ==================== 主入口：engine 装配 + 渲染 ====================
+// ==================== 主入口：engine 装配 + 渲染 + UI ====================
 import { MessageBus } from './messageBus.js';
 import { FrameRecord } from './shared/types.js';
 import { debug } from './shared/debug.js';
@@ -8,7 +8,7 @@ import { ARCHIVE_TOPICS, recordFrom } from './sim/records.js';
 import { assembleBundle } from './headless/bundle.js';
 import { initScene, updateScene, resetSceneCache } from './env/renderer.js';
 import { MAP_PRESETS, DEFAULT_MAP } from './env/mapDefinitions.js';
-import { setupUI, updateInspectPanel } from './ui/index.js';
+import { setupUI } from './ui/index.js';
 import { ReplayController } from './replay.js';
 
 const W = SIM_W, H = SIM_H;
@@ -32,7 +32,7 @@ for (const topic of ARCHIVE_TOPICS) {
 
 let currentScenario: Scenario | null = null;
 
-function applyScenario(json: unknown): boolean {
+function applyScenario(json: unknown): string | null {
   let scenario: Scenario;
   let built: ReturnType<typeof buildScenarioWorld>;
   try {
@@ -40,7 +40,7 @@ function applyScenario(json: unknown): boolean {
     built = buildScenarioWorld(scenario, SIM_W, SIM_H);
   } catch (e) {
     alert(`场景加载失败: ${(e as Error).message}`);
-    return false;
+    return null;
   }
   engine.rebuildWorld(built.worldCfg);
   if (built.route) {
@@ -53,11 +53,8 @@ function applyScenario(json: unknown): boolean {
   document.getElementById('hud-scenario')!.textContent = `${scenario.name}（种子 ${scenario.seed}）`;
   const mapSelect = document.getElementById('map-dropdown') as HTMLSelectElement | null;
   if (mapSelect) mapSelect.value = scenario.map;
-  return true;
+  return scenario.name;
 }
-
-// 初始世界：浏览器默认场景
-applyScenario(defaultScenario(DEFAULT_MAP));
 
 /** 导出当前运行归档：与 headless 同一套检测/报告（assembleBundle），下载 .run.json */
 function exportRun(): void {
@@ -77,34 +74,32 @@ function exportRun(): void {
   URL.revokeObjectURL(a.href);
 }
 
-// ui.ts 右键路由状态机（SETTING_START/SETTING_GOAL）的起点暂存
-let clickStartIdx: number | null = null;
+// 初始世界：浏览器默认场景
+applyScenario(defaultScenario(DEFAULT_MAP));
 
 const replay = new ReplayController(scene, lidarLines);
 
-setupUI({
-  W, H, canvas, camera, scene, controls,
-  onExportRun: exportRun,
-  get mapDef() { return engine.mapDef; },
-  get track() { return engine.track; },
-  get roadGraph() { return engine.roadGraph; },
-  get car() { return engine.car; },
-  get route() { return engine.route; },
-  get routeState() { return engine.routeState; },
-  get latestGPS() { return engine.latestGPS; },
-  onMapChange(name: string) {
-    const map = MAP_PRESETS[name] ? name : DEFAULT_MAP;
-    const base = currentScenario ?? defaultScenario(map);
-    applyScenario({ ...base, map });
+const ui = setupUI({
+  canvas, camera, scene, controls, replay,
+  engine: {
+    get mapDef() { return engine.mapDef; },
+    get track() { return engine.track; },
+    get roadGraph() { return engine.roadGraph; },
+    get route() { return engine.route; },
+    get routeState() { return engine.routeState; },
   },
-  onRouteSet(r, startIdx) { engine.setRoute(r, startIdx); },
-  setRouteState(s: string) { engine.routeState = s as typeof engine.routeState; },
-  setClickStartIdx(idx: number | null) { clickStartIdx = idx; },
-  getClickStartIdx: () => clickStartIdx,
-  getRouteState: () => engine.routeState,
-  replay,
-  onScenarioLoad(json: unknown) { applyScenario(json); },
-  onScenarioReset() { applyScenario(defaultScenario(engine.mapDef.name)); },
+  actions: {
+    loadScenario(json: unknown) { return applyScenario(json); },
+    loadDefaultScenario(map: string) { applyScenario(defaultScenario(map)); },
+    switchMap(name: string) {
+      const map = MAP_PRESETS[name] ? name : DEFAULT_MAP;
+      const base = currentScenario ?? defaultScenario(map);
+      applyScenario({ ...base, map });
+    },
+    exportRun,
+    setRoute(r, startIdx) { engine.setRoute(r, startIdx); },
+    setLivePaused(paused: boolean) { debug.paused = paused; },
+  },
 });
 
 engine.bus.subscribe('control:state', ({ snapshot, lidarScan, trajectory, state }: any) => {
@@ -115,6 +110,7 @@ engine.bus.subscribe('control:state', ({ snapshot, lidarScan, trajectory, state 
 //
 // 真实帧率波动 → 累积时间 → 每满 1/60s 调用一次 engine.step。
 // 与 headless 直接固定步进逐帧一致（复现性要求）。
+// 回放模式由 replay.state.active 分支接管，不步进 engine。
 let lastTime = performance.now();
 let acc = 0;
 const MAX_CATCHUP = 5;
@@ -124,7 +120,7 @@ function gameLoop(now: number) {
   lastTime = now;
 
   if (replay.state.active) {
-    replay.update(realDt);            // 回放模式：只推进回放时钟，不步进 engine
+    replay.update(realDt);
   } else if (!debug.paused) {
     acc += realDt;
     let n = 0;
@@ -138,7 +134,7 @@ function gameLoop(now: number) {
 
   controls.update();
   renderer.render(scene, camera);
-  updateInspectPanel(realDt);
+  ui.tick(realDt);
   requestAnimationFrame(gameLoop);
 }
 requestAnimationFrame(gameLoop);

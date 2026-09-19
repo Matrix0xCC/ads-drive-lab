@@ -1,15 +1,16 @@
 // ==================== UI：画布交互 ====================
-// 左键：物体信息 tooltip；右键：路线拾取（起点 → 终点两段式）。
-// 状态逻辑见 state.ts/controller.ts（T5 接线）。
+// 左键：物体信息 tooltip；右键：路线拾取（两段式：起点 → 终点）。
+// 拾取状态归 state.ts 的 routePick；建路线成功后 dispatch ROUTE_SET。
 
 import * as THREE from 'three';
-import type { UIContext } from './index.js';
+import { UiController } from './controller.js';
+import type { UiDeps } from './index.js';
+import { findRoute, findClosestPoint } from '../algo/routePlanner.js';
 import { createRoute } from '../shared/types.js';
 import { px } from '../shared/dimensions.js';
-import { findRoute, findClosestPoint } from '../algo/routePlanner.js';
 
-export function wireInteractions(ctx: UIContext): void {
-  const { canvas, camera } = ctx;
+export function wireInteractions(deps: UiDeps, ctl: UiController): void {
+  const { canvas, camera } = deps;
 
   // ── 左键点击 → 物体检查 ──
   canvas.addEventListener('click', (e: MouseEvent) => {
@@ -21,7 +22,7 @@ export function wireInteractions(ctx: UIContext): void {
     const raycaster = new THREE.Raycaster();
     raycaster.setFromCamera(mouse, camera);
 
-    const hits = raycaster.intersectObjects(ctx.scene.children, true);
+    const hits = raycaster.intersectObjects(deps.scene.children, true);
     const objHit = hits.find(h => h.object.userData?.type);
     if (objHit) {
       const d = objHit.object.userData;
@@ -39,9 +40,10 @@ export function wireInteractions(ctx: UIContext): void {
     }
   });
 
-  // ── 右键点击 → 路线设置 ──
+  // ── 右键点击 → 路线拾取 ──
   canvas.addEventListener('contextmenu', (e: MouseEvent) => {
     e.preventDefault();
+    if (ctl.state.mode !== 'LIVE') return;   // 回放中不给实时世界设路线
     const rect = canvas.getBoundingClientRect();
     const mouse = new THREE.Vector2(
       ((e.clientX - rect.left) / rect.width) * 2 - 1,
@@ -53,27 +55,27 @@ export function wireInteractions(ctx: UIContext): void {
     raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), target);
     if (!target) return;
 
-    const idx = findClosestPoint(target.x, target.z, ctx.track.centerPoints);
-    const rs = ctx.getRouteState();
+    const idx = findClosestPoint(target.x, target.z, deps.engine.track.centerPoints);
+    const st = ctl.state;
 
-    if (rs === 'NONE' || rs === 'SETTING_START' || rs === 'ARRIVED') {
-      ctx.setClickStartIdx(idx);
-      ctx.setRouteState('SETTING_GOAL');
-    } else if (rs === 'SETTING_GOAL') {
-      const startIdx = ctx.getClickStartIdx()!;
-      const pathIndices = findRoute(ctx.roadGraph, startIdx, idx);
-      if (pathIndices && pathIndices.length >= 2) {
-        const waypoints = pathIndices.map(i => ctx.track.centerPoints[i]);
-        let totalLen = 0;
-        for (let i = 1; i < waypoints.length; i++) {
-          totalLen += Math.hypot(
-            (waypoints[i].x as number) - (waypoints[i-1].x as number),
-            (waypoints[i].y as number) - (waypoints[i-1].y as number),
-          );
-        }
-        const r = createRoute(waypoints, pathIndices, startIdx, idx, px(totalLen));
-        ctx.onRouteSet(r, startIdx);
-      }
+    if (st.routePick === 'idle') {
+      ctl.dispatch({ type: 'RIGHT_CLICK', idx });
+      return;
     }
+    // picking-goal：尝试建路线；失败保持 picking（与旧行为一致）
+    const startIdx = st.pickStartIdx!;
+    const pathIndices = findRoute(deps.engine.roadGraph, startIdx, idx);
+    if (!pathIndices || pathIndices.length < 2) return;
+    const waypoints = pathIndices.map(i => deps.engine.track.centerPoints[i]);
+    let totalLen = 0;
+    for (let i = 1; i < waypoints.length; i++) {
+      totalLen += Math.hypot(
+        (waypoints[i].x as number) - (waypoints[i - 1].x as number),
+        (waypoints[i].y as number) - (waypoints[i - 1].y as number),
+      );
+    }
+    const r = createRoute(waypoints, pathIndices, startIdx, idx, px(totalLen));
+    deps.actions.setRoute(r, startIdx);
+    ctl.dispatch({ type: 'ROUTE_SET' });
   });
 }
