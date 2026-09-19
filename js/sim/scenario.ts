@@ -1,0 +1,186 @@
+// ==================== 场景加载：JSON → 世界配置 ====================
+//
+// 【用途】headless 模式的输入：场景 JSON（地图 + 障碍物 + 路线 + 种子），
+// 校验并转换为 SimEngine 的 WorldConfig。
+//
+// 【单位】场景文件中所有长度/速度一律物理单位（米 / m/s），
+// 在本模块边界统一转换为仿真单位（m()/mps() 工厂是唯一转换点）。
+//
+// 【坐标约定】障碍物用赛道 Frenet 坐标 (s, l) 声明（l>0 内侧），
+// 由 frenetToCartesian 换算到世界坐标；yaw 为相对赛道切线的偏角。
+// 路线用弧长 s 声明起终点，内部转中心线索引后复用 Dijkstra。
+//
+// 【注意】无 route 时车辆保持静止（与浏览器语义一致），
+// 行驶类场景必须带 route。
+
+import { Obstacle, Point2D, Route, TrackGeometry, createRoute } from '../shared/types.js';
+import { Px, rad, m, mps, px, SIM_UNITS_PER_METER } from '../shared/dimensions.js';
+import { MAP_PRESETS, MapDefinition } from '../env/mapDefinitions.js';
+import { generateTrack, TRACK_HALF_WIDTH } from '../env/track.js';
+import { generateObstacles } from '../env/obstacle.js';
+import { buildRoadGraph, findRoute } from '../algo/routePlanner.js';
+import { buildFrenetReference, frenetToCartesian } from '../algo/plan/frenet.js';
+import { createRng, deriveSeed } from '../shared/rng.js';
+import { WorldConfig } from './engine.js';
+
+export class ScenarioError extends Error {}
+
+export interface ScenarioObstacle { s: number; l: number; w: number; len: number; yaw?: number; }
+
+export interface Scenario {
+  version: 1;
+  name: string;
+  map: string;
+  seed: number;
+  duration: number;
+  car?: { speed?: number };
+  obstacles: { mode: 'explicit'; list: ScenarioObstacle[] } | { mode: 'random'; count: number };
+  route?: { startS: number; goalS: number };
+  checks?: Record<string, number>;
+}
+
+// ═══════════════════════════════════════════════════
+// 解析与校验
+// ═══════════════════════════════════════════════════
+
+function fail(msg: string): never { throw new ScenarioError(msg); }
+function isNum(v: unknown): v is number { return typeof v === 'number' && Number.isFinite(v); }
+
+/** 校验并规整场景 JSON；任何非法输入抛 ScenarioError（含字段名） */
+export function parseScenario(json: unknown): Scenario {
+  if (typeof json !== 'object' || json === null) fail('场景必须是 JSON 对象');
+  const o = json as Record<string, any>;
+
+  if (o.version !== 1) fail(`version 必须为 1（实际 ${o.version}）`);
+  if (typeof o.name !== 'string' || o.name.length === 0) fail('name 必须是非空字符串');
+  if (typeof o.map !== 'string' || !(o.map in MAP_PRESETS)) fail(`未知地图: ${o.map}`);
+  if (!isNum(o.seed) || !Number.isInteger(o.seed) || o.seed < 0) fail('seed 必须是非负整数');
+  if (!isNum(o.duration) || o.duration <= 0 || o.duration > 3600) fail('duration 必须在 (0, 3600] 秒');
+
+  if (o.car !== undefined) {
+    if (typeof o.car !== 'object' || o.car === null) fail('car 必须是对象');
+    if (o.car.speed !== undefined && (!isNum(o.car.speed) || o.car.speed <= 0)) {
+      fail('car.speed 必须是正数（m/s）');
+    }
+  }
+
+  const maxL = (TRACK_HALF_WIDTH as number) / SIM_UNITS_PER_METER;
+  const obs = o.obstacles;
+  if (typeof obs !== 'object' || obs === null) fail('缺少 obstacles 配置');
+  if (obs.mode === 'explicit') {
+    if (!Array.isArray(obs.list) || obs.list.length === 0) fail('obstacles.list 必须是非空数组');
+    obs.list.forEach((it: any, i: number) => {
+      if (!isNum(it?.s) || it.s < 0 || it.s >= 3600) fail(`obstacles.list[${i}].s 必须在 [0, 3600) 米`);
+      if (!isNum(it?.l) || Math.abs(it.l) >= maxL) fail(`obstacles.list[${i}].l 必须在 (-${maxL}, ${maxL}) 米`);
+      if (!isNum(it?.w) || it.w <= 0 || it.w > 20) fail(`obstacles.list[${i}].w 必须在 (0, 20] 米`);
+      if (!isNum(it?.len) || it.len <= 0 || it.len > 20) fail(`obstacles.list[${i}].len 必须在 (0, 20] 米`);
+      if (it.yaw !== undefined && !isNum(it.yaw)) fail(`obstacles.list[${i}].yaw 必须是数字（弧度）`);
+    });
+  } else if (obs.mode === 'random') {
+    if (!Number.isInteger(obs.count) || obs.count < 0 || obs.count > 50) {
+      fail('obstacles.count 必须是 0..50 的整数');
+    }
+  } else {
+    fail(`obstacles.mode 必须是 explicit 或 random（实际 ${obs.mode}）`);
+  }
+
+  if (o.route !== undefined) {
+    if (typeof o.route !== 'object' || o.route === null) fail('route 必须是对象');
+    if (!isNum(o.route.startS) || o.route.startS < 0) fail('route.startS 必须是非负数（米）');
+    if (!isNum(o.route.goalS) || o.route.goalS < 0) fail('route.goalS 必须是非负数（米）');
+  }
+
+  if (o.checks !== undefined) {
+    if (typeof o.checks !== 'object' || o.checks === null) fail('checks 必须是对象');
+    for (const [k, v] of Object.entries(o.checks)) {
+      if (!isNum(v)) fail(`checks.${k} 必须是数字`);
+    }
+  }
+
+  return o as Scenario;
+}
+
+// ═══════════════════════════════════════════════════
+// 世界构建
+// ═══════════════════════════════════════════════════
+
+/** 累计弧长 → 最近中心线索引（闭环） */
+function sToIndex(centerPoints: Point2D[], s: number): number {
+  let acc = 0, best = 0, bestErr = Infinity;
+  const n = centerPoints.length - 1;
+  for (let i = 0; i < n; i++) {
+    const err = Math.abs(acc - s);
+    if (err < bestErr) { bestErr = err; best = i; }
+    acc += Math.hypot(
+      (centerPoints[(i + 1) % n].x as number) - (centerPoints[i].x as number),
+      (centerPoints[(i + 1) % n].y as number) - (centerPoints[i].y as number),
+    );
+  }
+  return best;
+}
+
+/**
+ * 场景 → 世界配置
+ *
+ * @returns worldCfg 传给 SimEngine；track/route 供归档与检测器使用
+ * @throws ScenarioError 路线不可达等构建期错误
+ */
+export function buildScenarioWorld(scenario: Scenario, width: number, height: number): {
+  worldCfg: WorldConfig; track: TrackGeometry; route: Route | null;
+} {
+  const mapDef: MapDefinition = MAP_PRESETS[scenario.map];
+  const track = generateTrack(width, height, mapDef.controlRadii);
+  const ref = buildFrenetReference(track.centerPoints, true);
+
+  let obstacles: Obstacle[];
+  if (scenario.obstacles.mode === 'explicit') {
+    obstacles = scenario.obstacles.list.map(o => {
+      const cart = frenetToCartesian(m(o.s) as number, m(o.l), ref);
+      return {
+        x: cart.x, y: cart.y,
+        width: m(o.w), height: m(o.len),
+        angle: rad((cart.yaw as number) + (o.yaw ?? 0)),
+        zHeight: 8,
+      };
+    });
+  } else {
+    const rng = createRng(deriveSeed(scenario.seed, 'obstacles'));
+    obstacles = generateObstacles(track, scenario.obstacles.count, 10, 25, rng);
+  }
+
+  let route: Route | null = null;
+  let carStart: WorldConfig['carStart'] = undefined;
+  if (scenario.route) {
+    const graph = buildRoadGraph(track.centerPoints);
+    const startIdx = sToIndex(track.centerPoints, m(scenario.route.startS) as number);
+    const goalIdx = sToIndex(track.centerPoints, m(scenario.route.goalS) as number);
+    const pathIndices = findRoute(graph, startIdx, goalIdx);
+    if (!pathIndices || pathIndices.length < 2) {
+      throw new ScenarioError(`路线不可达: startS=${scenario.route.startS} goalS=${scenario.route.goalS}`);
+    }
+    const waypoints = pathIndices.map(i => track.centerPoints[i]);
+    let totalLen = 0;
+    for (let i = 1; i < waypoints.length; i++) {
+      totalLen += Math.hypot(
+        (waypoints[i].x as number) - (waypoints[i - 1].x as number),
+        (waypoints[i].y as number) - (waypoints[i - 1].y as number),
+      );
+    }
+    route = createRoute(waypoints, pathIndices, startIdx, goalIdx, px(totalLen));
+    // 车放路线起点，朝向第二点（与 engine.setRoute 一致的语义）
+    const np = waypoints[Math.min(1, waypoints.length - 1)];
+    carStart = {
+      x: waypoints[0].x, y: waypoints[0].y,
+      angle: rad(Math.atan2(
+        (np.y as number) - (waypoints[0].y as number),
+        (np.x as number) - (waypoints[0].x as number),
+      )),
+      speed: scenario.car?.speed !== undefined ? mps(scenario.car.speed) : mps(25),
+    };
+  }
+
+  return {
+    worldCfg: { map: mapDef, obstacles, seed: scenario.seed, carStart },
+    track, route,
+  };
+}
