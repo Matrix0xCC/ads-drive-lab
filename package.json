@@ -1,7 +1,7 @@
 {
-  "name": "ads",
+  "name": "ads-drive-lab",
   "version": "1.0.0",
-  "description": "",
+  "description": "ADS DriveLab — 2D 算法 + 3D 渲染的自动驾驶模拟器（感知/规划/控制 + headless 批量测试与回放）",
   "main": "index.js",
   "type": "module",
   "scripts": {
