@@ -132,14 +132,15 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
 
   // 横向候选：以当前车道中心为基准，±7m/±14m 偏移（用于避障），
   // 但必须 clamp 到可行驶域内——域边界与 checkBounds 复位阈值一致
-  //（半宽 − 车半宽 − 1.5m 复位缓冲），再留 0.25m 跟踪超调余量。
+  //（半宽 − 车半宽 − 1.5m 复位缓冲），再留 0.6m 跟踪超调余量。
+  //（0.25m 余量实测不足：贴边目标跟踪过冲到 5.0m 恰好触发复位传送，
+  //   2026-09-19 第七轮 oval-s4 案例）
   // 越界目标会把车带向界外 → 复位传送 → 常在障碍正前方"复活"引发碰撞
-  //（见 ISSUE_HISTORY 2026-09-19"横向候选超出可行驶域"）。clamp 后去重，
-  // 该赛道上典型结果为 3 个横向目标（当前车道 / 左缘 / 右缘）。
+  //（见 ISSUE_HISTORY"横向候选超出可行驶域"）。clamp 后去重。
   const lo = laneOffset as number;
   const L_MAX = (TRACK_HALF_WIDTH as number)
     - ((car.width as number) / 2 + (m(1.5) as number))
-    - (m(0.25) as number);
+    - (m(0.6) as number);
   const latTargets: Px[] = [];
   for (const v of [lo, lo - (m(7) as number), lo + (m(7) as number), lo - (m(14) as number), lo + (m(14) as number)]) {
     const c = Math.max(-L_MAX, Math.min(L_MAX, v));

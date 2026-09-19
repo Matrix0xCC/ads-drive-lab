@@ -5,7 +5,8 @@
 // 把车带向界外 → checkBounds 复位传送 → 常在障碍正前方"复活"引发碰撞。
 //
 // 可行驶域定义（与 checkBounds 复位阈值一致）：
-//   |l| ≤ 半宽 − 车半宽 − 复位缓冲(1.5m) − 跟踪超调余量(0.25m) = 4.75m = 19 units
+//   |l| ≤ 半宽 − 车半宽 − 复位缓冲(1.5m) − 跟踪超调余量(0.6m) = 4.4m = 17.6 units
+//（0.6m 余量：实测跟踪过冲可达 ~0.2m，旧值 0.25m 曾导致贴边目标 + 过冲触发复位传送）
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { plan } from '../../algo/plan/index.js';
@@ -14,7 +15,7 @@ import { CarState, WorldSnapshot, LidarScan } from '../../shared/types.js';
 import { rad, m, mps, mps2, px, pxps, dimless } from '../../shared/dimensions.js';
 import { MAX_SENSOR_DIST } from '../../algo/perception.js';
 
-const CORRIDOR_MAX = 19;  // 4.75m 的仿真单位值
+const CORRIDOR_MAX = 17.6;  // 4.4m 的仿真单位值
 
 function makeCar(x: number, y: number, angle: number, speed: number): CarState {
   return {
@@ -53,7 +54,7 @@ function makeBlockedLidar(blockedAngles: number[], blockedDist: number): LidarSc
 }
 
 describe('候选横向目标：可行驶域约束', () => {
-  it('无路线巡航：所有候选 |targetL| ≤ 4.75m', () => {
+  it('无路线巡航：所有候选 |targetL| ≤ 4.4m', () => {
     const car = makeCar(100, 0, 0, 120);
     plan(makeSnapshot(car), makeClearLidar());
     const cands = debug.planning!.candidates;
