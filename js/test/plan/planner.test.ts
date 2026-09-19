@@ -87,6 +87,37 @@ describe('planner 巡航', () => {
   });
 });
 
+describe('planner 双阈值（紧间隙慢行）', () => {
+  it('舒适层全阻塞但物理可过（且可达）→ 不停车，限速 8m/s 慢行', () => {
+    // 与 paths.test 双阈值夹具一致：P1 压舒适阻塞、−0.625m 档硬阈值可过。
+    // 车用 10m/s（可达性：紧段 ~34m 外，减速到 8m/s 只需 ~3m，可行）。
+    const n = 61, angles: any[] = [], distances: any[] = [];
+    for (let i = 0; i < n; i++) {
+      const a = -Math.PI / 3 + (i / (n - 1)) * 2 * Math.PI / 3;
+      angles.push(rad(a));
+      distances.push(i === 31 ? px(143.3) : i === 33 ? px(191) : i === 28 ? px(214.8) : MAX_SENSOR_DIST);
+    }
+    const scan: LidarScan = { angles, distances, rawDistances: [...distances], confidences: new Array(61).fill(1), timestamp: 0 };
+    const car = makeCar(100, 0, 0, 40);
+    plan(makeSnapshot(car), scan);
+    assert.strictEqual(debug.planning!.speedMode, 'cruise', '物理可过不应触发停车线');
+    assert.strictEqual(debug.planning!.speedTarget, mps(8) as number, '应限速 8m/s');
+  });
+
+  it('物理可过但不可达（30m/s、紧段 34m 外）→ 停车线生效（不可达=真无解）', () => {
+    const n = 61, angles: any[] = [], distances: any[] = [];
+    for (let i = 0; i < n; i++) {
+      const a = -Math.PI / 3 + (i / (n - 1)) * 2 * Math.PI / 3;
+      angles.push(rad(a));
+      distances.push(i === 31 ? px(143.3) : i === 33 ? px(191) : i === 28 ? px(214.8) : MAX_SENSOR_DIST);
+    }
+    const scan: LidarScan = { angles, distances, rawDistances: [...distances], confidences: new Array(61).fill(1), timestamp: 0 };
+    const car = makeCar(100, 0, 0, 120);   // 30m/s：需 ~70m 减速距离 > 34m
+    plan(makeSnapshot(car), scan);
+    assert.notStrictEqual(debug.planning!.speedMode, 'cruise', '不可达应进入停车/紧急');
+  });
+});
+
 describe('planner 速度目标（vCap 单值化）', () => {
   it('障碍 30m 内 → speedTarget ≤ 17.5m/s；50m → ≤ 25m/s；无障碍 → 35m/s', () => {
     const car = makeCar(100, 0, 0, 150);

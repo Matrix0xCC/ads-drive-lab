@@ -8,11 +8,15 @@
 // 旧的耦合采样里"本车道被障碍判阻塞"发生得太晚（第七轮晚横移分析），
 // 解耦后路径层用 120m 视程做碰撞检查。
 //
-// 【横向耐心、纵向保守】横向排名只看 COMMIT_WINDOW 内的阻塞（晚承诺），
-// 停车线由全程阻塞（allBlockedFar）触发。旧版直接用 120m 视程排名选路，
-// 障碍还在几十米外就提前承诺到侧向路径，随后新障碍堵死该侧 → 死口袋
-// （hairpin-s5 批量回归实测，plan#44 提前选边）。两个窗口分别扫描：
-// 近距决定"走哪条"，远距只决定"要不要停"。
+// 【横向耐心、纵向保守、双阈值通行】横向排名只看 COMMIT_WINDOW 内的阻塞
+// （晚承诺）——旧版直接用 120m 视程排名选路，障碍还在几十米外就提前承诺到
+// 侧向路径，随后新障碍堵死该侧 → 死口袋（hairpin-s5 批量回归实测）。
+// 停车线由"物理可过"硬阈值（HARD_CLEAR）判定：
+//   CLEAR（舒适，车半宽+1.5m）——判"顺不顺"，只影响排名；
+//   HARD_CLEAR（车半宽+0.4m）——判"能不能过"，决定停车线。
+// 全部候选连硬阈值都过不去才停车；否则选可过的路径并限速慢行。
+// （批量 A/B：只用舒适阈值判停 → 6/10 场景中途永久停车，其中 oval-s4/
+//   hairpin-s5 旧规划器干净通过——存在可行路线，被过保守的判停拒了。）
 
 import { FrenetReference, LidarScan } from '../../shared/types.js';
 import { Radians, Px, DimLess, m, px, perpx, dimless } from '../../shared/dimensions.js';
@@ -38,14 +42,14 @@ const NUDGE = m(2.5);         // 挪移档横向偏移
 export interface PathCandidate {
   targetL: Px;
   points: { s: number; l: Px; x: Px; y: Px; yaw: Radians }[];
-  /** 窗口（COMMIT_WINDOW）内是否被堵——决定横向排名 */
+  /** 窗口（COMMIT_WINDOW）内是否低于舒适间隙——决定横向排名 */
   blocked: boolean;
-  /** 窗口内首次碰撞命中的绝对弧长（blocked 时有效，否则 Infinity） */
+  /** 窗口内舒适层首次命中的绝对弧长（blocked 时有效，否则 Infinity） */
   sBlock: number;
-  /** 全程（PATH_HORIZON）内是否被堵——决定停车线 */
-  blockedFar: boolean;
-  /** 全程首次碰撞命中的绝对弧长（blockedFar 时有效，否则 Infinity） */
-  sBlockFar: number;
+  /** 全程（PATH_HORIZON）内是否低于物理硬阈值——决定停车线 */
+  blockedHard: boolean;
+  /** 全程硬阈值下首次命中的绝对弧长（blockedHard 时有效，否则 Infinity） */
+  sBlockHard: number;
   cost: number;
   /** 合成阶段按相对弧长求横向偏移（供 l(s(t)) 采样）；内部 clamp 到 [0, PATH_HORIZON] */
   evalL(s: number): Px;
@@ -53,11 +57,11 @@ export interface PathCandidate {
 
 export interface PathLayerResult {
   best: PathCandidate;
-  ranked: PathCandidate[];   // 窗口内非阻塞按 cost 升序在前；阻塞按 sBlock 降序在后
-  allBlocked: boolean;       // 窗口内全部候选阻塞
-  sBlock: number;            // best 的 sBlock（阻塞时）
-  allBlockedFar: boolean;    // 全程无清晰候选 → 停车线触发条件
-  sBlockFar: number;         // 全程下最晚的首个阻塞弧长（allBlockedFar 时有效，否则 Infinity）
+  ranked: PathCandidate[];   // 排序分级：舒适畅通（cost 升序）→ 舒适阻塞但物理可过（sBlock 降序）→ 物理阻塞（sBlockHard 降序）
+  allBlocked: boolean;       // 窗口内全部候选低于舒适间隙
+  sBlock: number;            // best 的 sBlock（舒适阻塞时）
+  allBlockedHard: boolean;   // 全部候选连物理硬阈值都过不去 → 停车线触发条件
+  sBlockHard: number;        // 物理层最晚首个阻塞弧长（allBlockedHard 时有效，否则 Infinity）
 }
 
 /** 线段 AB 到点 P 的最短距离 */
@@ -117,6 +121,8 @@ export function solvePathLayer(o: {
   // 批量 A/B 劣化 6/195→7/407，2026-09-19）。
   const CLEAR = ((o.carWidth as number) / 2 + (m(1.5) as number));
   const CLEAR_LOW = CLEAR + (m(2.0) as number);         // 低置信命中（边缘模糊）更大间隙
+  // 物理可通过硬阈值：车半宽 + 0.4m 车身余量。路径低于此值才算"过不去"。
+  const HARD_CLEAR = ((o.carWidth as number) / 2 + (m(0.4) as number));
   const maxDist = MAX_SENSOR_DIST as number;
   const DISCONT = m(2.0) as number;                     // 表面连续性阈值（相邻命中深度差）
 
@@ -132,11 +138,11 @@ export function solvePathLayer(o: {
   // 命中表面折线：相邻命中点深度连续（|Δd| ≤ DISCONT）时连成线段。
   // 必须连接——孤立点表示会让路径从"射线间隙"穿针（全宽墙在远距离处
   // 命中行距可达十几单位，实测本车道路径恰好从行间漏过）。
-  const hitSegs: { ax: number; ay: number; bx: number; by: number; tol: number }[] = [];
+  const hitSegs: { ax: number; ay: number; bx: number; by: number; low: boolean }[] = [];
   for (let i = 0; i < hits.length - 1; i++) {
     if (Math.abs(hits[i].d - hits[i + 1].d) <= DISCONT) {
       hitSegs.push({ ax: hits[i].x, ay: hits[i].y, bx: hits[i + 1].x, by: hits[i + 1].y,
-        tol: (hits[i].low || hits[i + 1].low) ? CLEAR_LOW : CLEAR });
+        low: hits[i].low || hits[i + 1].low });
     }
   }
 
@@ -154,9 +160,14 @@ export function solvePathLayer(o: {
 
   const candidates: PathCandidate[] = [];
   for (const targetL of targets) {
-    // 两段式路径：前 PATH_DEVELOP 内五次多项式完成横移，其后保持目标偏移
+    // 两段式路径：前 PATH_DEVELOP 内五次多项式完成横移，其后保持目标偏移。
+    // 横向夹在 [l0, target] 内：为满足初值斜率（车头指向），五次多项式会先向
+    // 端点外下沉，逐帧重读 l0 形成棘轮 → 车贴走廊边缘时撞 |l|=5.0 复位崖
+    // （hairpin-s5 批量实证，l 从 −4.4 逐帧滑到 −4.93 后复位）。
+    const lMin = Math.min(o.l0 as number, targetL), lMax = Math.max(o.l0 as number, targetL);
     const latPoly = solveQuintic(o.l0, o.dl0, perpx(0), px(targetL), dimless(0), perpx(0), PATH_DEVELOP as number);
-    const evalLat = (sRel: number): Px => latPoly.eval(Math.min(sRel, PATH_DEVELOP as number));
+    const evalLat = (sRel: number): Px => px(Math.max(lMin, Math.min(lMax,
+      latPoly.eval(Math.min(sRel, PATH_DEVELOP as number)) as number)));
     const points: PathCandidate['points'] = [];
     let centerSum = 0, curvSum = 0, prevYaw: number | null = null;
 
@@ -176,54 +187,58 @@ export function solvePathLayer(o: {
       prevYaw = cart.yaw as number;
     }
 
-    // 阻塞判定：路径折线到"命中点/命中表面折线"的最短距离 ≤ 间隙，返回沿路径
+    // 阻塞判定：路径折线到"命中点/命中表面折线"的最短距离 ≤ 阈值，返回沿路径
     // 首个命中的绝对弧长（Infinity = 无命中）。用线段而非采样点（路径采样间距
     // 3m > 间隙半径，会混叠漏判，实测）。
-    // 两个窗口分别扫描——近距（COMMIT_WINDOW）决定横向排名，全程决定停车线。
-    const firstBlockArc = (windowRel: number): number => {
+    // 两次扫描：舒适层只看窗口（COMMIT_WINDOW，决定横向排名）；硬阈值看全程
+    // （决定停车线——只有物理上真的过不去才停）。
+    const firstBlockArc = (windowRel: number, hard: boolean): number => {
       for (let i = 0; i < points.length - 1; i++) {
         if (points[i].s - o.s0 > windowRel) break;
         const a = points[i], b = points[i + 1];
         for (const h of hits) {
-          const tol = h.low ? CLEAR_LOW : CLEAR;
+          const tol = hard ? HARD_CLEAR : (h.low ? CLEAR_LOW : CLEAR);
           if (segPointDist((a.x as number), (a.y as number), (b.x as number), (b.y as number), h.x, h.y) <= tol) {
             return a.s;
           }
         }
         for (const sgm of hitSegs) {
+          const tol = hard ? HARD_CLEAR : (sgm.low ? CLEAR_LOW : CLEAR);
           if (segSegDist((a.x as number), (a.y as number), (b.x as number), (b.y as number),
-            sgm.ax, sgm.ay, sgm.bx, sgm.by) <= sgm.tol) {
+            sgm.ax, sgm.ay, sgm.bx, sgm.by) <= tol) {
             return a.s;
           }
         }
       }
       return Infinity;
     };
-    const sBlock = firstBlockArc(COMMIT_WINDOW as number);
-    const sBlockFar = firstBlockArc(Infinity);
+    const sBlock = firstBlockArc(COMMIT_WINDOW as number, false);
+    const sBlockHard = firstBlockArc(Infinity, true);
     const blocked = sBlock < Infinity;
+    const blockedHard = sBlockHard < Infinity;
 
     let cost = W_PATH_CENTER * centerSum / points.length + W_PATH_CURV * curvSum / points.length;
     if (o.prevTargetL !== null && Math.abs(targetL - o.prevTargetL) > 5 && targetL !== 0) cost += W_SWITCH_PATH;
 
     candidates.push({
-      targetL: px(targetL), points, blocked, sBlock, blockedFar: sBlockFar < Infinity, sBlockFar, cost,
+      targetL: px(targetL), points, blocked, sBlock, blockedHard, sBlockHard, cost,
       evalL: (s) => evalLat(Math.max(0, Math.min(s, PATH_HORIZON as number))),
     });
   }
 
-  const clear = candidates.filter(c => !c.blocked).sort((a, b) => a.cost - b.cost);
-  const stopped = candidates.filter(c => c.blocked).sort((a, b) => b.sBlock - a.sBlock);
-  const ranked = [...clear, ...stopped];
+  // 分级排序：舒适畅通（按代价）→ 舒适阻塞但物理可过（按最晚舒适碰撞）→ 物理阻塞（按最晚硬碰撞）
+  const tierClear = candidates.filter(c => !c.blocked).sort((a, b) => a.cost - b.cost);
+  const tierSqueeze = candidates.filter(c => c.blocked && !c.blockedHard).sort((a, b) => b.sBlock - a.sBlock);
+  const tierHard = candidates.filter(c => c.blockedHard).sort((a, b) => b.sBlockHard - a.sBlockHard);
+  const ranked = [...tierClear, ...tierSqueeze, ...tierHard];
   const best = ranked[0];
-  // 停车线基准：全程均被堵时，取"最晚碰撞"（sBlockFar 最大）作为可抵达的最远点
-  const farSorted = candidates.filter(c => c.blockedFar).sort((a, b) => b.sBlockFar - a.sBlockFar);
-  const allBlockedFar = farSorted.length === candidates.length;
+  // 停车线基准：全部候选物理阻塞时，取"最晚硬碰撞"作为可抵达的最远点
+  const allBlockedHard = tierHard.length === candidates.length;
   return {
     best, ranked,
-    allBlocked: clear.length === 0,
+    allBlocked: tierClear.length === 0,
     sBlock: best.sBlock,
-    allBlockedFar,
-    sBlockFar: allBlockedFar ? farSorted[0].sBlockFar : Infinity,
+    allBlockedHard,
+    sBlockHard: allBlockedHard ? best.sBlockHard : Infinity,
   };
 }

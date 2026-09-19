@@ -10,8 +10,8 @@
 //   2. 车辆投影 + dl/ds
 //   3. ARRIVED 检测
 //   4. 纵向巡航目标（vCap 单值版 + 终点 DECEL 缩放）
-//   5. solvePathLayer → 最优路径（窗口内排名；全程阻塞时给出停车基准）
-//   6. solveSpeedLayer → 巡航 / 停车线（全程阻塞触发）/ 兜底剖面
+//   5. solvePathLayer → 最优路径（窗口内排名；物理层全阻塞时给出停车基准）
+//   6. solveSpeedLayer → 巡航 / 停车线（物理层全阻塞触发）/ 兜底剖面
 //   7. 合成 l(s(t)) → Trajectory；状态机 + 兼容类型标签
 
 import {
@@ -19,7 +19,7 @@ import {
   Trajectory, TrajectoryPoint, createTrajectory,
 } from '../../shared/types.js';
 import {
-  Px, m, mps, pxps, secs, dimless, perpx,
+  Px, m, mps, mps2, pxps, secs, dimless, perpx,
 } from '../../shared/dimensions.js';
 import { buildFrenetReference, cartesianToFrenet, frenetToCartesian } from './frenet.js';
 import { PlanState, nextState } from './states.js';
@@ -31,6 +31,8 @@ import { solveSpeedLayer, STObstacle } from './speed.js';
 
 const DECEL_ZONE = m(25) as number;        // 路线终点减速区
 const STOP_ASSUMED_LEN = m(8) as number;   // 阻塞条目假定的障碍长度（仅影响 ST 条目 sMax）
+const TIGHT_SPEED = mps(8);                // 紧间隙慢行限速（双阈值：物理可过但低于舒适间隙时）
+const A_BRAKE = mps2(6);                   // 保守制动能力（与速度层 A_MAX 一致；紧间隙可达性评估用）
 
 /** 车道中心偏移量（Lane 3 = +1.875m）。切换车道改此值即可。 */
 let laneOffset: Px = m(1.875);
@@ -94,11 +96,27 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
     laneOffset, prevTargetL: _prevBestTargetL,
   });
 
+  // 双阈值：走的路径低于舒适间隙（舒适阻塞但物理可过）→ 慢行通过
+  if (pathLayer.best.blocked) targetV = Math.min(targetV, TIGHT_SPEED as number);
+
   // ─── 6. 速度层 ───
-  // 停车线由"全程阻塞"（allBlockedFar）触发：所有候选在整段视程内都被堵（全宽墙/
-  // 死口袋）才刹车；只要还有候选远端畅通，速度交给 vCap（横向耐心、纵向保守）。
-  const stObstacles: STObstacle[] = pathLayer.allBlockedFar
-    ? [{ sMin: pathLayer.sBlockFar - fl.s, sMax: pathLayer.sBlockFar - fl.s + (STOP_ASSUMED_LEN as number), tMin: 0, tMax: Infinity }]
+  // 停车线触发条件（二选一）：
+  //   ① 物理层全阻塞（allBlockedHard）——所有候选连硬阈值都过不去（全宽墙/真死口袋）；
+  //   ② 紧间隙候选不可达——慢行通过需在紧段起点前降到 TIGHT_SPEED，制动距离不够
+  //      （30m/s 时需 ~70m；20m 外才发现只能减速通行的紧口 = 物理上停不住也绕不开）。
+  // 只要存在"可达的物理可过"候选，就不停车（横向耐心、纵向保守、双阈值通行）。
+  let stopEngaged = pathLayer.allBlockedHard;
+  let stopLineS = pathLayer.sBlockHard;
+  if (!stopEngaged && pathLayer.best.blocked) {
+    const v0u = (car.speed as number) * cosHD;
+    const dReq = (v0u * v0u - (TIGHT_SPEED as number) ** 2) / (2 * (A_BRAKE as number));
+    if ((pathLayer.best.sBlock as number) - (fl.s as number) < dReq) {
+      stopEngaged = true;
+      stopLineS = pathLayer.best.sBlock;
+    }
+  }
+  const stObstacles: STObstacle[] = stopEngaged
+    ? [{ sMin: stopLineS - fl.s, sMax: stopLineS - fl.s + (STOP_ASSUMED_LEN as number), tMin: 0, tMax: Infinity }]
     : [];
   const speedLayer = solveSpeedLayer({ stObstacles, v0: (car.speed as number) * cosHD, targetV });
 
@@ -118,7 +136,7 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
   _currentState = nextState({
     routeActive,
     nearEnd: routeActive && remainingDist < DECEL_ZONE,
-    allBlockedFar: pathLayer.allBlockedFar,
+    allBlockedHard: stopEngaged,
     stopInfeasible: speedLayer.mode === 'emergency',
     avoiding: Math.abs((pathLayer.best.targetL as number) - (laneOffset as number)) > 3,
   });

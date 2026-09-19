@@ -34,11 +34,11 @@ function blockedScan(dist: number, arcHalf = 0.05): LidarScan {
   return { angles, distances, rawDistances: [...distances], confidences: new Array(61).fill(1), timestamp: 0 };
 }
 
-function solve(scan: LidarScan, opts: { s0?: number; l0?: number; prev?: number | null } = {}) {
+function solve(scan: LidarScan, opts: { s0?: number; l0?: number; prev?: number | null; dl0?: number } = {}) {
   // 直线参考线从 x=0 起算、间距 10u：车与 s0 必须一致（车在参考线该弧长处）
   const car = makeCar(opts.s0 ?? 0, 0, 0, 100);
   return solvePathLayer({
-    ref: straightRef(), l0: px(opts.l0 ?? 0), dl0: dimless(0), s0: opts.s0 ?? 0,
+    ref: straightRef(), l0: px(opts.l0 ?? 0), dl0: dimless(opts.dl0 ?? 0), s0: opts.s0 ?? 0,
     carX: car.x as number, carY: car.y as number, lidarScan: scan,
     carWidth: car.width as Px, collisionRadius: car.collisionRadius as Px,
     laneOffset: px(LO), prevTargetL: opts.prev ?? null,
@@ -83,21 +83,20 @@ describe('路径层：碰撞判定与选路', () => {
     const ord = r.ranked.map(p => p.sBlock);
     for (let i = 1; i < ord.length; i++) assert.ok(ord[i] <= ord[i - 1], '应按 sBlock 降序');
     assert.ok(r.sBlock === ord[0]);
-    assert.strictEqual(r.allBlockedFar, true, '近距全阻塞必然全程全阻塞');
-    assert.strictEqual(r.sBlockFar, r.best.sBlockFar, '全程停车基准=最晚碰撞候选');
+    assert.strictEqual(r.allBlockedHard, true, '物理阈值下也全阻塞（真无解）');
+    assert.strictEqual(r.sBlockHard, r.best.sBlockHard, '停车基准=最晚硬阻塞候选');
   });
 });
 
 describe('路径层：提交窗口（横向耐心）', () => {
-  it('窗口外障碍（300u=75m）→ 本车道不判近距阻塞；全程记录远距阻塞；停车线不触发', () => {
+  it('窗口外障碍（300u=75m）→ 本车道不判近距阻塞；停车线不触发', () => {
     const r = solve(blockedScan(300, 0.025));
     const inLane = r.ranked.find(p => Math.abs((p.targetL as number) - LO) < 1)!;
     assert.ok(inLane && !inLane.blocked, '窗口外不应判近距阻塞（不提前选边）');
-    assert.ok(inLane.sBlockFar < Infinity, '但全程应记录远距阻塞（供停车线）');
     assert.strictEqual(r.allBlocked, false);
     assert.strictEqual(r.best.targetL, inLane.targetL, '近距全清 → 最优应为本车道');
-    assert.strictEqual(r.allBlockedFar, false, '侧向候选全程畅通 → 停车线不触发');
-    assert.strictEqual(r.sBlockFar, Infinity);
+    assert.strictEqual(r.allBlockedHard, false, '物理层畅通 → 停车线不触发');
+    assert.strictEqual(r.sBlockHard, Infinity);
   });
 
   it('窗口内障碍（200u=50m）→ 本车道判阻塞，最优选侧', () => {
@@ -105,6 +104,44 @@ describe('路径层：提交窗口（横向耐心）', () => {
     const inLane = r.ranked.find(p => Math.abs((p.targetL as number) - LO) < 1)!;
     assert.ok(inLane && inLane.blocked, '窗口内应判阻塞');
     assert.ok(Math.abs((r.best.targetL as number) - LO) > 8, '应选侧向路径');   // >2m
+  });
+});
+
+describe('路径层：横向路径不越出 [l0, target]', () => {
+  it('车贴左侧、航向斜率指向外侧（dl0<0）→ 路径不得越过 l0 继续左漂', () => {
+    // 实测（hairpin-s5 批量）：车在 l≈−4.4 走廊边缘、航向角误差 dl0<0 时，五次
+    // 多项式为满足初值斜率会先向 −l 侧下沉，逐帧重读 l0 形成棘轮 → 撞 |l|=5.0
+    // 复位崖 → 复位到中心线正对障碍 → 连锁碰撞。路径必须夹在 [min(l0,target),
+    // max(l0,target)] 内（斜率自然过渡，不允许越过端点）。
+    const r = solve(clearScan(), { l0: -17, dl0: -0.1 });
+    for (const p of r.ranked) {
+      const lmin = Math.min(-17, p.targetL as number);
+      const worst = Math.min(...p.points.map(pt => pt.l as number));
+      assert.ok(worst >= lmin - 1e-6, `路径左漂越过端点：worst=${worst} < ${lmin} (target=${p.targetL})`);
+    }
+  });
+});
+
+describe('路径层：双阈值（舒适选路 / 物理通行）', () => {
+  it('全部候选低于舒适间隙、但存在物理可过候选 → allBlockedHard=false，最优为可过候选', () => {
+    // 夹具（笛卡尔命中点，直线参考、车在 l0=0）：
+    //   P1 右中 (143.2, 5.0)  —— 把车道/右侧候选压进舒适阻塞，但 −0.625m 档与它留 7.5u（>硬阈值 5.6u）
+    //   P2 远右 (189.9, 20.0) —— 堵 +4.375/+4.4
+    //   P3 左  (214.3, −15.0) —— 堵 −3.125/−4.4
+    const n = 61, angles: any[] = [], distances: any[] = [];
+    for (let i = 0; i < n; i++) {
+      const a = -Math.PI / 3 + (i / (n - 1)) * 2 * Math.PI / 3;
+      angles.push(rad(a));
+      distances.push(i === 31 ? px(143.3) : i === 33 ? px(191) : i === 28 ? px(214.8) : MAX_SENSOR_DIST);
+    }
+    const scan: LidarScan = { angles, distances, rawDistances: [...distances], confidences: new Array(61).fill(1), timestamp: 0 };
+    const r = solve(scan);
+    assert.strictEqual(r.allBlocked, true, '舒适层：应全部候选阻塞');
+    assert.strictEqual(r.allBlockedHard, false, '物理层：存在可通过候选（不停车）');
+    assert.strictEqual(r.best.targetL, px(-2.5), '最优应为物理可过的 −0.625m 档');
+    assert.strictEqual(r.best.blocked, true);
+    assert.strictEqual(r.best.blockedHard, false);
+    assert.ok(r.ranked[1].blockedHard, '硬阻塞候选应排在其后');
   });
 });
 

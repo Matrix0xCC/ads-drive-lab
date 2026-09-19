@@ -4,8 +4,8 @@
 //   畅通 + 路线     → FOLLOW（轨迹目标速度由速度层巡航剖面承载）
 //   畅通 + 无路线   → CRUISE
 //   路径偏离车道中心 → AVOID（避障侧向；overlays 的障碍高亮依赖此状态）
-//   全程无可行路径  → DECEL（停车线：所有候选在整段视程内都被堵，速度层
-//                     在障碍前减速停车；横向窗口内阻塞不算——还可能有出路）
+//   物理上无路可走  → DECEL（停车线：所有候选连硬阈值都过不去才停，速度层
+//                     在障碍前减速停车；仅低于舒适间隙的紧间隙不停——慢行通过）
 //   物理停不住      → EMERGENCY（速度层最大减速兜底）
 //   ARRIVED 由 planner 入口提前返回，不经过本函数
 //
@@ -44,7 +44,7 @@ export interface TransitionInput {
   routeActive: boolean;      // 是否有激活的路线
   nearEnd: boolean;          // 是否接近终点（剩余 < DECEL_ZONE）
   avoiding: boolean;         // 当前路径偏离车道中心（避让侧向）
-  allBlockedFar: boolean;    // 所有候选在全程视程内阻塞（停车线生效）
+  allBlockedHard: boolean;   // 所有候选在物理硬阈值下阻塞（真无解 → 停车线生效）
   stopInfeasible: boolean;   // 物理停不住（速度层兜底）
 }
 
@@ -55,7 +55,7 @@ export interface TransitionInput {
  */
 export function nextState(input: TransitionInput): PlanState {
   if (input.stopInfeasible) return PlanState.EMERGENCY;
-  if (input.allBlockedFar) return PlanState.DECEL;       // 停车线（真无解）
+  if (input.allBlockedHard) return PlanState.DECEL;      // 停车线（真无解）
   if (input.avoiding) return PlanState.AVOID;
   if (input.routeActive && input.nearEnd) return PlanState.DECEL;
   return input.routeActive ? PlanState.FOLLOW : PlanState.CRUISE;

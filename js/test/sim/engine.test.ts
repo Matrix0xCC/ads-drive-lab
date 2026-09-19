@@ -49,11 +49,11 @@ describe('SimEngine 路线模式', () => {
 
     // 黄金基线（防重构回归；数值来自实现后实测值，
     // 人工核验：5s 前进 ~100m 沿赛道、末速 26.7m/s、无 NaN、状态 ACTIVE。
-    // 2026-09-19 更新：规划层解耦升级（SL 路径层 + ST 速度层）上线）
-    assert.strictEqual(e.car.x, 1043.200060413056);
-    assert.strictEqual(e.car.y, 703.8181264539674);
-    assert.strictEqual(e.car.angle, 2.9288550744029593);
-    assert.strictEqual(e.car.speed, 106.81910366898283);
+    // 2026-09-19 更新：横向路径夹紧 [l0,target]（消除贴边棘轮复位）后重取）
+    assert.strictEqual(e.car.x, 1042.7754033852511);
+    assert.strictEqual(e.car.y, 702.725228410087);
+    assert.strictEqual(e.car.angle, 2.942426913126911);
+    assert.strictEqual(e.car.speed, 106.60974631315693);
   });
 });
 
