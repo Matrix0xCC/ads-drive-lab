@@ -206,10 +206,12 @@ function isCarInsideTrack(cx: number, cy: number, r: number, track: TrackGeometr
   return true;
 }
 
-export function checkBounds(car: CarState, track: TrackGeometry): void {
+export function checkBounds(car: CarState, track: TrackGeometry): boolean {
   // 用车宽一半（4 sim-units = 1m）+ 1.5m 缓冲，< 车道半宽 3.75m，不会误触发
   const r = (car.width as number) / 2 + (m(1.5) as number);
   if (!isCarInsideTrack(car.x as number, car.y as number, r, track)) {
     resetToTrack(car, track.centerPoints);
+    return true;
   }
+  return false;
 }
