@@ -18,6 +18,7 @@ import { buildFrenetReference } from '../algo/plan/frenet.js';
 import { runSafetyChecks } from './checks/safety.js';
 import { runPerceptionChecks } from './checks/perception.js';
 import { runPlanningChecks } from './checks/planning.js';
+import { runMissionChecks, finalizeMissionChecks } from './checks/mission.js';
 
 export interface DetectorConfig {
   // 安全（阈值由检查模块各自使用）
@@ -142,9 +143,11 @@ export class Detector {
     runSafetyChecks(this, rec);
     runPerceptionChecks(this, rec);
     runPlanningChecks(this, rec);
+    runMissionChecks(this, rec);
   }
 
   finish(): Issue[] {
+    finalizeMissionChecks(this);
     return this.merger.finish();
   }
 }
