@@ -3,10 +3,12 @@
 // 【职责】纯展示层 — 只读取上游模块（感知、规划、控制）的输出数据，
 //        写入对应 DOM 元素，不做任何独立计算。
 //
-// 所有长度/速度显示为物理单位（m, m/s），通过 SIM_UNITS_PER_METER=4 转换。
+// 长度显示为物理单位（m，SIM_UNITS_PER_METER=4 转换）；速度单位由用户偏好
+// 决定（默认 km/h，点击切换 m/s——偏好存于 shared/display.ts，由 ui 层写入）。
 
 import { LidarScan, Trajectory, Obstacle, CarState, Route, GPSReading } from '../../shared/types.js';
 import { SIM_UNITS_PER_METER } from '../../shared/dimensions.js';
+import { display, formatSpeed } from '../../shared/display.js';
 
 /** 仿真单位 → 物理量显示：dist / 4 = 米，保留 d 位小数 */
 const toM = (v: number, d = 1) => (v / SIM_UNITS_PER_METER).toFixed(d);
@@ -60,7 +62,7 @@ export function updateHUD(
     const mid = Math.floor(lidarScan.distances.length / 2);
     elFront.textContent = `${toM(lidarScan.distances[mid] as number)} m`;
   }
-  if (elSpeed) elSpeed.textContent = `${toM(car.speed as number)} m/s`;
+  if (elSpeed) elSpeed.textContent = formatSpeed(car.speed as number, display.speedUnit);
   if (elRays)  elRays.textContent = lidarScan ? String(lidarScan.angles.length) : '0';
   if (elObs)   elObs.textContent = String(obstacles.length);
 

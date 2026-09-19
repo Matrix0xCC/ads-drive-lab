@@ -16,6 +16,7 @@ import { wireInteractions } from './interactions.js';
 import { setupReplayPanel } from './replayPanel.js';
 import { renderHint } from './hud.js';
 import { setInspectorOpen, updateInspectPanel } from './inspector.js';
+import { display } from '../shared/display.js';
 
 // ═══════════════════════════════════════════════════
 // 依赖接口（main.ts 提供）
@@ -68,6 +69,7 @@ export function setupUI(deps: UiDeps): { tick(dt: number): void } {
     onMode: (mode) => (mode === 'REPLAY' ? replayPanel.show() : replayPanel.hide()),
     onInspector: (open) => setInspectorOpen(open),
     onHint: (hint) => renderHint(hint),
+    onSpeedUnit: (unit) => { display.speedUnit = unit; },
   }, () => deps.engine.routeState);
 
   /** 进入回放：加载数据成功后切模式（回放栏显隐由 onMode 副作用处理） */
@@ -95,6 +97,11 @@ export function setupUI(deps: UiDeps): { tick(dt: number): void } {
   // inspect 折叠按钮
   document.getElementById('btn-inspect-toggle')?.addEventListener('click', () => {
     controller.dispatch({ type: 'TOGGLE_INSPECTOR' });
+  });
+
+  // 点击 HUD 速度 → 切换 km/h ↔ m/s（渲染层下一帧自动按新单位显示）
+  document.getElementById('hud-speed')?.addEventListener('click', () => {
+    controller.dispatch({ type: 'TOGGLE_SPEED_UNIT' });
   });
 
   // ── 统一键盘分发器（Space 双语义 / Esc 三义）──

@@ -4,12 +4,13 @@ import assert from 'node:assert';
 import { UiController } from '../../ui/controller.js';
 
 function makeCtl() {
-  const calls = { pause: [] as boolean[], mode: [] as string[], insp: [] as boolean[], hint: [] as string[] };
+  const calls = { pause: [] as boolean[], mode: [] as string[], insp: [] as boolean[], hint: [] as string[], unit: [] as string[] };
   const ctl = new UiController({
     onLivePaused: (p) => calls.pause.push(p),
     onMode: (m) => calls.mode.push(m),
     onInspector: (o) => calls.insp.push(o),
     onHint: (h) => calls.hint.push(h),
+    onSpeedUnit: (u) => calls.unit.push(u),
   }, () => 'NONE');
   return { ctl, calls };
 }
@@ -61,12 +62,20 @@ describe('UiController.dispatch', () => {
     assert.deepStrictEqual(calls.insp, [false]);
   });
 
+  it('TOGGLE_SPEED_UNIT → onSpeedUnit 按 kmh/ms 交替', () => {
+    const { ctl, calls } = makeCtl();
+    ctl.dispatch({ type: 'TOGGLE_SPEED_UNIT' });
+    ctl.dispatch({ type: 'TOGGLE_SPEED_UNIT' });
+    assert.deepStrictEqual(calls.unit, ['ms', 'kmh']);
+  });
+
   it('refresh 按当前状态重发全部副作用（初始化用）', () => {
     const { ctl, calls } = makeCtl();
     ctl.refresh();
     assert.deepStrictEqual(calls.pause, [false]);
     assert.deepStrictEqual(calls.mode, ['LIVE']);
     assert.deepStrictEqual(calls.insp, [true]);
+    assert.deepStrictEqual(calls.unit, ['kmh']);
     assert.strictEqual(calls.hint.length, 1);
   });
 });

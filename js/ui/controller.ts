@@ -6,12 +6,14 @@
 
 import { UiState, UiEvent, UiMode, reduce, deriveHint, INITIAL_UI_STATE } from './state.js';
 import type { RouteState } from '../sim/engine.js';
+import type { SpeedUnit } from '../shared/display.js';
 
 export interface UiEffects {
   onLivePaused(paused: boolean): void;
   onMode(mode: UiMode): void;
   onInspector(open: boolean): void;
   onHint(hint: string): void;
+  onSpeedUnit(unit: SpeedUnit): void;
 }
 
 export class UiController {
@@ -35,6 +37,7 @@ export class UiController {
     if (next.livePaused !== prev.livePaused) this.effects.onLivePaused(next.livePaused);
     if (next.mode !== prev.mode) this.effects.onMode(next.mode);
     if (next.inspectorOpen !== prev.inspectorOpen) this.effects.onInspector(next.inspectorOpen);
+    if (next.speedUnit !== prev.speedUnit) this.effects.onSpeedUnit(next.speedUnit);
     this.effects.onHint(deriveHint(next, this.getRouteState()));
   }
 
@@ -43,6 +46,7 @@ export class UiController {
     this.effects.onLivePaused(this._state.livePaused);
     this.effects.onMode(this._state.mode);
     this.effects.onInspector(this._state.inspectorOpen);
+    this.effects.onSpeedUnit(this._state.speedUnit);
     this.effects.onHint(deriveHint(this._state, this.getRouteState()));
   }
 }

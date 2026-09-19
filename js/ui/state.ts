@@ -5,6 +5,7 @@
 // 本模块不得 import DOM/three（仅类型 import 引擎的 RouteState）。
 
 import type { RouteState } from '../sim/engine.js';
+import type { SpeedUnit } from '../shared/display.js';
 
 export type UiMode = 'LIVE' | 'REPLAY';
 export type RoutePickPhase = 'idle' | 'picking-goal';
@@ -19,6 +20,8 @@ export interface UiState {
   scenarioName: string | null;
   /** inspect 面板展开状态 */
   inspectorOpen: boolean;
+  /** 速度显示单位（点击 HUD 速度切换；默认 km/h） */
+  speedUnit: SpeedUnit;
 }
 
 export type UiEvent =
@@ -29,7 +32,8 @@ export type UiEvent =
   | { type: 'CANCEL' }
   | { type: 'SCENARIO_CHANGED'; name: string }
   | { type: 'ROUTE_SET' }
-  | { type: 'TOGGLE_INSPECTOR' };
+  | { type: 'TOGGLE_INSPECTOR' }
+  | { type: 'TOGGLE_SPEED_UNIT' };
 
 export const INITIAL_UI_STATE: UiState = {
   mode: 'LIVE',
@@ -38,6 +42,7 @@ export const INITIAL_UI_STATE: UiState = {
   pickStartIdx: null,
   scenarioName: null,
   inspectorOpen: true,
+  speedUnit: 'kmh',
 };
 
 export function reduce(state: UiState, e: UiEvent): UiState {
@@ -67,6 +72,8 @@ export function reduce(state: UiState, e: UiEvent): UiState {
         : state;
     case 'TOGGLE_INSPECTOR':
       return { ...state, inspectorOpen: !state.inspectorOpen };
+    case 'TOGGLE_SPEED_UNIT':
+      return { ...state, speedUnit: state.speedUnit === 'kmh' ? 'ms' : 'kmh' };
   }
 }
 

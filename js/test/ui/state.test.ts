@@ -83,6 +83,15 @@ describe('reduce: inspect 折叠', () => {
   });
 });
 
+describe('reduce: 速度显示单位', () => {
+  it('默认 km/h；TOGGLE_SPEED_UNIT 在 kmh/ms 间翻转', () => {
+    assert.strictEqual(live().speedUnit, 'kmh');
+    const ms = reduce(live(), { type: 'TOGGLE_SPEED_UNIT' });
+    assert.strictEqual(ms.speedUnit, 'ms');
+    assert.strictEqual(reduce(ms, { type: 'TOGGLE_SPEED_UNIT' }).speedUnit, 'kmh');
+  });
+});
+
 describe('deriveHint', () => {
   it('四种分支文案', () => {
     assert.strictEqual(deriveHint(live(), 'NONE'),
