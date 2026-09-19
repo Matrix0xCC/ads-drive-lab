@@ -48,12 +48,12 @@ describe('SimEngine 路线模式', () => {
     assert.ok((e.car.speed as number) <= (mps(42.5) as number) + 1e-9);
 
     // 黄金基线（防重构回归；数值来自实现后实测值，
-    // 人工核验：5s 前进 ~100m 沿赛道、末速 27.2m/s（=当前最近障碍的限速值）、无 NaN。
-    // 2026-09-19 更新：速度适应（限速）与障碍生成器现实化各引入一次行为变化）
-    assert.strictEqual(e.car.x, 1048.5396272227804);
-    assert.strictEqual(e.car.y, 709.1712146447594);
-    assert.strictEqual(e.car.angle, 2.9157850486338828);
-    assert.strictEqual(e.car.speed, 108.87548610429882);
+    // 人工核验：5s 前进 ~100m 沿赛道、末速 26.7m/s、无 NaN、状态 ACTIVE。
+    // 2026-09-19 更新：规划层解耦升级（SL 路径层 + ST 速度层）上线）
+    assert.strictEqual(e.car.x, 1043.200060413056);
+    assert.strictEqual(e.car.y, 703.8181264539674);
+    assert.strictEqual(e.car.angle, 2.9288550744029593);
+    assert.strictEqual(e.car.speed, 106.81910366898283);
   });
 });
 

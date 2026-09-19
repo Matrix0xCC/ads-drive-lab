@@ -31,12 +31,13 @@ export function updateInspectPanel(dt: number) {
   if (pl) {
     html += `  状态: ${pl.state} | S=${toM(pl.frenetS)}m L=${toM(pl.frenetL, 2)}m\n`;
     html += `  dl/ds=${pl.dl_ds.toFixed(4)} | Δheading=${(pl.headingDiff*180/Math.PI).toFixed(1)}°\n`;
-    if (pl.remainingDist > 0) html += `  剩余: ${toM(pl.remainingDist)}m | 速度比: ${pl.speedScale.toFixed(2)}\n`;
-    html += `  最优: L=${toM(pl.bestTargetL, 1)}m V=${toM(pl.bestTargetV, 1)}m/s cost=${pl.bestCost.toFixed(1)}\n`;
-    html += '  候选:\n';
-    for (const cnd of pl.candidates) {
-      const mark = cnd.targetL === pl.bestTargetL && cnd.targetV === pl.bestTargetV ? '★' : ' ';
-      html += `    ${mark} L=${toM(cnd.targetL, 1).padStart(5)}m V=${toM(cnd.targetV, 1).padStart(5)}m/s cost=${cnd.cost.toFixed(1)}${cnd.collision?' COL':''}\n`;
+    if (pl.remainingDist > 0) html += `  剩余: ${toM(pl.remainingDist)}m\n`;
+    html += `  速度: 目标 ${toM(pl.speedTarget)}m/s 模式 ${pl.speedMode}\n`;
+    html += `  最优路径: L=${toM(pl.bestTargetL, 1)}m cost=${pl.bestCost.toFixed(1)}\n`;
+    html += '  路径候选:\n';
+    for (const p of pl.paths) {
+      const mark = p.targetL === pl.bestTargetL ? '★' : ' ';
+      html += `    ${mark} L=${toM(p.targetL, 1).padStart(5)}m cost=${p.cost.toFixed(1)}${p.blocked ? ' BLOCK' : ''}\n`;
     }
   }
   html += '\n<b>Control</b>\n';

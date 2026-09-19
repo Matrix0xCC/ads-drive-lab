@@ -18,19 +18,22 @@ describe('recordFrom（主题 → 归档记录）', () => {
     assert.strictEqual(r.control.throttle, 0.5);
   });
 
-  it('planning:result → plan 记录（frenet/候选/best 来自 debug 快照）', () => {
+  it('planning:result → plan 记录（路径候选映射进归档字段）', () => {
     const r: any = recordFrom('planning:result', {
       t: 1, step: 60, state: 'AVOID',
       planning: { frenetS: 100, frenetL: 14, dl_ds: 0.1, headingDiff: 0.05,
-        candidates: [{ targetL: 7.5, targetV: 100, cost: 1, collision: false }],
-        bestCost: 1, bestTargetL: 7.5, bestTargetV: 100 },
+        paths: [{ targetL: 7.5, blocked: false, cost: 1 }],
+        bestCost: 1, bestTargetL: 7.5, speedTarget: 100, speedMode: 'cruise' },
       trajectory: { points: [{ t: 0, x: 1, y: 2, v: 100 }], type: 'avoid_left', cost: 1 },
     });
     assert.strictEqual(r.type, 'plan');
     assert.strictEqual(r.state, 'AVOID');
     assert.strictEqual(r.frenet.l, 14);
     assert.strictEqual(r.candidates.length, 1);
+    assert.strictEqual(r.candidates[0].blocked === undefined, true, '归档字段名为 collision');
+    assert.strictEqual(r.candidates[0].collision, false);
     assert.strictEqual(r.best.targetL, 7.5);
+    assert.strictEqual(r.best.targetV, 100);
     assert.strictEqual(r.trajectory.type, 'avoid_left');
   });
 

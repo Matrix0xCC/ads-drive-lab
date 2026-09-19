@@ -7,6 +7,7 @@ import { buildFrenetReference } from '../../algo/plan/frenet.js';
 import { CarState, WorldSnapshot, LidarScan, Route } from '../../shared/types.js';
 import { rad, m, mps, mps2, px, pxps, pxps2, dimless, perpx } from '../../shared/dimensions.js';
 import { MAX_SENSOR_DIST } from '../../algo/perception.js';
+import { debug } from '../../shared/debug.js';
 
 // ─── 辅助 ───
 
@@ -63,17 +64,37 @@ describe('planner 巡航', () => {
     assert.ok(traj.points.length > 0);
   });
 
-  it('前方 80px 障碍物 → 避障', () => {
+  it('前方 75m 障碍 → 提前选侧避让（120m 视程下横移有充分距离）', () => {
     const car = makeCar(100, 0, 0, 120);
-    const traj = plan(makeSnapshot(car), makeBlockedLidar([0], 80));
+    const traj = plan(makeSnapshot(car), makeBlockedLidar([0], 300));
     assert.ok(traj.type !== 'lane_keep');
     assert.ok(traj.type !== 'emergency');
+  });
+
+  it('前方 20m 障碍且未开始横移 → 物理上无法绕开，紧急制动（诚实语义）', () => {
+    const car = makeCar(100, 0, 0, 120);
+    const traj = plan(makeSnapshot(car), makeBlockedLidar([0], 80));
+    assert.strictEqual(traj.type, 'emergency');
   });
 
   it('远处 200px 障碍物 → 不触发紧急', () => {
     const car = makeCar(100, 0, 0, 120);
     const traj = plan(makeSnapshot(car), makeBlockedLidar([0], 200));
     assert.ok(traj.type !== 'emergency');
+  });
+});
+
+describe('planner 速度目标（vCap 单值化）', () => {
+  it('障碍 30m 内 → speedTarget ≤ 17.5m/s；50m → ≤ 25m/s；无障碍 → 35m/s', () => {
+    const car = makeCar(100, 0, 0, 150);
+    plan(makeSnapshot(car), makeBlockedLidar([0], 120));
+    assert.ok(debug.planning!.speedTarget <= (mps(17.5) as number) + 1e-6,
+      `30m 内应限 17.5，实际 ${debug.planning!.speedTarget / 4}`);
+    plan(makeSnapshot(car), makeBlockedLidar([0], 200));
+    assert.ok(debug.planning!.speedTarget <= (mps(25) as number) + 1e-6,
+      `50m 应限 25，实际 ${debug.planning!.speedTarget / 4}`);
+    plan(makeSnapshot(car), makeClearLidar());
+    assert.strictEqual(debug.planning!.speedTarget, mps(35) as number);
   });
 });
 
@@ -92,7 +113,7 @@ describe('planner 一致性', () => {
 
   it('30 帧内避障方向切换 ≤2 次', () => {
     const car = makeCar(100, 0, 0, 120);
-    const lidar = makeBlockedLidar([0], 60);
+    const lidar = makeBlockedLidar([0], 300);
     let switches = 0;
     let lastType = '';
     for (let i = 0; i < 30; i++) {

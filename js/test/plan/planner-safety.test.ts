@@ -54,16 +54,25 @@ function isBehindObstacle(px: number, py: number, carX: number, carY: number, ob
 // ═══════════════════════════════════════════════════
 
 describe('不变量', () => {
-  it('正前方 15m 障碍（可行驶域内不可避让）→ 降级为最低速度目标且不出域', () => {
-    // 25m/s 下 15m 内的横向避让物理上不可行；正确行为是最低速度最小化碰撞能量，
-    // 而不是借道界外"绕开"（旧行为，见 ISSUE_HISTORY 2026-09-19 第二根因）
+  it('正前方 15m 障碍（物理停不住）→ emergency 最大减速剖面', () => {
+    // 25m/s 的五次多项式制动距离 ≈ 1.875×25²/(2×6) ≈ 98m ≫ 15m：
+    // 正确行为是最大减速兜底（可能仍接触），而非加速硬挤（解耦架构语义）
     const car = makeCar(500, 0, 0, 100);  // 100 sim-units = 25 m/s
     const lidar = lidarWithObstacle(0, 60, 10);  // 15m ahead, 2.5m wide
     const traj = plan(makeSnapshot(car), lidar);
-    assert.strictEqual(debug.planning!.bestTargetV, mps(17.5) as number, '不可避让时应降级到最低速度');
-    for (const pt of traj.points) {
-      assert.ok(Math.abs(pt.y as number) <= 30, `轨迹点出域: y=${pt.y}`);  // 直线赛道 l≈y，半宽 30
-    }
+    assert.strictEqual(debug.planning!.speedMode, 'emergency');
+    assert.ok((traj.points[traj.points.length - 1].v as number) < (traj.points[0].v as number), '应减速');
+    assert.ok((traj.points[traj.points.length - 1].v as number) < 10, '末速度应接近 0');
+  });
+
+  it('正前方 115m 全宽障碍（距离充足）→ stop：停车线剖面 v→0', () => {
+    const car = makeCar(500, 0, 0, 100);
+    // 230u 宽（角覆盖 ±14°，横向 ±111u）——足以封死全部路径候选
+    const lidar = lidarWithObstacle(0, 460, 230);
+    const traj = plan(makeSnapshot(car), lidar);
+    assert.strictEqual(debug.planning!.speedMode, 'stop');
+    const last = traj.points[traj.points.length - 1];
+    assert.ok(Math.abs(last.v as number) < 3, `末点速度应≈0，实际 ${last.v}`);
   });
 
   it('正前方 50m 障碍（可避让）→ 轨迹不穿障碍物', () => {

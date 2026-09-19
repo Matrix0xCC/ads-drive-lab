@@ -28,11 +28,14 @@ export function recordFrom(topic: string, p: any): FrameRecord {
                 rawDistances: p.scan.rawDistances, confidences: p.scan.confidences },
         stats: p.stats };
     case 'planning:result': {
+      // 解耦架构：路径候选映射进归档的旧字段名（detector/回放零改动）——
+      // candidates ← 路径层候选（collision 标记 = blocked）；targetV 记巡航目标
       const pl = p.planning;
       return { type: 'plan', t: p.t, step: p.step, state: p.state,
         frenet: { s: pl?.frenetS ?? 0, l: pl?.frenetL ?? 0, dl_ds: pl?.dl_ds ?? 0, headingDiff: pl?.headingDiff ?? 0 },
-        candidates: pl?.candidates ?? [],
-        best: { cost: pl?.bestCost ?? 0, targetL: pl?.bestTargetL ?? 0, targetV: pl?.bestTargetV ?? 0 },
+        candidates: (pl?.paths ?? []).map((x: any) => ({
+          targetL: x.targetL, targetV: pl?.speedTarget ?? 0, cost: x.cost, collision: x.blocked })),
+        best: { cost: pl?.bestCost ?? 0, targetL: pl?.bestTargetL ?? 0, targetV: pl?.speedTarget ?? 0 },
         trajectory: { points: p.trajectory.points.map((pt: any) => ({ t: pt.t, x: pt.x, y: pt.y, v: pt.v })),
                       type: p.trajectory.type, cost: p.trajectory.cost } };
     }

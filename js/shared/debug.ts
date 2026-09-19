@@ -15,24 +15,25 @@ export interface PerceptionDebug {
   filteredHits: number;        // 背景减除后保留数
 }
 
-/** 规划模块内部状态 */
+/** 规划模块内部状态（解耦架构：路径层候选 + 速度层模式） */
 export interface PlanningDebug {
   state: string;               // 当前状态机状态
   frenetS: number;             // 车辆 Frenet s
   frenetL: number;             // 车辆 Frenet l
   dl_ds: number;               // dl/ds 斜率
   headingDiff: number;         // 车头与切线夹角
-  candidates: {
+  paths: {
     targetL: number;
-    targetV: number;
+    blocked: boolean;
     cost: number;
-    collision: boolean;
   }[];
   bestCost: number;
   bestTargetL: number;
-  bestTargetV: number;
+  /** 巡航速度目标（仿真单位） */
+  speedTarget: number;
+  /** 速度层模式：cruise | stop | emergency */
+  speedMode: string;
   remainingDist: number;
-  speedScale: number;
 }
 
 /** 控制模块内部状态 */

@@ -54,6 +54,32 @@ function segPointDist(ax: number, ay: number, bx: number, by: number, px0: numbe
   return Math.hypot(px0 - (ax + t * dx), py0 - (ay + t * dy));
 }
 
+/** 两线段最短距离（含交叉与端点最近情形） */
+function segSegDist(
+  ax: number, ay: number, bx: number, by: number,
+  cx: number, cy: number, dx2: number, dy2: number,
+): number {
+  const ux = bx - ax, uy = by - ay;
+  const vx = dx2 - cx, vy = dy2 - cy;
+  const wx = ax - cx, wy = ay - cy;
+  const a = ux * ux + uy * uy;       // |u|²
+  const b = ux * vx + uy * vy;       // u·v
+  const c = vx * vx + vy * vy;       // |v|²
+  const d = ux * wx + uy * wy;       // u·w
+  const e = vx * wx + vy * wy;       // v·w
+  const denom = a * c - b * b;
+  let sN: number, sD = denom, tN: number, tD = denom;
+  if (denom < 1e-9) {                // 平行：取端点组合的最小值
+    sN = 0; sD = 1; tN = e; tD = c;
+  } else {
+    sN = b * e - c * d;
+    tN = a * e - b * d;
+  }
+  const s = sN <= 0 ? 0 : (sN >= sD ? 1 : sN / sD);
+  const t = tN <= 0 ? 0 : (tN >= tD ? 1 : tN / tD);
+  return Math.hypot((ax + s * ux) - (cx + t * vx), (ay + s * uy) - (cy + t * vy));
+}
+
 export function solvePathLayer(o: {
   ref: FrenetReference; l0: Px; dl0: DimLess; s0: number;
   carX: number; carY: number; lidarScan: LidarScan;
@@ -73,13 +99,26 @@ export function solvePathLayer(o: {
   const CLEAR = ((o.carWidth as number) / 2 + (m(0.5) as number));
   const CLEAR_LOW = CLEAR + (m(2.0) as number);         // 低置信命中（边缘模糊）更大间隙
   const maxDist = MAX_SENSOR_DIST as number;
-  const hits: { x: number; y: number; low: boolean }[] = [];
+  const DISCONT = m(2.0) as number;                     // 表面连续性阈值（相邻命中深度差）
+
+  // 命中点（按射线顺序排列，供表面折线构建）
+  const hits: { x: number; y: number; d: number; low: boolean }[] = [];
   for (let i = 0; i < o.lidarScan.distances.length; i++) {
     const d = o.lidarScan.distances[i] as number;
     if (d >= maxDist - 1) continue;                     // 无命中/已过滤
     const conf = o.lidarScan.confidences?.[i] ?? 1;
     const a = o.lidarScan.angles[i] as number;
-    hits.push({ x: o.carX + Math.cos(a) * d, y: o.carY + Math.sin(a) * d, low: conf < 1 });
+    hits.push({ x: o.carX + Math.cos(a) * d, y: o.carY + Math.sin(a) * d, d, low: conf < 1 });
+  }
+  // 命中表面折线：相邻命中点深度连续（|Δd| ≤ DISCONT）时连成线段。
+  // 必须连接——孤立点表示会让路径从"射线间隙"穿针（全宽墙在远距离处
+  // 命中行距可达十几单位，实测本车道路径恰好从行间漏过）。
+  const hitSegs: { ax: number; ay: number; bx: number; by: number; tol: number }[] = [];
+  for (let i = 0; i < hits.length - 1; i++) {
+    if (Math.abs(hits[i].d - hits[i + 1].d) <= DISCONT) {
+      hitSegs.push({ ax: hits[i].x, ay: hits[i].y, bx: hits[i + 1].x, by: hits[i + 1].y,
+        tol: (hits[i].low || hits[i + 1].low) ? CLEAR_LOW : CLEAR });
+    }
   }
 
   // 候选目标：{车道中心, ±2.5m 挪移, ±走廊边界} clamp + 去重
@@ -117,15 +156,29 @@ export function solvePathLayer(o: {
       // 阻塞判定在循环外以"点-线段距离"完成后统一处理（避免采样混叠）
     }
 
-    // 点-线段距离：命中点到路径折线的最短距离 ≤ 间隙 → 阻塞。
-    // 用线段而非采样点（采样间距 3m > 间隙半径 1.5m，会出现混叠漏判，实测）。
+    // 阻塞判定：路径折线到"命中点/命中表面折线"的最短距离 ≤ 间隙。
+    // 用线段而非采样点（路径采样间距 3m > 间隙半径 1.5m，会混叠漏判，实测）。
     if (!blocked) {
+      // 命中点（孤立点形式）
       for (const h of hits) {
         const tol = h.low ? CLEAR_LOW : CLEAR;
         for (let i = 0; i < points.length - 1 && !blocked; i++) {
           const a = points[i], b = points[i + 1];
           const d = segPointDist((a.x as number), (a.y as number), (b.x as number), (b.y as number), h.x, h.y);
           if (d <= tol) {
+            blocked = true;
+            sBlock = a.s;
+          }
+        }
+        if (blocked) break;
+      }
+      // 命中表面折线（线段-线段距离）
+      for (const sgm of hitSegs) {
+        for (let i = 0; i < points.length - 1 && !blocked; i++) {
+          const a = points[i], b = points[i + 1];
+          const d = segSegDist((a.x as number), (a.y as number), (b.x as number), (b.y as number),
+            sgm.ax, sgm.ay, sgm.bx, sgm.by);
+          if (d <= sgm.tol) {
             blocked = true;
             sBlock = a.s;
           }
