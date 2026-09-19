@@ -24,7 +24,7 @@ describe('mission: tracking_error', () => {
     const det = new Detector({}, { track: straightTrack() as any, obstacles: [] });
     det.feed(stepRec(1, 0, 0));
     det.feed(traj(2));                       // 规划：60px/s 前进
-    det.feed(stepRec(6, 30, px(m(3) as number)));  // 0.067s 后应在 x≈4，实际 x=30 且横向偏 3m
+    det.feed(stepRec(6, 30, px(m(3) as number)));  // 横向偏离轨迹线 3m
     det.feed(traj(6));                       // 下一规划帧 → 触发与上一轨迹的比较
     assert.ok(det.finish().find(i => i.check === 'tracking_error'));
   });
@@ -33,9 +33,21 @@ describe('mission: tracking_error', () => {
     const det = new Detector({}, { track: straightTrack() as any, obstacles: [] });
     det.feed(stepRec(1, 0, 0));
     det.feed(traj(2));
-    det.feed(stepRec(6, 6, 0));              // 0.067s × 60px/s ≈ 4px ✓
+    det.feed(stepRec(6, 6, 0));              // 在轨迹线上 ✓
     det.feed(traj(6));
     assert.strictEqual(det.finish().find(i => i.check === 'tracking_error'), undefined);
+  });
+
+  it('纯纵向偏移（规划起点 Frenet 量化伪影）→ 不误报', () => {
+    // 规划起点 s0 量化到最近采样点（间距 ~2.9m），按时间插值的旧口径
+    // 会把沿路径的 ~2m 纵向偏移计成"跟踪误差"——物理上车辆仍在路径上
+    const det = new Detector({}, { track: straightTrack() as any, obstacles: [] });
+    det.feed(stepRec(1, 0, 0));
+    det.feed(traj(2));
+    det.feed(stepRec(6, 12.8, 0));           // 沿轨迹线纵向超前 2.2m（y 仍为 0）
+    det.feed(traj(6));
+    assert.strictEqual(det.finish().find(i => i.check === 'tracking_error'), undefined,
+      '沿路径的纵向偏移不应判跟踪误差');
   });
 });
 

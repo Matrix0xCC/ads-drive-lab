@@ -55,7 +55,7 @@ export function buildReportMd(o: {
   lines.push('|---|---|');
   lines.push(`| 最大/平均速度 | ${summary.speed.maxMps.toFixed(1)} / ${summary.speed.avgMps.toFixed(1)} m/s |`);
   lines.push(`| 到达 step | ${summary.arrivedAtStep ?? '未到达'} |`);
-  lines.push(`| 跟踪 RMSE | ${summary.trackingRmseM?.toFixed(3) ?? 'n/a'} m |`);
+  lines.push(`| 交叉跟踪 RMSE | ${summary.trackingRmseM?.toFixed(3) ?? 'n/a'} m |`);
   lines.push(`| 最近障碍距离 | ${summary.minObstacleDistM?.toFixed(2) ?? 'n/a'} m |`);
   lines.push(`| 状态分布 | ${Object.entries(summary.stateCounts).map(([k, v]) => `${k}:${v}`).join(' ')} |`);
   lines.push(`| 紧急制动 / 越界复位 | ${summary.emergencyBrakes} / ${summary.boundsResets} |`);

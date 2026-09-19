@@ -117,7 +117,6 @@ export class Detector {
   stallRun = 0;
   arrivedAtStep: number | null = null;
   prevTraj: { points: { t: number; x: number; y: number; v: number }[] } | null = null;
-  prevPlanStep: number | null = null;
   trackingErrSum = 0;
   trackingErrN = 0;
   // summary 聚合（Task 11 的 buildSummary 使用）

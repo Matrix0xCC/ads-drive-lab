@@ -11,6 +11,16 @@
 import { FrameRecord } from '../../shared/types.js';
 import { Detector } from '../detector.js';
 
+/** 点到线段的最短距离 */
+function pointSegDist(px: number, py: number, x1: number, y1: number, x2: number, y2: number): number {
+  const dx = x2 - x1, dy = y2 - y1;
+  const len2 = dx * dx + dy * dy;
+  if (len2 === 0) return Math.hypot(px - x1, py - y1);
+  let t = ((px - x1) * dx + (py - y1) * dy) / len2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
+}
+
 export function runMissionChecks(det: Detector, rec: FrameRecord): void {
   if (rec.type === 'step') {
     const speed = rec.car.speed;
@@ -44,39 +54,30 @@ export function runMissionChecks(det: Detector, rec: FrameRecord): void {
   }
 
   if (rec.type === 'plan') {
-    // ⑩ 跟踪误差：上一规划帧轨迹 → 按时间插值到当前时刻
-    if (det.prevTraj && det.prevPlanStep !== null && det.lastStepRec) {
-      const dt = (rec.step - det.prevPlanStep) / 60;   // 秒
+    // ⑩ 跟踪误差 = 交叉跟踪距离：车到上一规划帧轨迹折线的最小距离。
+    // 旧口径按时间插值比对期望位置，把规划起点 s0 的 Frenet 量化误差
+    //（最近采样点，间距 ~2.9m）计成"误差"——实测纵向伪影 ~0.9m 而真实
+    // 交叉跟踪仅 ~0.04m（2026-09-19 第五轮，见 ISSUE_HISTORY）。
+    if (det.prevTraj && det.prevTraj.points.length >= 2 && det.lastStepRec) {
+      const car = det.lastStepRec.car;
       const pts = det.prevTraj.points;
-      let exp: { x: number; y: number } | null = null;
-      if (pts.length >= 2 && dt <= pts[pts.length - 1].t) {
-        for (let i = 0; i < pts.length - 1; i++) {
-          if (dt >= pts[i].t && dt <= pts[i + 1].t) {
-            const f = (dt - pts[i].t) / Math.max(pts[i + 1].t - pts[i].t, 1e-9);
-            exp = {
-              x: pts[i].x + f * (pts[i + 1].x - pts[i].x),
-              y: pts[i].y + f * (pts[i + 1].y - pts[i].y),
-            };
-            break;
-          }
-        }
+      let minD = Infinity;
+      for (let i = 0; i < pts.length - 1; i++) {
+        minD = Math.min(minD, pointSegDist(car.x, car.y, pts[i].x, pts[i].y, pts[i + 1].x, pts[i + 1].y));
       }
-      if (exp) {
-        const car = det.lastStepRec.car;
-        const err = Math.hypot(car.x - exp.x, car.y - exp.y);
-        det.trackingErrSum += err * err;
+      if (Number.isFinite(minD)) {
+        det.trackingErrSum += minD * minD;
         det.trackingErrN += 1;
-        if (err > (det.cfg.trackingErr as number)) {
+        if (minD > (det.cfg.trackingErr as number)) {
           det.merger.add({
             check: 'tracking_error', category: 'mission', severity: 'medium', step: rec.step,
-            summary: `跟踪偏差 ${(err / 4).toFixed(2)}m（期望 ${(exp.x / 4).toFixed(1)},${(exp.y / 4).toFixed(1)}）`,
-            details: { err, expX: exp.x, expY: exp.y, carX: car.x, carY: car.y },
+            summary: `交叉跟踪偏差 ${(minD / 4).toFixed(2)}m`,
+            details: { minD, carX: car.x, carY: car.y },
           });
         }
       }
     }
     det.prevTraj = rec.trajectory;
-    det.prevPlanStep = rec.step;
   }
 }
 
