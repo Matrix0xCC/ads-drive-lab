@@ -12,6 +12,7 @@
 
 import { TrackGeometry, Point2D } from '../shared/types.js';
 import { Px, m, px } from '../shared/dimensions.js';
+import { Rng } from '../shared/rng.js';
 
 /** 赛道半宽 7.5m ≈ 2 车道 */
 export const TRACK_HALF_WIDTH: Px = m(7.5);
@@ -40,7 +41,7 @@ function catmullRom(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, t: number): Vec2 {
  * @param height 画布高度
  * @returns TrackGeometry
  */
-export function generateTrack(width: number, height: number, controlRadii?: number[]): TrackGeometry {
+export function generateTrack(width: number, height: number, controlRadii?: number[], rng: Rng = Math.random): TrackGeometry {
   const cx = width / 2, cy = height / 2;
 
   // 1. 生成 8 个环状控制点（预设半径或随机）
@@ -48,7 +49,7 @@ export function generateTrack(width: number, height: number, controlRadii?: numb
   const controls: Vec2[] = [];
   for (let i = 0; i < numControls; i++) {
     const angle = (i / numControls) * Math.PI * 2;
-    const radius = controlRadii ? controlRadii[i] : (m(60) as number + Math.random() * m(20) as number);
+    const radius = controlRadii ? controlRadii[i] : (m(60) as number + rng() * m(20) as number);
     controls.push({ x: cx + Math.cos(angle) * radius, y: cy + Math.sin(angle) * radius });
   }
 

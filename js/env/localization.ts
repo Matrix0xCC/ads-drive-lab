@@ -12,6 +12,7 @@
 
 import { CarState, GPSReading } from '../shared/types.js';
 import { Px, px } from '../shared/dimensions.js';
+import { Rng } from '../shared/rng.js';
 
 export interface LocalizationConfig {
   /** 高斯噪声标准差（px），默认 5px（在 50px 宽的赛道上可见但不致命） */
@@ -26,10 +27,10 @@ const DEFAULT_CONFIG: LocalizationConfig = { noiseStdDev: 5 };
  * 取两个 [0,1) 均匀随机数 u1, u2，
  * 返回 sqrt(-2*ln(u1)) * cos(2π*u2) ~ N(0, 1)
  */
-function boxMuller(): number {
+function boxMuller(rng: Rng): number {
   let u1: number, u2: number;
-  do { u1 = Math.random(); } while (u1 === 0); // ln(0) = -Infinity
-  u2 = Math.random();
+  do { u1 = rng(); } while (u1 === 0); // ln(0) = -Infinity
+  u2 = rng();
   return Math.sqrt(-2 * Math.log(u1)) * Math.cos(2 * Math.PI * u2);
 }
 
@@ -38,14 +39,15 @@ function boxMuller(): number {
  *
  * @param car    车辆真实状态
  * @param config 噪声配置
+ * @param rng    随机源（缺省 Math.random；headless 传入可播种 RNG 以复现）
  * @returns GPSReading（带噪声的位置 + 不确定度估计）
  */
-export function localize(car: CarState, config?: Partial<LocalizationConfig>): GPSReading {
+export function localize(car: CarState, config?: Partial<LocalizationConfig>, rng: Rng = Math.random): GPSReading {
   const cfg = { ...DEFAULT_CONFIG, ...config };
   const sigma = cfg.noiseStdDev;
 
-  const noiseX = boxMuller() * sigma;
-  const noiseY = boxMuller() * sigma;
+  const noiseX = boxMuller(rng) * sigma;
+  const noiseY = boxMuller(rng) * sigma;
 
   return {
     x: px((car.x as number) + noiseX),
