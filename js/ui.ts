@@ -42,6 +42,10 @@ export interface UIContext {
   getRouteState: () => string;
   /** 回放控制器（main.ts 创建并接入渲染循环） */
   replay: ReplayController;
+  /** 场景加载（与 headless 同源）：ui.ts 负责 fetch 场景文件，main 负责解析应用 */
+  onScenarioLoad: (json: unknown) => void;
+  /** 恢复浏览器默认随机场景（当前地图） */
+  onScenarioReset: () => void;
 }
 
 // ═══════════════════════════════════════════════════
@@ -103,6 +107,33 @@ export function setupUI(ctx: UIContext) {
     mapSelect.value = DEFAULT_MAP;
     mapSelect.addEventListener('change', () => {
       ctx.onMapChange(mapSelect.value);
+    });
+  }
+
+  // ── 场景加载（与 headless 同源：scenarios/index.json 列表） ──
+  const scenarioSelect = document.getElementById('scenario-dropdown') as HTMLSelectElement | null;
+  if (scenarioSelect) {
+    fetch('scenarios/index.json')
+      .then(r => (r.ok ? r.json() : { scenarios: [] }))
+      .then((idx: any) => {
+        for (const entry of idx.scenarios ?? []) {
+          const opt = document.createElement('option');
+          opt.value = entry.file;
+          opt.textContent = `${entry.name}（${entry.map}）`;
+          scenarioSelect.appendChild(opt);
+        }
+      })
+      .catch(() => { /* 索引缺失不阻塞页面 */ });
+    scenarioSelect.addEventListener('change', async () => {
+      const file = scenarioSelect.value;
+      if (!file) { ctx.onScenarioReset(); return; }
+      try {
+        const res = await fetch(`scenarios/${file}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        ctx.onScenarioLoad(await res.json());
+      } catch (e) {
+        alert(`场景加载失败: ${(e as Error).message}`);
+      }
     });
   }
 

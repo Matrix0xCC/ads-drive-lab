@@ -57,7 +57,7 @@ requestAnimationFrame 主循环 (~60Hz)
 - `js/headless/` — headless CLI（run.ts）、归档（archive.ts）、检测器（detector.ts + checks/）、报告（report.ts）
 - `js/shared/` — 接口契约（types/interfaces/，含归档记录 schema）、量纲系统（dimensions.ts）、rng、debug、recorder
 - `js/ui.ts` / `js/replay.ts` — DOM 交互与回放控制器；`js/env/renderer/` — Three.js 渲染
-- `scenarios/` — 场景用例（入库）；`runs/` — 运行归档（gitignore）
+- `scenarios/` — 场景用例（入库）；新增场景需登记 `scenarios/index.json` 才会出现在浏览器场景下拉；`runs/` — 运行归档（gitignore）
 - `js/test/` — node:test 单元测试（`.test.ts`，编译后运行）
 
 ### 核心设计约定
@@ -96,6 +96,8 @@ Pure Pursuit：δ = atan2(2·L·sin α, ld)，预瞄距离 = clamp(0.4×speed, 1
 ### Headless 运行与归档（AI 自助测试流程）
 
 `npm run sim -- --scenario ...` → 产出 `runs/<id>/`：`report.md`（判定+问题+指标+钻取指引）、`frames.jsonl`（逐帧全量流，typed records，可 grep）、`world.json`（真值）、`issues.json`、`summary.json`。工作流：先读 `report.md` → 按指引 `grep '"type":"plan"' frames.jsonl` 钻取 → 改代码 → **同场景同种子复跑**对比（确定性保证逐帧一致）。四类自动检测：安全/感知/规划行为/跟踪任务；车辆无 route 时保持静止（与浏览器一致），行驶类场景必须带 route。浏览器可用回放模式打开任意 runs/<id> 查看现场。
+
+**场景同源**：浏览器与 headless 共用同一管线（`Scenario → parseScenario → buildScenarioWorld → SimEngine`）。浏览器顶栏「场景」下拉可加载 `scenarios/` 任意场景（带路线自动开跑），默认「随机场景」=随机种子+随机 3-5 障碍、无路线（右键设路线）；地图下拉切换保留当前场景配置仅换地图。同场景同种子在浏览器不做任何操作时与 headless 逐帧一致。
 
 ## 开发规范
 

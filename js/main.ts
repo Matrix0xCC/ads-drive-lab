@@ -3,6 +3,7 @@ import { MessageBus } from './messageBus.js';
 import { Recorder } from './shared/recorder.js';
 import { debug } from './shared/debug.js';
 import { SIM_W, SIM_H, FIXED_DT, SimEngine } from './sim/engine.js';
+import { Scenario, parseScenario, buildScenarioWorld, defaultScenario } from './sim/scenario.js';
 import { initScene, updateScene, resetSceneCache } from './env/renderer.js';
 import { MAP_PRESETS, DEFAULT_MAP } from './env/mapDefinitions.js';
 import { setupUI, updateInspectPanel } from './ui.js';
@@ -17,12 +18,44 @@ const engine = new SimEngine(new MessageBus('autopilot', false), { map: MAP_PRES
 
 // 浏览器侧数据记录（headless 用 ArchiveWriter 订阅同样的主题）
 const recorder = new Recorder();
-recorder.start(engine.mapDef.name);
 engine.bus.subscribe('planning:result', (p: any) => {
   recorder.recordFrame(p.snapshot.car, p.scan, p.trajectory, p.state, p.route);
 });
 
-document.getElementById('hud-map')!.textContent = engine.mapDef.name;
+// ==================== 场景（与 headless 完全同源） ====================
+//
+// 两条模式共用同一管线：Scenario → parseScenario → buildScenarioWorld → engine。
+// 浏览器默认场景 = 随机障碍、无路线（右键设路线）；加载 scenarios/ 文件后
+// 带路线的场景自动开跑，且同场景同种子与 headless 逐帧一致。
+
+let currentScenario: Scenario | null = null;
+
+function applyScenario(json: unknown): boolean {
+  let scenario: Scenario;
+  let built: ReturnType<typeof buildScenarioWorld>;
+  try {
+    scenario = parseScenario(json);
+    built = buildScenarioWorld(scenario, SIM_W, SIM_H);
+  } catch (e) {
+    alert(`场景加载失败: ${(e as Error).message}`);
+    return false;
+  }
+  engine.rebuildWorld(built.worldCfg);
+  if (built.route) {
+    engine.setRoute(built.route, built.route.startIndex, { speed: built.worldCfg.carStart?.speed });
+  }
+  currentScenario = scenario;
+  resetSceneCache(scene);
+  recorder.reset(); recorder.start(scenario.name);
+  document.getElementById('hud-map')!.textContent = engine.mapDef.name;
+  document.getElementById('hud-scenario')!.textContent = `${scenario.name}（种子 ${scenario.seed}）`;
+  const mapSelect = document.getElementById('map-dropdown') as HTMLSelectElement | null;
+  if (mapSelect) mapSelect.value = scenario.map;
+  return true;
+}
+
+// 初始世界：浏览器默认场景
+applyScenario(defaultScenario(DEFAULT_MAP));
 
 // ui.ts 右键路由状态机（SETTING_START/SETTING_GOAL）的起点暂存
 let clickStartIdx: number | null = null;
@@ -39,11 +72,9 @@ setupUI({
   get routeState() { return engine.routeState; },
   get latestGPS() { return engine.latestGPS; },
   onMapChange(name: string) {
-    const mapDef = MAP_PRESETS[name] || MAP_PRESETS[DEFAULT_MAP];
-    engine.rebuildWorld({ map: mapDef });
-    resetSceneCache(scene);
-    recorder.reset(); recorder.start(mapDef.name);
-    document.getElementById('hud-map')!.textContent = mapDef.name;
+    const map = MAP_PRESETS[name] ? name : DEFAULT_MAP;
+    const base = currentScenario ?? defaultScenario(map);
+    applyScenario({ ...base, map });
   },
   onRouteSet(r, startIdx) { engine.setRoute(r, startIdx); },
   setRouteState(s: string) { engine.routeState = s as typeof engine.routeState; },
@@ -51,6 +82,8 @@ setupUI({
   getClickStartIdx: () => clickStartIdx,
   getRouteState: () => engine.routeState,
   replay,
+  onScenarioLoad(json: unknown) { applyScenario(json); },
+  onScenarioReset() { applyScenario(defaultScenario(engine.mapDef.name)); },
 });
 
 engine.bus.subscribe('control:state', ({ snapshot, lidarScan, trajectory, state }: any) => {

@@ -1,7 +1,8 @@
 // ==================== 测试：场景解析与构建 ====================
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { parseScenario, buildScenarioWorld, ScenarioError } from '../../sim/scenario.js';
+import { parseScenario, buildScenarioWorld, defaultScenario, ScenarioError } from '../../sim/scenario.js';
+import { createRng } from '../../shared/rng.js';
 import { cartesianToFrenet, buildFrenetReference } from '../../algo/plan/frenet.js';
 import { m } from '../../shared/dimensions.js';
 
@@ -29,6 +30,25 @@ describe('parseScenario 校验', () => {
       ...VALID,
       obstacles: { mode: 'explicit', list: [{ s: 10, l: 99, w: 2, len: 2 }] },
     }), ScenarioError);
+  });
+});
+
+describe('defaultScenario（浏览器默认场景）', () => {
+  it('产出可通过 parseScenario 校验，随机障碍数量 3-5', () => {
+    for (let i = 0; i < 20; i++) {
+      const s = parseScenario(defaultScenario('oval'));
+      assert.strictEqual(s.map, 'oval');
+      assert.ok(Number.isInteger(s.seed) && s.seed >= 0);
+      assert.ok(s.obstacles.mode === 'random' &&
+        s.obstacles.count >= 3 && s.obstacles.count <= 5,
+        `count=${s.obstacles.mode === 'random' ? s.obstacles.count : 'n/a'}`);
+    }
+  });
+
+  it('注入 rng 时确定（同 rng 同场景）', () => {
+    const a = defaultScenario('oval', createRng(5));
+    const b = defaultScenario('oval', createRng(5));
+    assert.deepStrictEqual(a, b);
   });
 });
 

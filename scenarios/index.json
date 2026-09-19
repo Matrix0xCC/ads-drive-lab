@@ -1,0 +1,17 @@
+{
+  "scenarios": [
+    { "name": "oval-cruise", "file": "oval-cruise.json", "map": "oval" },
+    { "name": "oval-avoid-1", "file": "oval-avoid-1.json", "map": "oval" },
+    { "name": "hairpin-route", "file": "hairpin-route.json", "map": "hairpin" },
+    { "name": "batch-oval-s1", "file": "batch/oval-s1.json", "map": "oval" },
+    { "name": "batch-oval-s2", "file": "batch/oval-s2.json", "map": "oval" },
+    { "name": "batch-oval-s3", "file": "batch/oval-s3.json", "map": "oval" },
+    { "name": "batch-oval-s4", "file": "batch/oval-s4.json", "map": "oval" },
+    { "name": "batch-oval-s5", "file": "batch/oval-s5.json", "map": "oval" },
+    { "name": "batch-hairpin-s1", "file": "batch/hairpin-s1.json", "map": "hairpin" },
+    { "name": "batch-hairpin-s2", "file": "batch/hairpin-s2.json", "map": "hairpin" },
+    { "name": "batch-hairpin-s3", "file": "batch/hairpin-s3.json", "map": "hairpin" },
+    { "name": "batch-hairpin-s4", "file": "batch/hairpin-s4.json", "map": "hairpin" },
+    { "name": "batch-hairpin-s5", "file": "batch/hairpin-s5.json", "map": "hairpin" }
+  ]
+}

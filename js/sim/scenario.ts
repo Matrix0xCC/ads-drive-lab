@@ -20,7 +20,7 @@ import { generateTrack, TRACK_HALF_WIDTH } from '../env/track.js';
 import { generateObstacles } from '../env/obstacle.js';
 import { buildRoadGraph, findRoute } from '../algo/routePlanner.js';
 import { buildFrenetReference, frenetToCartesian } from '../algo/plan/frenet.js';
-import { createRng, deriveSeed } from '../shared/rng.js';
+import { Rng, createRng, deriveSeed } from '../shared/rng.js';
 import { WorldConfig } from './engine.js';
 
 export class ScenarioError extends Error {}
@@ -98,6 +98,25 @@ export function parseScenario(json: unknown): Scenario {
   }
 
   return o as Scenario;
+}
+
+// ═══════════════════════════════════════════════════
+// 浏览器默认场景（与 headless 同源：同一套 Scenario → engine 管线）
+// ═══════════════════════════════════════════════════
+
+/**
+ * 构建浏览器默认场景：地图 + 随机种子 + 随机 3-5 障碍、无路线
+ *（路线由用户右键设置；带路线的场景文件加载后会自动开跑）
+ */
+export function defaultScenario(map: string, rng: Rng = Math.random): Scenario {
+  return {
+    version: 1,
+    name: `browser-${map}`,
+    map,
+    seed: Math.floor(rng() * 1000000),
+    duration: 3600,        // 浏览器不按时长终止
+    obstacles: { mode: 'random', count: 3 + Math.floor(rng() * 3) },
+  };
 }
 
 // ═══════════════════════════════════════════════════

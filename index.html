@@ -62,6 +62,9 @@
         <option value="highway">Highway</option>
         <option value="tech_circuit">Tech Circuit</option>
       </select>
+      <select id="scenario-dropdown" title="加载场景（与 headless 同源）">
+        <option value="">随机场景</option>
+      </select>
       <button id="btn-reset-view" title="重置视角 (R)">&#8634;</button>
       <button id="btn-export" title="导出记录">&#128190;</button>
       <button id="btn-import" title="导入记录">&#128194;</button>
@@ -93,6 +96,7 @@
     <!-- HUD -->
     <div id="hud">
       <div>地图: <span id="hud-map">---</span></div>
+      <div>场景: <span id="hud-scenario">---</span></div>
       <div>前方: <span id="hud-front">---</span></div>
       <div>速度: <span id="hud-speed">---</span></div>
       <div class="state-normal"  id="hud-state">状态: NORMAL 巡航中</div>
