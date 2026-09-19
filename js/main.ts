@@ -8,7 +8,7 @@ import { ARCHIVE_TOPICS, recordFrom } from './sim/records.js';
 import { assembleBundle } from './headless/bundle.js';
 import { initScene, updateScene, resetSceneCache } from './env/renderer.js';
 import { MAP_PRESETS, DEFAULT_MAP } from './env/mapDefinitions.js';
-import { setupUI, updateInspectPanel } from './ui.js';
+import { setupUI, updateInspectPanel } from './ui/index.js';
 import { ReplayController } from './replay.js';
 
 const W = SIM_W, H = SIM_H;
