@@ -1,9 +1,11 @@
 // ==================== 主入口：engine 装配 + 渲染 ====================
 import { MessageBus } from './messageBus.js';
-import { Recorder } from './shared/recorder.js';
+import { FrameRecord } from './shared/types.js';
 import { debug } from './shared/debug.js';
 import { SIM_W, SIM_H, FIXED_DT, SimEngine } from './sim/engine.js';
 import { Scenario, parseScenario, buildScenarioWorld, defaultScenario } from './sim/scenario.js';
+import { ARCHIVE_TOPICS, recordFrom } from './sim/records.js';
+import { assembleBundle } from './headless/bundle.js';
 import { initScene, updateScene, resetSceneCache } from './env/renderer.js';
 import { MAP_PRESETS, DEFAULT_MAP } from './env/mapDefinitions.js';
 import { setupUI, updateInspectPanel } from './ui.js';
@@ -16,11 +18,11 @@ canvas.width = W; canvas.height = H;
 const { renderer, scene, camera, controls, lidarLines } = initScene(canvas, W, H);
 const engine = new SimEngine(new MessageBus('autopilot', false), { map: MAP_PRESETS[DEFAULT_MAP] });
 
-// 浏览器侧数据记录（headless 用 ArchiveWriter 订阅同样的主题）
-const recorder = new Recorder();
-engine.bus.subscribe('planning:result', (p: any) => {
-  recorder.recordFrame(p.snapshot.car, p.scan, p.trajectory, p.state, p.route);
-});
+// 运行归档收集（与 headless 同源：同一主题清单、同一记录映射）
+const frames: FrameRecord[] = [];
+for (const topic of ARCHIVE_TOPICS) {
+  engine.bus.subscribe(topic, (p: any) => frames.push(recordFrom(topic, p)));
+}
 
 // ==================== 场景（与 headless 完全同源） ====================
 //
@@ -46,7 +48,7 @@ function applyScenario(json: unknown): boolean {
   }
   currentScenario = scenario;
   resetSceneCache(scene);
-  recorder.reset(); recorder.start(scenario.name);
+  frames.length = 0;   // 归档从本次场景加载起重新收集
   document.getElementById('hud-map')!.textContent = engine.mapDef.name;
   document.getElementById('hud-scenario')!.textContent = `${scenario.name}（种子 ${scenario.seed}）`;
   const mapSelect = document.getElementById('map-dropdown') as HTMLSelectElement | null;
@@ -57,13 +59,32 @@ function applyScenario(json: unknown): boolean {
 // 初始世界：浏览器默认场景
 applyScenario(defaultScenario(DEFAULT_MAP));
 
+/** 导出当前运行归档：与 headless 同一套检测/报告（assembleBundle），下载 .run.json */
+function exportRun(): void {
+  if (!currentScenario) return;
+  const bundle = assembleBundle({
+    scenario: currentScenario, track: engine.track, obstacles: engine.obstacles,
+    route: engine.route, frames, simTime: engine.simTime,
+    id: `${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}_${currentScenario.name}_browser`,
+    createdAt: new Date().toISOString(),
+    gitCommit: null, nodeVersion: 'browser',
+  });
+  const blob = new Blob([JSON.stringify(bundle)], { type: 'application/json' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = `${bundle.meta.id}.run.json`;
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
 // ui.ts 右键路由状态机（SETTING_START/SETTING_GOAL）的起点暂存
 let clickStartIdx: number | null = null;
 
 const replay = new ReplayController(scene, lidarLines);
 
 setupUI({
-  W, H, canvas, camera, scene, controls, recorder,
+  W, H, canvas, camera, scene, controls,
+  onExportRun: exportRun,
   get mapDef() { return engine.mapDef; },
   get track() { return engine.track; },
   get roadGraph() { return engine.roadGraph; },

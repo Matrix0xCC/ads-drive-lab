@@ -13,6 +13,7 @@
 import * as THREE from 'three';
 import { updateScene, resetSceneCache } from './env/renderer.js';
 import { FrameRecord, RunMeta, WorldFile, Issue } from './shared/types.js';
+import { RunBundle } from './headless/bundle.js';
 import { px, rad } from './shared/dimensions.js';
 
 export interface ReplayState {
@@ -55,17 +56,30 @@ export class ReplayController {
     } catch { return []; }
   }
 
+  /** 从服务器 runs/<id>/ 加载 */
   async load(runId: string): Promise<void> {
     const base = `runs/${encodeURIComponent(runId)}`;
-    this._meta = await (await fetch(`${base}/run.json`)).json();
-    this._world = await (await fetch(`${base}/world.json`)).json();
-    this._issues = await (await fetch(`${base}/issues.json`)).json();
+    const meta = await (await fetch(`${base}/run.json`)).json();
+    const world = await (await fetch(`${base}/world.json`)).json();
+    const issues = await (await fetch(`${base}/issues.json`)).json();
     const text = await (await fetch(`${base}/frames.jsonl`)).text();
-    const records: FrameRecord[] = text.trim().split('\n').map(l => JSON.parse(l));
+    const frames: FrameRecord[] = text.trim().split('\n').map(l => JSON.parse(l));
+    this.applyBundle({ meta, world, issues, frames });
+  }
+
+  /** 导入本地归档包（.run.json，与服务器归档同构）直接回放 */
+  loadBundle(bundle: RunBundle): void {
+    this.applyBundle(bundle);
+  }
+
+  private applyBundle(src: { meta: RunMeta; world: WorldFile; issues: Issue[]; frames: FrameRecord[] }): void {
+    this._meta = src.meta;
+    this._world = src.world;
+    this._issues = src.issues;
 
     this._stepIndex = new Map();
     let maxStep = 0;
-    for (const r of records) {
+    for (const r of src.frames) {
       const arr = this._stepIndex.get(r.step) ?? [];
       arr.push(r);
       this._stepIndex.set(r.step, arr);
@@ -73,7 +87,7 @@ export class ReplayController {
     }
 
     this.state.active = true;
-    this.state.runId = runId;
+    this.state.runId = src.meta?.id ?? null;
     this.state.totalSteps = maxStep;
     this.state.currentStep = 0;
     this.state.markers = this._issues.map(i => i.firstFrame);

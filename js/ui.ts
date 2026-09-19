@@ -6,8 +6,8 @@
 import * as THREE from 'three';
 import { MapDefinition, MAP_PRESETS, DEFAULT_MAP } from './env/mapDefinitions.js';
 import { debug } from './shared/debug.js';
-import { Recorder } from './shared/recorder.js';
 import { Route, GPSReading, createRoute, TrackGeometry } from './shared/types.js';
+import { parseBundle } from './headless/bundle.js';
 import { rad, px, pxps, SIM_UNITS_PER_METER } from './shared/dimensions.js';
 import { buildRoadGraph, findRoute, findClosestPoint, RoadGraph } from './algo/routePlanner.js';
 import { CarState } from './shared/types.js';
@@ -24,7 +24,8 @@ export interface UIContext {
   camera: THREE.PerspectiveCamera;
   scene: THREE.Scene;
   controls: OrbitControls;
-  recorder: Recorder;
+  /** 导出当前运行归档（main.ts 组装 RunBundle 并下载） */
+  onExportRun: () => void;
   // 可变状态（UI 只读或通过回调修改）
   mapDef: MapDefinition;
   track: TrackGeometry;
@@ -99,7 +100,7 @@ export function updateInspectPanel(dt: number) {
 // ═══════════════════════════════════════════════════
 
 export function setupUI(ctx: UIContext) {
-  const { W, H, canvas, camera, controls, recorder } = ctx;
+  const { W, H, canvas, camera, controls } = ctx;
 
   // ── 地图选择 ──
   const mapSelect = document.getElementById('map-dropdown') as HTMLSelectElement;
@@ -137,14 +138,9 @@ export function setupUI(ctx: UIContext) {
     });
   }
 
-  // ── 数据导出/导入 ──
+  // ── 运行归档导出/导入（与 headless 同格式：.run.json 归档包） ──
   document.getElementById('btn-export')?.addEventListener('click', () => {
-    const json = recorder.exportJSON();
-    const blob = new Blob([json], { type: 'application/json' });
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `recording_${ctx.mapDef.name}_${new Date().toISOString().slice(0, 19)}.json`;
-    a.click();
+    ctx.onExportRun();
   });
 
   document.getElementById('btn-import')?.addEventListener('click', () => {
@@ -154,7 +150,14 @@ export function setupUI(ctx: UIContext) {
       const file = e.target?.files?.[0];
       if (!file) return;
       const reader = new FileReader();
-      reader.onload = () => { recorder.importJSON(reader.result as string); };
+      reader.onload = () => {
+        try {
+          const bundle = parseBundle(JSON.parse(reader.result as string));
+          void enterReplay(() => replay.loadBundle(bundle));
+        } catch (err) {
+          alert(`归档导入失败: ${(err as Error).message}`);
+        }
+      };
       reader.readAsText(file);
     };
     input.click();
@@ -269,6 +272,14 @@ export function setupUI(ctx: UIContext) {
     }
   }
 
+  /** 进入回放：暂停实时仿真 → 加载数据（服务器运行或导入归档）→ 显示回放栏 */
+  async function enterReplay(load: () => Promise<void> | void) {
+    debug.paused = true;
+    await load();
+    if (replayBar) replayBar.style.display = 'flex';
+    renderMarkers();
+  }
+
   document.getElementById('btn-replay-mode')?.addEventListener('click', async () => {
     const runs = await ReplayController.listRuns();
     if (runs.length === 0) {
@@ -279,10 +290,7 @@ export function setupUI(ctx: UIContext) {
     if (choice === null) return;
     const idx = Number(choice);
     if (Number.isNaN(idx) || !runs[idx]) return;
-    debug.paused = true;                       // 暂停实时仿真
-    await replay.load(runs[idx].id);
-    if (replayBar) replayBar.style.display = 'flex';
-    renderMarkers();
+    await enterReplay(() => replay.load(runs[idx].id));
   });
 
   document.getElementById('btn-replay-play')?.addEventListener('click', () => replay.toggle());
