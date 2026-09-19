@@ -1,6 +1,6 @@
-// ==================== UI：inspect 面板 ====================
-// 开发者检查面板渲染（节流 10Hz）：展示感知/规划/控制模块的内部状态。
-// 状态逻辑见 state.ts/controller.ts（T5 接线折叠）。
+// ==================== UI：调试面板（Inspect，画布右下） ====================
+// 渲染（节流 10Hz）：感知/规划/控制模块的内部状态，写入 #inspect-body。
+// 展开/收起由状态 debugOpen 控制（btn-debug-toggle / I 键）。
 
 import { debug } from '../shared/debug.js';
 import { SIM_UNITS_PER_METER } from '../shared/dimensions.js';
@@ -45,13 +45,13 @@ export function updateInspectPanel(dt: number) {
     html += `  预瞄: ${toM(c.lookaheadDist)}m → (${toM(c.lookaheadX)},${toM(c.lookaheadY)})\n`;
     html += `  α=${(c.alpha*180/Math.PI).toFixed(1)}° | δ=${(c.steerAngle*180/Math.PI).toFixed(2)}° | 油门=${c.throttle.toFixed(3)}\n`;
   }
-  body.innerHTML = html;   // 只更新内容区，保留标题栏（折叠按钮）
+  body.innerHTML = html;
 }
 
-/** 折叠/展开 inspect 面板（控制内容区显隐与按钮箭头） */
+/** 折叠/展开调试面板（控制内容区显隐与按钮箭头） */
 export function setInspectorOpen(open: boolean): void {
   const body = document.getElementById('inspect-body');
-  const btn = document.getElementById('btn-inspect-toggle');
+  const btn = document.getElementById('btn-debug-toggle');
   if (body) body.style.display = open ? 'block' : 'none';
   if (btn) btn.textContent = open ? '▾' : '▸';
 }

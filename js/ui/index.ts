@@ -10,11 +10,14 @@ import { MapDefinition } from '../env/mapDefinitions.js';
 import { RoadGraph } from '../algo/routePlanner.js';
 import { ReplayController } from '../replay.js';
 import type { RouteState } from '../sim/engine.js';
+import { SIM_W, SIM_H } from '../sim/engine.js';
+import { frameCamera } from '../env/renderer.js';
 import { UiController } from './controller.js';
 import { wireToolbar } from './toolbar.js';
+import { wireSidebar, setSidebarSection } from './sidebar.js';
 import { wireInteractions } from './interactions.js';
 import { setupReplayPanel } from './replayPanel.js';
-import { renderHint } from './hud.js';
+import { renderHint, setInfoOpen } from './hud.js';
 import { setInspectorOpen, updateInspectPanel } from './inspector.js';
 import { display } from '../shared/display.js';
 
@@ -57,17 +60,19 @@ export interface UiDeps {
 export function setupUI(deps: UiDeps): { tick(dt: number): void } {
   const { canvas, camera, controls } = deps;
 
-  /** 暂停按钮图标随状态同步 */
+  /** 暂停按钮图标随状态同步（只改图标 span，保留按钮文案） */
   function renderPauseButton(paused: boolean) {
-    const btn = document.getElementById('btn-pause');
-    if (btn) btn.textContent = paused ? '▶' : '⏸';
+    const icon = document.getElementById('pause-icon');
+    if (icon) icon.textContent = paused ? '▶' : '⏸';
   }
 
   // ── 状态机 + 副作用 ──（replayPanel 在下方定义，副作用仅在运行期触发，无 TDZ 问题）
   const controller = new UiController({
     onLivePaused: (p) => { deps.actions.setLivePaused(p); renderPauseButton(p); },
     onMode: (mode) => (mode === 'REPLAY' ? replayPanel.show() : replayPanel.hide()),
-    onInspector: (open) => setInspectorOpen(open),
+    onSidebarSection: (section) => setSidebarSection(section),
+    onInfoPanel: (open) => setInfoOpen(open),
+    onDebugPanel: (open) => setInspectorOpen(open),
     onHint: (hint) => renderHint(hint),
     onSpeedUnit: (unit) => { display.speedUnit = unit; },
   }, () => deps.engine.routeState);
@@ -92,11 +97,15 @@ export function setupUI(deps: UiDeps): { tick(dt: number): void } {
 
   const replayPanel = setupReplayPanel(deps, enterReplay, exitReplay);
   wireToolbar(deps, controller, { enterReplay, exitReplayIfActive });
+  wireSidebar(controller);
   wireInteractions(deps, controller);
 
-  // inspect 折叠按钮
-  document.getElementById('btn-inspect-toggle')?.addEventListener('click', () => {
-    controller.dispatch({ type: 'TOGGLE_INSPECTOR' });
+  // 右侧面板折叠按钮
+  document.getElementById('btn-info-toggle')?.addEventListener('click', () => {
+    controller.dispatch({ type: 'TOGGLE_INFO' });
+  });
+  document.getElementById('btn-debug-toggle')?.addEventListener('click', () => {
+    controller.dispatch({ type: 'TOGGLE_DEBUG' });
   });
 
   // 点击 HUD 速度 → 切换 km/h ↔ m/s（渲染层下一帧自动按新单位显示）
@@ -106,9 +115,7 @@ export function setupUI(deps: UiDeps): { tick(dt: number): void } {
 
   // ── 统一键盘分发器（Space 双语义 / Esc 三义）──
   function resetCamera() {
-    camera.position.set(canvas.width / 2, 600, canvas.height / 2 + 400);
-    controls.target.set(canvas.width / 2, 0, canvas.height / 2);
-    controls.update();
+    frameCamera(camera, controls, canvas.clientWidth, canvas.clientHeight, SIM_W, SIM_H);
   }
   window.addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLInputElement) return;
@@ -127,7 +134,7 @@ export function setupUI(deps: UiDeps): { tick(dt: number): void } {
         resetCamera();
         break;
       case 'i': case 'I':
-        controller.dispatch({ type: 'TOGGLE_INSPECTOR' });
+        controller.dispatch({ type: 'TOGGLE_DEBUG' });
         break;
       case 'ArrowLeft':
         if (st.mode === 'REPLAY') deps.replay.seekStep(deps.replay.state.currentStep - 1);
@@ -142,7 +149,7 @@ export function setupUI(deps: UiDeps): { tick(dt: number): void } {
 
   return {
     tick(dt: number) {
-      if (controller.state.inspectorOpen) updateInspectPanel(dt);
+      if (controller.state.debugOpen) updateInspectPanel(dt);
     },
   };
 }

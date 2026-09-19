@@ -9,6 +9,8 @@ import type { SpeedUnit } from '../shared/display.js';
 
 export type UiMode = 'LIVE' | 'REPLAY';
 export type RoutePickPhase = 'idle' | 'picking-goal';
+/** 左侧菜单栏分区（手风琴单开） */
+export type SidebarSection = 'world' | 'sim' | 'data';
 
 export interface UiState {
   mode: UiMode;
@@ -18,8 +20,12 @@ export interface UiState {
   routePick: RoutePickPhase;
   pickStartIdx: number | null;
   scenarioName: string | null;
-  /** inspect 面板展开状态 */
-  inspectorOpen: boolean;
+  /** 左侧菜单当前展开的分区（null = 全收起） */
+  sidebarSection: SidebarSection | null;
+  /** 右侧信息面板（详细遥测）展开状态 */
+  infoOpen: boolean;
+  /** 右侧调试面板（Inspect）展开状态 */
+  debugOpen: boolean;
   /** 速度显示单位（点击 HUD 速度切换；默认 km/h） */
   speedUnit: SpeedUnit;
 }
@@ -32,7 +38,9 @@ export type UiEvent =
   | { type: 'CANCEL' }
   | { type: 'SCENARIO_CHANGED'; name: string }
   | { type: 'ROUTE_SET' }
-  | { type: 'TOGGLE_INSPECTOR' }
+  | { type: 'TOGGLE_SECTION'; section: SidebarSection }
+  | { type: 'TOGGLE_INFO' }
+  | { type: 'TOGGLE_DEBUG' }
   | { type: 'TOGGLE_SPEED_UNIT' };
 
 export const INITIAL_UI_STATE: UiState = {
@@ -41,7 +49,9 @@ export const INITIAL_UI_STATE: UiState = {
   routePick: 'idle',
   pickStartIdx: null,
   scenarioName: null,
-  inspectorOpen: true,
+  sidebarSection: null,
+  infoOpen: true,
+  debugOpen: true,
   speedUnit: 'kmh',
 };
 
@@ -70,8 +80,13 @@ export function reduce(state: UiState, e: UiEvent): UiState {
       return state.routePick === 'picking-goal'
         ? { ...state, routePick: 'idle', pickStartIdx: null }
         : state;
-    case 'TOGGLE_INSPECTOR':
-      return { ...state, inspectorOpen: !state.inspectorOpen };
+    case 'TOGGLE_SECTION':
+      // 手风琴单开：点已展开的分区 → 收起；点其它分区 → 切换（前一个自动收起）
+      return { ...state, sidebarSection: state.sidebarSection === e.section ? null : e.section };
+    case 'TOGGLE_INFO':
+      return { ...state, infoOpen: !state.infoOpen };
+    case 'TOGGLE_DEBUG':
+      return { ...state, debugOpen: !state.debugOpen };
     case 'TOGGLE_SPEED_UNIT':
       return { ...state, speedUnit: state.speedUnit === 'kmh' ? 'ms' : 'kmh' };
   }

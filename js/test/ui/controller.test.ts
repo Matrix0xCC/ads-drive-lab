@@ -4,11 +4,16 @@ import assert from 'node:assert';
 import { UiController } from '../../ui/controller.js';
 
 function makeCtl() {
-  const calls = { pause: [] as boolean[], mode: [] as string[], insp: [] as boolean[], hint: [] as string[], unit: [] as string[] };
+  const calls = {
+    pause: [] as boolean[], mode: [] as string[], sect: [] as (string | null)[],
+    info: [] as boolean[], debug: [] as boolean[], hint: [] as string[], unit: [] as string[],
+  };
   const ctl = new UiController({
     onLivePaused: (p) => calls.pause.push(p),
     onMode: (m) => calls.mode.push(m),
-    onInspector: (o) => calls.insp.push(o),
+    onSidebarSection: (s) => calls.sect.push(s),
+    onInfoPanel: (o) => calls.info.push(o),
+    onDebugPanel: (o) => calls.debug.push(o),
     onHint: (h) => calls.hint.push(h),
     onSpeedUnit: (u) => calls.unit.push(u),
   }, () => 'NONE');
@@ -56,10 +61,20 @@ describe('UiController.dispatch', () => {
     assert.strictEqual(calls.hint[calls.hint.length - 1], '右键设置路线起点 · 左键查看物体 · Space 暂停 · R 重置视角');
   });
 
-  it('TOGGLE_INSPECTOR → onInspector(false)', () => {
+  it('TOGGLE_SECTION → onSidebarSection(分区) 按手风琴语义', () => {
     const { ctl, calls } = makeCtl();
-    ctl.dispatch({ type: 'TOGGLE_INSPECTOR' });
-    assert.deepStrictEqual(calls.insp, [false]);
+    ctl.dispatch({ type: 'TOGGLE_SECTION', section: 'data' });
+    assert.deepStrictEqual(calls.sect, ['data']);
+    ctl.dispatch({ type: 'TOGGLE_SECTION', section: 'data' });
+    assert.deepStrictEqual(calls.sect, ['data', null]);
+  });
+
+  it('TOGGLE_INFO / TOGGLE_DEBUG → 各自面板副作用', () => {
+    const { ctl, calls } = makeCtl();
+    ctl.dispatch({ type: 'TOGGLE_INFO' });
+    ctl.dispatch({ type: 'TOGGLE_DEBUG' });
+    assert.deepStrictEqual(calls.info, [false]);
+    assert.deepStrictEqual(calls.debug, [false]);
   });
 
   it('TOGGLE_SPEED_UNIT → onSpeedUnit 按 kmh/ms 交替', () => {
@@ -74,7 +89,9 @@ describe('UiController.dispatch', () => {
     ctl.refresh();
     assert.deepStrictEqual(calls.pause, [false]);
     assert.deepStrictEqual(calls.mode, ['LIVE']);
-    assert.deepStrictEqual(calls.insp, [true]);
+    assert.deepStrictEqual(calls.sect, [null]);
+    assert.deepStrictEqual(calls.info, [true]);
+    assert.deepStrictEqual(calls.debug, [true]);
     assert.deepStrictEqual(calls.unit, ['kmh']);
     assert.strictEqual(calls.hint.length, 1);
   });

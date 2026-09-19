@@ -13,7 +13,7 @@
 
 import * as THREE from 'three';
 import { WorldSnapshot, LidarScan, Trajectory, Route, GPSReading } from '../shared/types.js';
-import { initScene } from './renderer/scene.js';
+import { initScene, frameCamera } from './renderer/scene.js';
 import { buildTrackGroup, buildObstacleGroup, buildCarGroup } from './renderer/geometry.js';
 import { updateLidar, updateTrajectoryLine, updateRouteLine, updateGPSRing, updateObstacleMarkers, resetOverlayCache } from './renderer/overlays.js';
 import { updateHUD } from './renderer/hud.js';
@@ -68,4 +68,4 @@ export function updateScene(
   updateHUD(lidarScan, car, plannerState, obstacles, trajectory, route ?? null, gps ?? null);
 }
 
-export { initScene };
+export { initScene, frameCamera };

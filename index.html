@@ -8,33 +8,78 @@
   <title>2D 自动驾驶 - 3D 俯视</title>
   <style>
     body { margin: 0; background: #111; overflow: hidden; }
-    #canvas-container { position: relative; width: 1800px; height: 800px; margin: 20px auto; }
-    canvas { display: block; }
+    #app { display: flex; height: 100vh; }
 
-    #hud {
+    /* ── 左侧菜单栏（手风琴单开：世界/仿真/数据） ── */
+    #sidebar {
+      width: 230px; flex: none; background: #181818; border-right: 1px solid #333;
+      color: #ccc; font-family: monospace; font-size: 13px; overflow-y: auto;
+    }
+    .sb-title {
+      padding: 12px 14px; color: #0f0; font-weight: bold;
+      border-bottom: 1px solid #333; letter-spacing: 1px;
+    }
+    .sb-head {
+      display: block; width: 100%; text-align: left; background: none;
+      border: none; border-bottom: 1px solid #262626; color: #ddd;
+      font-family: inherit; font-size: 13px; padding: 10px 12px; cursor: pointer;
+    }
+    .sb-head:hover { background: #242424; }
+    .sb-arrow { display: inline-block; width: 16px; color: #888; }
+    .sb-body { display: none; padding: 10px 12px 12px; border-bottom: 1px solid #262626; line-height: 1.7; }
+    .sb-body button {
+      display: block; width: 100%; text-align: left; background: #333; color: #fff;
+      border: 1px solid #555; padding: 6px 10px; margin-bottom: 6px;
+      font-family: inherit; font-size: 12px; border-radius: 4px; cursor: pointer;
+    }
+    .sb-body button:hover { background: #444; }
+    .sb-label { display: block; color: #888; font-size: 11px; margin: 6px 0 2px; }
+    .sb-body select {
+      width: 100%; background: #333; color: #fff; border: 1px solid #555;
+      padding: 5px 8px; font-family: inherit; font-size: 12px; border-radius: 4px;
+    }
+
+    /* ── 画布区 ── */
+    /* 画布容器占满菜单右侧的剩余空间（宽 + 全屏高）；渲染分辨率与相机宽高比
+       跟随容器（main.ts resize 监听），取景由 frameCamera 按容器宽高比整定，
+       保证赛道不被裁切。悬浮面板锚定容器边缘，始终完整可见。 */
+    #canvas-container {
+      position: relative; flex: 1; min-width: 0; height: 100%; overflow: hidden;
+    }
+    canvas { display: block; width: 100%; height: 100%; }
+
+    /* 精简遥测：速度 + 状态（详细数据在右侧「信息」面板） */
+    #hud-mini {
       position: absolute; top: 10px; left: 15px;
-      color: #fff; font-family: monospace; font-size: 13px;
-      pointer-events: none; z-index: 10;
-      line-height: 1.6;
+      color: #fff; font-family: monospace; font-size: 15px;
+      pointer-events: none; z-index: 10; line-height: 1.7;
       text-shadow: 0 1px 3px rgba(0,0,0,0.8);
     }
-    #hud .state-normal  { color: #44ff44; font-weight: bold; }
-    #hud .state-avoid  { color: #ff4444; font-weight: bold; }
+    #hud-mini #hud-speed { pointer-events: auto; cursor: pointer; font-weight: bold; }
+    #hud-mini .state-normal { color: #44ff44; font-weight: bold; }
+    #hud-mini .state-avoid  { color: #ff4444; font-weight: bold; }
 
-    /* 顶栏两簇（世界 / 控制） */
-    #world-cluster, #control-cluster {
-      position: absolute; right: 15px; z-index: 20; pointer-events: all;
-      display: flex; gap: 8px; align-items: center;
+    /* ── 右侧面板（信息 / 调试） ── */
+    #info-panel, #inspect-panel {
+      position: absolute; right: 15px; z-index: 20;
+      color: #ddd; font-family: monospace; font-size: 11px;
+      background: rgba(0,0,0,0.85); padding: 8px 10px; border-radius: 4px; line-height: 1.7;
     }
-    #world-cluster { top: 10px; }
-    #control-cluster { top: 52px; }
-    .cluster-label { color: #888; font-family: monospace; font-size: 11px; margin-right: 2px; }
-    #world-cluster select, #control-cluster button {
-      background: #333; color: #fff; border: 1px solid #666;
-      padding: 6px 10px; font-family: monospace; font-size: 13px;
-      border-radius: 4px; cursor: pointer;
+    #info-panel { top: 10px; width: 240px; color: #aaa; }
+    #inspect-panel { bottom: 10px; width: 280px; max-height: 400px; overflow-y: auto; }
+    .panel-header {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 4px; color: #0f0;
     }
-    #world-cluster select:hover, #control-cluster button:hover { background: #444; }
+    .panel-header button {
+      background: #222; color: #0f0; border: 1px solid #555; cursor: pointer;
+      font-family: inherit; font-size: 11px; border-radius: 3px; padding: 0 6px;
+    }
+    #info-body span { color: #fff; }
+    #hud-route { color: #ffaa00; }
+    #hud-gps { color: #8888ff; }
+    #hud-obstacle-info { color: #ffaa00; min-height: 14px; }
+    #hud-obstacle-info.state-avoid { color: #ff4444; font-weight: bold; }
 
     #replay-bar button, #replay-bar select {
       background: #333; color: #fff; border: 1px solid #666;
@@ -53,104 +98,114 @@
       z-index: 10; pointer-events: none;
       color: #888; font-family: monospace; font-size: 11px;
     }
-
-    /* inspect 面板标题栏（可折叠） */
-    #inspect-header {
-      display: flex; justify-content: space-between; align-items: center;
-      pointer-events: auto; margin-bottom: 4px;
-    }
-    #btn-inspect-toggle {
-      background: #222; color: #0f0; border: 1px solid #555; cursor: pointer;
-      font-family: monospace; font-size: 11px; border-radius: 3px; padding: 0 6px;
-    }
   </style>
 </head>
 <body>
-  <div id="canvas-container">
-    <canvas id="canvas"></canvas>
+  <div id="app">
+    <!-- ══ 左侧菜单栏 ══ -->
+    <aside id="sidebar">
+      <div class="sb-title">自动驾驶模拟器</div>
 
-    <!-- 世界选择（地图 + 场景） -->
-    <div id="world-cluster">
-      <span class="cluster-label">世界</span>
-      <select id="map-dropdown">
-        <option value="oval">Oval</option>
-        <option value="hairpin">Hairpin</option>
-        <option value="highway">Highway</option>
-        <option value="tech_circuit">Tech Circuit</option>
-      </select>
-      <select id="scenario-dropdown" title="加载场景（与 headless 同源）">
-        <option value="">随机场景</option>
-      </select>
-    </div>
-
-    <!-- 控制（仿真 / 数据 / 视图） -->
-    <div id="control-cluster">
-      <span class="cluster-label">控制</span>
-      <button id="btn-pause" title="暂停/继续 (Space)">&#9208;</button>
-      <button id="btn-replay-mode" title="回放已归档运行">&#9194;</button>
-      <button id="btn-export" title="导出运行归档 (.run.json)">&#128190;</button>
-      <button id="btn-import" title="导入归档并回放">&#128194;</button>
-      <button id="btn-reset-view" title="重置视角 (R)">&#8634;</button>
-    </div>
-
-    <!-- 回放栏 -->
-    <div id="replay-bar" style="display:none;position:absolute;bottom:10px;left:50%;transform:translateX(-50%);
-      z-index:30;background:rgba(0,0,0,0.85);padding:8px 12px;border-radius:6px;
-      gap:8px;align-items:center;color:#fff;font-family:monospace;font-size:12px;width:900px;">
-      <button id="btn-replay-play" title="播放/暂停">&#9199;</button>
-      <div id="replay-track" style="position:relative;flex:1;">
-        <input id="replay-timeline" type="range" min="0" max="0" value="0" style="width:100%;">
-        <div id="replay-markers" style="position:absolute;left:0;right:0;top:-2px;height:8px;pointer-events:none;"></div>
+      <!-- 世界 -->
+      <button class="sb-head" id="menu-world"><span class="sb-arrow" id="arrow-world">▸</span>世界</button>
+      <div class="sb-body" id="section-world">
+        <label class="sb-label">地图</label>
+        <select id="map-dropdown">
+          <option value="oval">Oval</option>
+          <option value="hairpin">Hairpin</option>
+          <option value="highway">Highway</option>
+          <option value="tech_circuit">Tech Circuit</option>
+        </select>
+        <label class="sb-label">场景（与 headless 同源）</label>
+        <select id="scenario-dropdown" title="加载场景（与 headless 同源）">
+          <option value="">随机场景</option>
+        </select>
       </div>
-      <span id="replay-step-label">0 / 0</span>
-      <select id="replay-speed">
-        <option value="0.5">0.5&times;</option>
-        <option value="1" selected>1&times;</option>
-        <option value="2">2&times;</option>
-        <option value="4">4&times;</option>
-      </select>
-      <button id="btn-replay-prev" title="上一帧">&lang;</button>
-      <button id="btn-replay-next" title="下一帧">&rang;</button>
-      <button id="btn-replay-close" title="退出回放">&times;</button>
-    </div>
 
-    <!-- HUD -->
-    <div id="hud">
-      <div>地图: <span id="hud-map">---</span></div>
-      <div>场景: <span id="hud-scenario">---</span></div>
-      <div>前方: <span id="hud-front">---</span></div>
-      <div>速度: <span id="hud-speed" style="pointer-events:auto;cursor:pointer;" title="点击切换 km/h ↔ m/s">---</span></div>
-      <div class="state-normal"  id="hud-state">状态: NORMAL 巡航中</div>
-      <div>转向: <span id="hud-steer">---</span> rad | 油门: <span id="hud-throttle">---</span></div>
-      <div style="color:#888;font-size:10px;margin-top:4px;">
-        LiDAR: <span id="hud-rays">0</span> 条射线 |
-        障碍物: <span id="hud-obstacles">0</span> 个
+      <!-- 仿真 -->
+      <button class="sb-head" id="menu-sim"><span class="sb-arrow" id="arrow-sim">▸</span>仿真</button>
+      <div class="sb-body" id="section-sim">
+        <button id="btn-pause" title="暂停/继续 (Space)"><span id="pause-icon">&#9208;</span> 暂停 / 继续</button>
+        <button id="btn-reset-view" title="重置视角 (R)">&#8634; 重置视角</button>
       </div>
-      <div id="hud-obstacle-info" style="color:#ffaa00;font-size:11px;margin-top:2px;min-height:16px;"></div>
-      <div id="hud-route" style="color:#ffaa00;font-size:11px;margin-top:2px;min-height:16px;">路线: 点击赛道设置</div>
-      <div id="hud-gps" style="color:#8888ff;font-size:10px;margin-top:2px;min-height:14px;">GPS: ---</div>
-    </div>
 
-    <!-- 底部上下文提示（文案由 UI 状态机驱动，当前为静态占位） -->
-    <div id="hint-bar">右键设置路线起点 · 左键查看物体 · Space 暂停 · R 重置视角</div>
-
-    <!-- 物体点击提示 -->
-    <div id="object-tooltip" style="display:none;position:fixed;z-index:100;pointer-events:none;
-      color:#fff;font-family:monospace;font-size:11px;background:rgba(0,0,0,0.85);
-      padding:5px 8px;border-radius:3px;line-height:1.5;white-space:nowrap;">
-    </div>
-
-    <!-- Inspect 面板 -->
-    <div id="inspect-panel" style="position:absolute;bottom:10px;right:15px;
-      z-index:20;pointer-events:none;color:#0f0;font-family:monospace;font-size:10px;
-      background:rgba(0,0,0,0.85);padding:8px 10px;border-radius:4px;line-height:1.4;
-      max-height:400px;overflow-y:auto;width:280px;">
-      <div id="inspect-header">
-        <span>Inspect</span>
-        <button id="btn-inspect-toggle" title="折叠/展开 (I)">&#9662;</button>
+      <!-- 数据 -->
+      <button class="sb-head" id="menu-data"><span class="sb-arrow" id="arrow-data">▸</span>数据</button>
+      <div class="sb-body" id="section-data">
+        <button id="btn-replay-mode" title="回放已归档运行">&#9194; 回放运行…</button>
+        <button id="btn-export" title="导出运行归档 (.run.json)">&#128190; 导出归档</button>
+        <button id="btn-import" title="导入归档并回放">&#128194; 导入归档并回放</button>
       </div>
-      <pre id="inspect-body" style="margin:0;"></pre>
-    </div>
+    </aside>
+
+    <!-- ══ 画布区 ══ -->
+    <main id="canvas-container">
+      <canvas id="canvas"></canvas>
+
+      <!-- 精简遥测：速度（点击切 km/h ↔ m/s）+ 状态 -->
+      <div id="hud-mini">
+        <div><span id="hud-speed" title="点击切换 km/h ↔ m/s">---</span></div>
+        <div id="hud-state" class="state-normal">状态: NORMAL</div>
+      </div>
+
+      <!-- 信息面板（右上，可折叠）：详细遥测 -->
+      <div id="info-panel">
+        <div class="panel-header">
+          <span>信息</span>
+          <button id="btn-info-toggle" title="折叠/展开">&#9662;</button>
+        </div>
+        <div id="info-body">
+          <div>地图: <span id="hud-map">---</span></div>
+          <div>场景: <span id="hud-scenario">---</span></div>
+          <div>前方: <span id="hud-front">---</span></div>
+          <div>转向: <span id="hud-steer">---</span> rad</div>
+          <div>油门: <span id="hud-throttle">---</span></div>
+          <div>LiDAR: <span id="hud-rays">0</span> 条射线 | 障碍物: <span id="hud-obstacles">0</span> 个</div>
+          <div id="hud-obstacle-info"></div>
+          <div id="hud-route">路线: 点击赛道设置</div>
+          <div id="hud-gps">GPS: ---</div>
+        </div>
+      </div>
+
+      <!-- 调试面板（右下，可折叠）：感知/规划/控制内部状态 -->
+      <div id="inspect-panel">
+        <div class="panel-header">
+          <span>调试</span>
+          <button id="btn-debug-toggle" title="折叠/展开 (I)">&#9662;</button>
+        </div>
+        <pre id="inspect-body" style="margin:0;color:#0f0;font-size:10px;line-height:1.4;"></pre>
+      </div>
+
+      <!-- 回放栏 -->
+      <div id="replay-bar" style="display:none;position:absolute;bottom:10px;left:50%;transform:translateX(-50%);
+        z-index:30;background:rgba(0,0,0,0.85);padding:8px 12px;border-radius:6px;
+        gap:8px;align-items:center;color:#fff;font-family:monospace;font-size:12px;width:min(900px, 90%);">
+        <button id="btn-replay-play" title="播放/暂停">&#9199;</button>
+        <div id="replay-track" style="position:relative;flex:1;">
+          <input id="replay-timeline" type="range" min="0" max="0" value="0" style="width:100%;">
+          <div id="replay-markers" style="position:absolute;left:0;right:0;top:-2px;height:8px;pointer-events:none;"></div>
+        </div>
+        <span id="replay-step-label">0 / 0</span>
+        <select id="replay-speed">
+          <option value="0.5">0.5&times;</option>
+          <option value="1" selected>1&times;</option>
+          <option value="2">2&times;</option>
+          <option value="4">4&times;</option>
+        </select>
+        <button id="btn-replay-prev" title="上一帧">&lang;</button>
+        <button id="btn-replay-next" title="下一帧">&rang;</button>
+        <button id="btn-replay-close" title="退出回放">&times;</button>
+      </div>
+
+      <!-- 底部上下文提示（文案由 UI 状态机驱动） -->
+      <div id="hint-bar">右键设置路线起点 · 左键查看物体 · Space 暂停 · R 重置视角</div>
+
+      <!-- 物体点击提示 -->
+      <div id="object-tooltip" style="display:none;position:fixed;z-index:100;pointer-events:none;
+        color:#fff;font-family:monospace;font-size:11px;background:rgba(0,0,0,0.85);
+        padding:5px 8px;border-radius:3px;line-height:1.5;white-space:nowrap;">
+      </div>
+    </main>
   </div>
 
   <!-- Three.js import map -->

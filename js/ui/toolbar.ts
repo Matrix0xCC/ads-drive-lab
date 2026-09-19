@@ -6,6 +6,8 @@ import { UiController } from './controller.js';
 import type { UiDeps } from './index.js';
 import { ReplayController } from '../replay.js';
 import { parseBundle } from '../headless/bundle.js';
+import { frameCamera } from '../env/renderer.js';
+import { SIM_W, SIM_H } from '../sim/engine.js';
 
 export interface ToolbarHelpers {
   enterReplay: (load: () => Promise<void> | void) => Promise<void>;
@@ -105,8 +107,6 @@ export function wireToolbar(
   });
 
   document.getElementById('btn-reset-view')?.addEventListener('click', () => {
-    deps.camera.position.set(deps.canvas.width / 2, 600, deps.canvas.height / 2 + 400);
-    deps.controls.target.set(deps.canvas.width / 2, 0, deps.canvas.height / 2);
-    deps.controls.update();
+    frameCamera(deps.camera, deps.controls, deps.canvas.clientWidth, deps.canvas.clientHeight, SIM_W, SIM_H);
   });
 }

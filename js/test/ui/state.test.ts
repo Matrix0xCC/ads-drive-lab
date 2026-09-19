@@ -75,11 +75,38 @@ describe('reduce: 路线拾取', () => {
   });
 });
 
-describe('reduce: inspect 折叠', () => {
-  it('TOGGLE_INSPECTOR 翻转', () => {
-    const s = reduce(live(), { type: 'TOGGLE_INSPECTOR' });
-    assert.strictEqual(s.inspectorOpen, false);
-    assert.strictEqual(reduce(s, { type: 'TOGGLE_INSPECTOR' }).inspectorOpen, true);
+describe('reduce: 左侧菜单手风琴（世界/仿真/数据）', () => {
+  it('默认全收起（sidebarSection=null）', () => {
+    assert.strictEqual(live().sidebarSection, null);
+  });
+
+  it('点开分区 → 展开；单开：切换分区时前一个自动收起', () => {
+    const s1 = reduce(live(), { type: 'TOGGLE_SECTION', section: 'world' });
+    assert.strictEqual(s1.sidebarSection, 'world');
+    const s2 = reduce(s1, { type: 'TOGGLE_SECTION', section: 'data' });
+    assert.strictEqual(s2.sidebarSection, 'data');
+  });
+
+  it('点已展开的分区 → 收起（null）', () => {
+    const open = reduce(live(), { type: 'TOGGLE_SECTION', section: 'world' });
+    const closed = reduce(open, { type: 'TOGGLE_SECTION', section: 'world' });
+    assert.strictEqual(closed.sidebarSection, null);
+  });
+});
+
+describe('reduce: 右侧面板（信息/调试）', () => {
+  it('默认都展开', () => {
+    assert.strictEqual(live().infoOpen, true);
+    assert.strictEqual(live().debugOpen, true);
+  });
+
+  it('TOGGLE_INFO / TOGGLE_DEBUG 各自独立翻转', () => {
+    const s1 = reduce(live(), { type: 'TOGGLE_INFO' });
+    assert.strictEqual(s1.infoOpen, false);
+    assert.strictEqual(s1.debugOpen, true, '互不影响');
+    const s2 = reduce(s1, { type: 'TOGGLE_DEBUG' });
+    assert.strictEqual(s2.debugOpen, false);
+    assert.strictEqual(reduce(s2, { type: 'TOGGLE_INFO' }).infoOpen, true);
   });
 });
 

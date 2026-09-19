@@ -13,9 +13,24 @@ import { ReplayController } from './replay.js';
 
 const W = SIM_W, H = SIM_H;
 const canvas = document.getElementById('canvas') as HTMLCanvasElement;
-canvas.width = W; canvas.height = H;
+const container = canvas.parentElement as HTMLElement;
 
-const { renderer, scene, camera, controls, lidarLines } = initScene(canvas, W, H);
+/** 画布占满容器的视口尺寸（布局未就绪时回退到世界尺寸） */
+function viewportSize(): { w: number; h: number } {
+  return { w: container.clientWidth || W, h: container.clientHeight || H };
+}
+
+const { renderer, scene, camera, controls, lidarLines } = initScene(
+  canvas, viewportSize().w, viewportSize().h, W, H,
+);
+
+// 窗口尺寸变化：渲染分辨率与相机宽高比跟随（相机位置保持，R 键可重新取景）
+window.addEventListener('resize', () => {
+  const { w, h } = viewportSize();
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h;
+  camera.updateProjectionMatrix();
+});
 const engine = new SimEngine(new MessageBus('autopilot', false), { map: MAP_PRESETS[DEFAULT_MAP] });
 
 // 运行归档收集（与 headless 同源：同一主题清单、同一记录映射）

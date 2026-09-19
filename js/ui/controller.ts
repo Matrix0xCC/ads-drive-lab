@@ -4,14 +4,16 @@
 // 本模块不得 import DOM/three：所有副作用通过 UiEffects 注入，
 // 是"状态集中"与"DOM 只是渲染投影"之间的唯一边界。
 
-import { UiState, UiEvent, UiMode, reduce, deriveHint, INITIAL_UI_STATE } from './state.js';
+import { UiState, UiEvent, UiMode, SidebarSection, reduce, deriveHint, INITIAL_UI_STATE } from './state.js';
 import type { RouteState } from '../sim/engine.js';
 import type { SpeedUnit } from '../shared/display.js';
 
 export interface UiEffects {
   onLivePaused(paused: boolean): void;
   onMode(mode: UiMode): void;
-  onInspector(open: boolean): void;
+  onSidebarSection(section: SidebarSection | null): void;
+  onInfoPanel(open: boolean): void;
+  onDebugPanel(open: boolean): void;
   onHint(hint: string): void;
   onSpeedUnit(unit: SpeedUnit): void;
 }
@@ -36,7 +38,9 @@ export class UiController {
     this._state = next;
     if (next.livePaused !== prev.livePaused) this.effects.onLivePaused(next.livePaused);
     if (next.mode !== prev.mode) this.effects.onMode(next.mode);
-    if (next.inspectorOpen !== prev.inspectorOpen) this.effects.onInspector(next.inspectorOpen);
+    if (next.sidebarSection !== prev.sidebarSection) this.effects.onSidebarSection(next.sidebarSection);
+    if (next.infoOpen !== prev.infoOpen) this.effects.onInfoPanel(next.infoOpen);
+    if (next.debugOpen !== prev.debugOpen) this.effects.onDebugPanel(next.debugOpen);
     if (next.speedUnit !== prev.speedUnit) this.effects.onSpeedUnit(next.speedUnit);
     this.effects.onHint(deriveHint(next, this.getRouteState()));
   }
@@ -45,7 +49,9 @@ export class UiController {
   refresh(): void {
     this.effects.onLivePaused(this._state.livePaused);
     this.effects.onMode(this._state.mode);
-    this.effects.onInspector(this._state.inspectorOpen);
+    this.effects.onSidebarSection(this._state.sidebarSection);
+    this.effects.onInfoPanel(this._state.infoOpen);
+    this.effects.onDebugPanel(this._state.debugOpen);
     this.effects.onSpeedUnit(this._state.speedUnit);
     this.effects.onHint(deriveHint(this._state, this.getRouteState()));
   }
