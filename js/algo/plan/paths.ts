@@ -140,8 +140,12 @@ export function solvePathLayer(o: {
     }
   }
 
-  // 候选目标：{车道中心, ±2.5m 挪移, ±走廊边界} clamp + 去重
-  const raw = [lo, lo - (NUDGE as number), lo + (NUDGE as number), -L_MAX, L_MAX];
+  // 候选目标：{车道中心, ±2.5m/±5m 挪移, ±走廊边界} clamp + 去重。
+  // 两级挪移覆盖中间间隙：单级 2.5m 时，障碍贴一侧的宽间隙里只有走廊边缘候选
+  // 可清，车被推上边缘（距复位崖 |l|=5.0 仅 0.6m 跟踪余量）→ 越界复位
+  // （oval-s2 批量实证：复位后落回障碍正前方导致连锁碰撞）。
+  const raw = [lo, lo - (NUDGE as number), lo + (NUDGE as number),
+    lo - 2 * (NUDGE as number), lo + 2 * (NUDGE as number), -L_MAX, L_MAX];
   const targets: number[] = [];
   for (const v of raw) {
     const c = Math.max(-L_MAX, Math.min(L_MAX, v));

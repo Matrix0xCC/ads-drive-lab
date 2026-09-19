@@ -107,3 +107,22 @@ describe('路径层：提交窗口（横向耐心）', () => {
     assert.ok(Math.abs((r.best.targetL as number) - LO) > 8, '应选侧向路径');   // >2m
   });
 });
+
+describe('路径层：候选覆盖间隙', () => {
+  it('障碍贴右、左侧留有中间间隙 → 最优为间隙内候选（非走廊边缘）', () => {
+    // 链段从 l≈0 延到 l≈+5.2m（右车道+右侧）：左侧可通行区间 ≈ [−4.4, −1]，间隙中心 ≈ −3.1m。
+    // 若候选只有走廊边缘 −4.4（距复位崖 |l|=5.0 仅 0.6m 跟踪余量），实际车会贴边
+    // 漂移越界触发复位（oval-s2 批量实证）；间隙内候选（车道中心−5m）才是稳妥选择。
+    const n = 61, angles: any[] = [], distances: any[] = [];
+    for (let i = 0; i < n; i++) {
+      const a = -Math.PI / 3 + (i / (n - 1)) * 2 * Math.PI / 3;
+      angles.push(rad(a));
+      distances.push((i >= 30 && i <= 33) ? px(200) : MAX_SENSOR_DIST);    // 相邻射线 → 命中链段（l≈0..+5.2m）
+    }
+    const scan: LidarScan = { angles, distances, rawDistances: [...distances], confidences: new Array(61).fill(1), timestamp: 0 };
+    const r = solve(scan);
+    assert.strictEqual(r.best.blocked, false);
+    assert.ok(Math.abs((r.best.targetL as number) - (LO - 20)) < 2,
+      `最优应在间隙内（车道中心−5m），实际 ${(r.best.targetL as number) / 4}m`);
+  });
+});
