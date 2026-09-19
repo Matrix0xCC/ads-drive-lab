@@ -36,6 +36,37 @@ function pointAheadOf(carAngleRad: number, dist: number): { x: number; y: number
 
 const MARGIN = 20;  // 仿真单位（5m）
 
+describe('isLidarCollision 锥形窗口随命中距离缩放', () => {
+  // 命中距离 200u（50m）处目标角宽很窄（±1.25m ≈ ±1.4°）：
+  // 轨迹点在 4.5° 方位（侧向绕行）不应被固定 ±4° 宽锥牵连误判；
+  // 正对（同方位）的轨迹点仍应判碰撞。
+  const scanHitAt0 = (d: number) => {
+    const n = 61;
+    const angles: any[] = [], distances: any[] = [], rawDistances: any[] = [], confidences: number[] = [];
+    for (let i = 0; i < n; i++) {
+      const off = (-60 + i * 2) * Math.PI / 180;
+      angles.push(rad(off));
+      const hit = Math.abs(off) < 0.025;   // 单射线（现实量级：50m 处 2.5m 宽）
+      distances.push(px(hit ? d : (MAX_SENSOR_DIST as number)));
+      rawDistances.push(px(hit ? d : (MAX_SENSOR_DIST as number)));
+      confidences.push(hit ? 1 : 0);
+    }
+    return { angles, distances, rawDistances, confidences, timestamp: 0 };
+  };
+
+  it('远距离目标的窄角宽度：4.5° 侧偏的轨迹点不判碰撞', () => {
+    const scan = scanHitAt0(200);
+    const pt = pointAheadOf((4.5 * Math.PI) / 180, 240);   // 越过 200u 处目标 40u（> margin 20）
+    assert.strictEqual(isLidarCollision(pt.x, pt.y, 0, 0, scan as any, MARGIN), false);
+  });
+
+  it('同方位（正对）的轨迹点仍判碰撞（对照）', () => {
+    const scan = scanHitAt0(200);
+    const pt = pointAheadOf(0, 240);   // 200 + MARGIN(20) < 240
+    assert.strictEqual(isLidarCollision(pt.x, pt.y, 0, 0, scan as any, MARGIN), true);
+  });
+});
+
 describe('isLidarCollision 角度环绕', () => {
   it('car.angle=190°（原始值 > π）：正前方障碍 + 轨迹越过 → 判碰撞', () => {
     const carAngle = 190 * Math.PI / 180;          // 3.316 rad，超过 π 的原始值

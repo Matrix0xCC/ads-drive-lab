@@ -61,7 +61,6 @@ export function isLidarCollision(
   const distances = lidarScan.distances;
   const confidences = lidarScan.confidences;
   const maxDist = MAX_SENSOR_DIST as number;
-  const coneHalf = ptDist < 30 ? 6 : ptDist < 80 ? 4 : 2;
 
   // 线性扫描找最近射线（61 条射线，O(61) 完全足够）
   // 归一化必须先取模再折叠：扫描角是未归一化的绝对角（car.angle 可累积
@@ -75,12 +74,23 @@ export function isLidarCollision(
     if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
   }
 
-  // 检查锥形范围内所有射线
-  for (let offset = -coneHalf; offset <= coneHalf; offset++) {
+  // 锥形搜索：每条命中射线按其"命中距离处的横向窗口"（±1.5m 换算成角宽）
+  // 判定是否与轨迹点方向属同一威胁——越远角宽越小。固定角度带宽（旧版
+  // ±12°/±8°/±4°）在远距离覆盖过宽：50m 目标的 ±4° 锥在 100m 处覆盖 ±7m，
+  // 会把正常侧向绕行判成碰撞（2026-09-19 第七轮暴露、第八轮单变量验证）。
+  const RAY_SPACING = Math.PI / 90;   // 2° 角分辨率
+  const CONE_LATERAL = 6;             // 横向窗口半宽（仿真单位 = 1.5m）
+  const MAX_CONE_RAYS = 8;            // 硬上限 ±16°（近距离宽锥）
+  for (let offset = -MAX_CONE_RAYS; offset <= MAX_CONE_RAYS; offset++) {
     const idx = bestIdx + offset;
     if (idx < 0 || idx >= distances.length) continue;
     const lidarDist = distances[idx] as number;
     if (lidarDist >= maxDist - 1) continue;  // 无命中或已过滤 → 安全
+
+    // 与"该命中距离处 ±CONE_LATERAL 横向窗口"的角宽比较
+    const angDiff = Math.abs(offset) * RAY_SPACING;
+    const latTol = Math.atan2(CONE_LATERAL, Math.max(lidarDist, 1)) + RAY_SPACING;
+    if (angDiff > latTol) continue;
 
     // 置信度调整：低置信命中可能是边界边缘，用更保守的余量
     const conf = confidences && idx < confidences.length ? confidences[idx] : 1;
