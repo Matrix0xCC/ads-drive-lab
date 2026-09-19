@@ -12,6 +12,7 @@ import { rad, px, pxps, SIM_UNITS_PER_METER } from './shared/dimensions.js';
 import { buildRoadGraph, findRoute, findClosestPoint, RoadGraph } from './algo/routePlanner.js';
 import { CarState } from './shared/types.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { ReplayController } from './replay.js';
 
 // ═══════════════════════════════════════════════════
 // 上下文接口
@@ -39,6 +40,8 @@ export interface UIContext {
   setClickStartIdx: (idx: number | null) => void;
   getClickStartIdx: () => number | null;
   getRouteState: () => string;
+  /** 回放控制器（main.ts 创建并接入渲染循环） */
+  replay: ReplayController;
 }
 
 // ═══════════════════════════════════════════════════
@@ -212,5 +215,66 @@ export function setupUI(ctx: UIContext) {
         ctx.onRouteSet(r, startIdx);
       }
     }
+  });
+
+  // ── 回放 ──
+  const replayBar = document.getElementById('replay-bar') as HTMLDivElement | null;
+  const timeline = document.getElementById('replay-timeline') as HTMLInputElement | null;
+  const stepLabel = document.getElementById('replay-step-label');
+  const markersBox = document.getElementById('replay-markers');
+  const replay = ctx.replay;
+
+  function renderMarkers() {
+    if (!markersBox) return;
+    markersBox.innerHTML = '';
+    const total = replay.state.totalSteps || 1;
+    for (const step of replay.state.markers) {
+      const dot = document.createElement('div');
+      dot.className = 'replay-marker';
+      dot.style.left = `${(step / total) * 100}%`;
+      dot.title = `问题帧 ${step}`;
+      dot.addEventListener('click', () => replay.seekStep(step));
+      markersBox.appendChild(dot);
+    }
+  }
+
+  document.getElementById('btn-replay-mode')?.addEventListener('click', async () => {
+    const runs = await ReplayController.listRuns();
+    if (runs.length === 0) {
+      alert('没有可回放的运行。先执行: npm run sim -- --scenario scenarios/oval-cruise.json');
+      return;
+    }
+    const choice = prompt('选择运行（输入编号）:\n' + runs.map((r, i) => `${i}: ${r.label}`).join('\n'), '0');
+    if (choice === null) return;
+    const idx = Number(choice);
+    if (Number.isNaN(idx) || !runs[idx]) return;
+    debug.paused = true;                       // 暂停实时仿真
+    await replay.load(runs[idx].id);
+    if (replayBar) replayBar.style.display = 'flex';
+    renderMarkers();
+  });
+
+  document.getElementById('btn-replay-play')?.addEventListener('click', () => replay.toggle());
+  document.getElementById('btn-replay-prev')?.addEventListener('click', () => replay.seekStep(replay.state.currentStep - 1));
+  document.getElementById('btn-replay-next')?.addEventListener('click', () => replay.seekStep(replay.state.currentStep + 1));
+  (document.getElementById('replay-speed') as HTMLSelectElement | null)
+    ?.addEventListener('change', (e: any) => replay.setSpeed(Number(e.target.value)));
+  document.getElementById('btn-replay-close')?.addEventListener('click', () => {
+    replay.close();
+    if (replayBar) replayBar.style.display = 'none';
+    debug.paused = false;                      // 恢复实时仿真
+  });
+  timeline?.addEventListener('input', () => replay.seekStep(Number(timeline.value)));
+  replay.onChange = () => {
+    if (timeline) {
+      timeline.value = String(Math.floor(replay.state.currentStep));
+      timeline.max = String(replay.state.totalSteps);
+    }
+    if (stepLabel) stepLabel.textContent = `${Math.floor(replay.state.currentStep)} / ${replay.state.totalSteps}`;
+  };
+  window.addEventListener('keydown', (e) => {
+    if (!replay.state.active || e.target instanceof HTMLInputElement) return;
+    if (e.key === 'ArrowLeft') replay.seekStep(replay.state.currentStep - 1);
+    if (e.key === 'ArrowRight') replay.seekStep(replay.state.currentStep + 1);
   });
 }

@@ -6,6 +6,7 @@ import { SIM_W, SIM_H, FIXED_DT, SimEngine } from './sim/engine.js';
 import { initScene, updateScene, resetSceneCache } from './env/renderer.js';
 import { MAP_PRESETS, DEFAULT_MAP } from './env/mapDefinitions.js';
 import { setupUI, updateInspectPanel } from './ui.js';
+import { ReplayController } from './replay.js';
 
 const W = SIM_W, H = SIM_H;
 const canvas = document.getElementById('canvas') as HTMLCanvasElement;
@@ -25,6 +26,8 @@ document.getElementById('hud-map')!.textContent = engine.mapDef.name;
 
 // ui.ts 右键路由状态机（SETTING_START/SETTING_GOAL）的起点暂存
 let clickStartIdx: number | null = null;
+
+const replay = new ReplayController(scene, lidarLines);
 
 setupUI({
   W, H, canvas, camera, scene, controls, recorder,
@@ -47,6 +50,7 @@ setupUI({
   setClickStartIdx(idx: number | null) { clickStartIdx = idx; },
   getClickStartIdx: () => clickStartIdx,
   getRouteState: () => engine.routeState,
+  replay,
 });
 
 engine.bus.subscribe('control:state', ({ snapshot, lidarScan, trajectory, state }: any) => {
@@ -65,7 +69,9 @@ function gameLoop(now: number) {
   const realDt = Math.min(0.1, (now - lastTime) / 1000);
   lastTime = now;
 
-  if (!debug.paused) {
+  if (replay.state.active) {
+    replay.update(realDt);            // 回放模式：只推进回放时钟，不步进 engine
+  } else if (!debug.paused) {
     acc += realDt;
     let n = 0;
     while (acc >= FIXED_DT && n < MAX_CATCHUP) {

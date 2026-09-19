@@ -32,6 +32,17 @@
     }
     #map-select button:hover { background: #444; }
 
+    #replay-bar button, #replay-bar select {
+      background: #333; color: #fff; border: 1px solid #666;
+      padding: 4px 8px; font-family: monospace; font-size: 12px;
+      border-radius: 4px; cursor: pointer;
+    }
+    #replay-bar button:hover { background: #444; }
+    .replay-marker {
+      position: absolute; top: 0; width: 6px; height: 6px; margin-left: -3px;
+      border-radius: 50%; background: #ff4444; cursor: pointer; pointer-events: auto;
+    }
+
     #hud-instructions {
       position: absolute; bottom: 10px; left: 15px;
       z-index: 10; pointer-events: none;
@@ -55,6 +66,28 @@
       <button id="btn-export" title="导出记录">&#128190;</button>
       <button id="btn-import" title="导入记录">&#128194;</button>
       <button id="btn-pause" title="暂停/继续 (Space)">&#9208;</button>
+      <button id="btn-replay-mode" title="回放已归档运行">&#9194;</button>
+    </div>
+
+    <!-- 回放栏 -->
+    <div id="replay-bar" style="display:none;position:absolute;bottom:10px;left:50%;transform:translateX(-50%);
+      z-index:30;background:rgba(0,0,0,0.85);padding:8px 12px;border-radius:6px;
+      gap:8px;align-items:center;color:#fff;font-family:monospace;font-size:12px;width:900px;">
+      <button id="btn-replay-play" title="播放/暂停">&#9199;</button>
+      <div id="replay-track" style="position:relative;flex:1;">
+        <input id="replay-timeline" type="range" min="0" max="0" value="0" style="width:100%;">
+        <div id="replay-markers" style="position:absolute;left:0;right:0;top:-2px;height:8px;pointer-events:none;"></div>
+      </div>
+      <span id="replay-step-label">0 / 0</span>
+      <select id="replay-speed">
+        <option value="0.5">0.5&times;</option>
+        <option value="1" selected>1&times;</option>
+        <option value="2">2&times;</option>
+        <option value="4">4&times;</option>
+      </select>
+      <button id="btn-replay-prev" title="上一帧">&lang;</button>
+      <button id="btn-replay-next" title="下一帧">&rang;</button>
+      <button id="btn-replay-close" title="退出回放">&times;</button>
     </div>
 
     <!-- HUD -->
