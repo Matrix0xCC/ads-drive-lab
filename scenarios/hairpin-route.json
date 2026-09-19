@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "name": "hairpin-route",
+  "map": "hairpin",
+  "seed": 7,
+  "duration": 120,
+  "obstacles": { "mode": "random", "count": 3 },
+  "route": { "startS": 0, "goalS": 230 }
+}

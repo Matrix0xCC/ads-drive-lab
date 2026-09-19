@@ -58,6 +58,16 @@ export function runSafetyChecks(det: Detector, rec: FrameRecord): void {
     }
   }
 
+  if (rec.type === 'event' && rec.kind === 'bounds_reset') {
+    // ②b 复位事件：车体已越出赛道被强拉回中心线。
+    // 必须单独处理——物理步进→复位→发布记录在同一 tick 内完成，
+    // |l| 超限的瞬间不会出现在 step 记录里（见 ② 的逐帧判定兜底）。
+    det.merger.add({
+      check: 'off_track', category: 'safety', severity: 'high', step: rec.step,
+      summary: '车体越出赛道边界并触发复位', details: rec.payload,
+    });
+  }
+
   if (rec.type === 'plan') {
     det.lastPlanRec = rec;
     // ③ EMERGENCY 状态

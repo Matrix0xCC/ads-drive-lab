@@ -12,7 +12,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm run typecheck   # 仅类型检查
 npm run build       # tsc 编译到 dist/
 npm run watch       # 监听模式
-npm test            # tsc + node --test dist/js/test/plan/
+npm test            # tsc + node --test dist/js/test/
+
+# headless 仿真（运行 + 归档 + 检测 + 报告）
+npm run sim -- --scenario scenarios/oval-avoid-1.json    # 场景文件
+npm run sim -- --map oval --obstacles 4 --seed 42        # 快速随机场景
+# 参数：--scenario --map --obstacles --seed --duration --out --fail-on-issue
 
 # 单个测试文件（需先编译）
 npx tsc && node --test dist/js/test/plan/planner.test.js
@@ -48,9 +53,12 @@ requestAnimationFrame 主循环 (~60Hz)
 
 - `js/env/` — 纯环境模拟（赛道/障碍物/车辆物理/定位噪声/渲染），不含决策逻辑
 - `js/algo/` — 感知（perception）、规划（plan/）、控制（control）、全局路径（routePlanner）
-- `js/shared/` — 接口契约（types/interfaces/）、量纲系统（dimensions.ts）、debug、recorder
-- `js/ui.ts` — 全部 DOM 交互（无 `ui/` 目录），`js/env/renderer/` — Three.js 渲染
-- `js/test/plan/` — node:test 单元测试（`.test.ts`，编译后运行）
+- `js/sim/` — SimEngine 共用核心（浏览器/headless 同一管线装配）+ 场景加载（scenario.ts）
+- `js/headless/` — headless CLI（run.ts）、归档（archive.ts）、检测器（detector.ts + checks/）、报告（report.ts）
+- `js/shared/` — 接口契约（types/interfaces/，含归档记录 schema）、量纲系统（dimensions.ts）、rng、debug、recorder
+- `js/ui.ts` / `js/replay.ts` — DOM 交互与回放控制器；`js/env/renderer/` — Three.js 渲染
+- `scenarios/` — 场景用例（入库）；`runs/` — 运行归档（gitignore）
+- `js/test/` — node:test 单元测试（`.test.ts`，编译后运行）
 
 ### 核心设计约定
 
@@ -84,6 +92,10 @@ Pure Pursuit：δ = atan2(2·L·sin α, ld)，预瞄距离 = clamp(0.4×speed, 1
 
 - `shared/debug.ts` — 跨模块共享调试对象，各模块写入内部状态，ui.ts 的 inspect 面板读取展示
 - `shared/recorder.ts` — 15Hz 录像、导出/导入 JSON、`analyzeRecording()` 检测 emergency/近距/摇摆帧
+
+### Headless 运行与归档（AI 自助测试流程）
+
+`npm run sim -- --scenario ...` → 产出 `runs/<id>/`：`report.md`（判定+问题+指标+钻取指引）、`frames.jsonl`（逐帧全量流，typed records，可 grep）、`world.json`（真值）、`issues.json`、`summary.json`。工作流：先读 `report.md` → 按指引 `grep '"type":"plan"' frames.jsonl` 钻取 → 改代码 → **同场景同种子复跑**对比（确定性保证逐帧一致）。四类自动检测：安全/感知/规划行为/跟踪任务；车辆无 route 时保持静止（与浏览器一致），行驶类场景必须带 route。浏览器可用回放模式打开任意 runs/<id> 查看现场。
 
 ## 开发规范
 

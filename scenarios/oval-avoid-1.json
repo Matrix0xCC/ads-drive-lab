@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "name": "oval-avoid-1",
+  "map": "oval",
+  "seed": 42,
+  "duration": 60,
+  "obstacles": {
+    "mode": "explicit",
+    "list": [
+      { "s": 120, "l": 2.5, "w": 1.5, "len": 3.0 },
+      { "s": 135, "l": -2.5, "w": 1.5, "len": 3.0 }
+    ]
+  },
+  "route": { "startS": 0, "goalS": 260 }
+}

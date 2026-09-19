@@ -33,13 +33,13 @@ describe('planning: state_flapping', () => {
 });
 
 describe('planning: close_call', () => {
-  it('最近命中 <10m 且速度 >5m/s → issue；含紧急制动事件单独记录', () => {
+  it('最近命中 <5m 且速度 >5m/s → issue；含紧急制动事件单独记录', () => {
     const det = new Detector({}, { track: straightTrack() as any, obstacles: [] });
     det.feed({ type: 'step', t: 0.1, step: 1,
       car: { x: px(0), y: px(0), angle: 0, speed: 250, steerAngle: 0 }, control: null });
     det.feed({ type: 'perception', t: 0.1, step: 1,
       scan: { angles: [], distances: [], rawDistances: [], confidences: [] },
-      stats: { rawHits: 1, filteredHits: 1, frontDist: 100, minDist: px(30) } });  // 7.5m
+      stats: { rawHits: 1, filteredHits: 1, frontDist: 100, minDist: px(15) } });  // 3.75m
     det.feed(event(2, 'emergency_brake', { frontDist: 30 }));
     const issues = det.finish();
     assert.ok(issues.find(i => i.check === 'close_call'));

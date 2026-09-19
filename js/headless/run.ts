@@ -13,25 +13,29 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { execFileSync } from 'node:child_process';
-import * as process from 'node:process';
+import process from 'node:process';
 import { MessageBus } from '../messageBus.js';
 import { SimEngine, FIXED_DT } from '../sim/engine.js';
 import { parseScenario, buildScenarioWorld, Scenario } from '../sim/scenario.js';
 import { ArchiveWriter, updateRunsIndex } from './archive.js';
-import { FrameRecord, RunMeta, WorldFile, RunSummary } from '../shared/types.js';
+import { Detector, DetectorConfig } from './detector.js';
+import { verdictOf, buildSummary, buildReportMd } from './report.js';
+import { FrameRecord, RunMeta, WorldFile } from '../shared/types.js';
 
 interface CliArgs {
   scenario?: string;
   map?: string;
   obstacles?: number;
-  seed: number;
-  duration: number;
+  /** undefined = 未显式指定（文件场景保留自身 seed，随机场景用时间戳） */
+  seed?: number;
+  /** undefined = 未显式指定（场景文件保留自身 duration） */
+  duration?: number;
   out?: string;
   failOnIssue: boolean;
 }
 
 export function parseArgs(argv: string[]): CliArgs {
-  const a: CliArgs = { seed: Date.now() % 1000000, duration: 60, failOnIssue: false };
+  const a: CliArgs = { failOnIssue: false };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     if (k === '--scenario') a.scenario = argv[++i];
@@ -109,14 +113,19 @@ function toWorldFile(scenario: Scenario, engine: SimEngine, route: any): WorldFi
 function main(): void {
   const args = parseArgs(process.argv.slice(2));
 
-  // 场景：文件模式或 CLI 随机模式
-  const scenario: Scenario = args.scenario
-    ? parseScenario(JSON.parse(fs.readFileSync(args.scenario, 'utf8')))
-    : parseScenario({
-        version: 1, name: `cli-${args.map ?? 'oval'}`, map: args.map ?? 'oval',
-        seed: args.seed, duration: args.duration,
-        obstacles: { mode: 'random', count: args.obstacles ?? 4 },
-      });
+  // 场景：文件模式或 CLI 随机模式；显式 CLI 参数覆盖场景字段
+  let scenario: Scenario;
+  if (args.scenario) {
+    scenario = parseScenario(JSON.parse(fs.readFileSync(args.scenario, 'utf8')));
+    if (args.seed !== undefined) scenario.seed = args.seed;
+    if (args.duration !== undefined) scenario.duration = args.duration;
+  } else {
+    scenario = parseScenario({
+      version: 1, name: `cli-${args.map ?? 'oval'}`, map: args.map ?? 'oval',
+      seed: args.seed ?? (Date.now() % 1000000), duration: args.duration ?? 60,
+      obstacles: { mode: 'random', count: args.obstacles ?? 4 },
+    });
+  }
 
   const built = buildScenarioWorld(scenario, 1800, 800);
   const engine = new SimEngine(new MessageBus('headless', false), built.worldCfg);
@@ -130,9 +139,20 @@ function main(): void {
   const archive = new ArchiveWriter(runDir);
   archive.writeWorld(toWorldFile(scenario, engine, built.route));
 
-  // 订阅归档（同步总线：发布顺序 = 记录顺序）
+  // 检测器（阈值可由场景 checks 覆盖；路线信息供超时/停滞检查）
+  const det = new Detector(scenario.checks as Partial<DetectorConfig> | undefined, {
+    track: engine.track, obstacles: engine.obstacles,
+  });
+  det.routeActive = built.route !== null;
+  det.routeLength = built.route ? (built.route.length as number) : null;
+
+  // 订阅归档 + 检测（同步总线：发布顺序 = 记录顺序）
   for (const topic of ARCHIVE_TOPICS) {
-    engine.bus.subscribe(topic, (p: any) => archive.appendRecord(recordFrom(topic, p)));
+    engine.bus.subscribe(topic, (p: any) => {
+      const r = recordFrom(topic, p);
+      archive.appendRecord(r);
+      det.feed(r);
+    });
   }
 
   // 运行循环：duration 上限；到达后继续 1s（供停车检查）再停
@@ -144,26 +164,27 @@ function main(): void {
     if (arrivedAtStep !== null && engine.stepCount >= arrivedAtStep + 60) break;
   }
 
-  // TODO(Task 7-11): 检测 + 报告；当前先写占位 verdict，保证 E2E 可用
+  // 检测 → 报告 → 归档收尾
+  const issues = det.finish();
+  const { verdict, counts } = verdictOf(issues);
+  const summary = buildSummary(det, { steps: engine.stepCount, simTime: engine.simTime });
   const meta: RunMeta = {
     version: 1, id: args.out ? path.basename(runDir) : id,
     scenario: scenario.name, map: scenario.map, seed: scenario.seed,
     durationS: engine.simTime, steps: engine.stepCount,
     gitCommit: gitCommitOf(), nodeVersion: process.version, createdAt: new Date().toISOString(),
-    verdict: 'PASS', issueCounts: { high: 0, medium: 0, low: 0 },
+    verdict, issueCounts: counts,
   };
-  archive.finalize({
-    issues: [],
-    summary: { steps: engine.stepCount, simSeconds: engine.simTime } as RunSummary,
-    reportMd: '# 占位（Task 11 生成）',
-    meta,
-  });
+  const reportMd = buildReportMd({ meta, issues, summary, scenario });
+  archive.finalize({ issues, summary, reportMd, meta });
   if (!args.out) {
     updateRunsIndex(runsRoot, { id: meta.id, scenario: scenario.name, map: scenario.map,
-      seed: scenario.seed, createdAt: meta.createdAt, verdict: meta.verdict,
-      issues: meta.issueCounts, durationS: meta.durationS });
+      seed: scenario.seed, createdAt: meta.createdAt, verdict,
+      issues: counts, durationS: meta.durationS });
   }
   console.log(`运行完成: ${runDir}  steps=${engine.stepCount}`);
+  console.log(`判定: ${verdict} (high=${counts.high} medium=${counts.medium} low=${counts.low})`);
+  process.exitCode = args.failOnIssue && verdict === 'ISSUES' ? 1 : 0;
 }
 
 main();

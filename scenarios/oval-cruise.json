@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "name": "oval-cruise",
+  "map": "oval",
+  "seed": 1,
+  "duration": 90,
+  "obstacles": { "mode": "random", "count": 0 },
+  "route": { "startS": 0, "goalS": 260 }
+}

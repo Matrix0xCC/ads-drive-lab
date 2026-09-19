@@ -47,10 +47,10 @@ export interface DetectorConfig {
 export const DEFAULT_DETECTOR_CONFIG: DetectorConfig = {
   gpsSigma: m(1.25), gpsThresholdSigma: 3,
   phantomTolerance: m(1.0), phantomRate: 0.01,
-  closeCallDist: m(10), closeCallSpeed: mps(5),
+  closeCallDist: m(5), closeCallSpeed: mps(5),
   flappingWindowSteps: 60, flappingCount: 4,
   lateralJump: m(10), lateralWindowPlans: 15, lateralCount: 3,
-  trackingErr: m(1.0), stallSpeed: mps(0.5), stallSteps: 180, arriveSpeed: mps(1),
+  trackingErr: m(2.0), stallSpeed: mps(0.5), stallSteps: 180, arriveSpeed: mps(1),
   mergeGapSteps: 30,
 };
 
@@ -144,6 +144,25 @@ export class Detector {
     runPerceptionChecks(this, rec);
     runPlanningChecks(this, rec);
     runMissionChecks(this, rec);
+    this._accumulate(rec);
+  }
+
+  /** summary 聚合（报告用）：速度/最小障碍距离/状态计数/事件计数 */
+  private _accumulate(rec: FrameRecord): void {
+    if (rec.type === 'step') {
+      const s = rec.car.speed;
+      this.speedSum += s;
+      this.speedN += 1;
+      if (s > this.speedMax) this.speedMax = s;
+    } else if (rec.type === 'perception') {
+      const md = rec.stats?.minDist;
+      if (typeof md === 'number' && md < this.minObstacleDist) this.minObstacleDist = md;
+    } else if (rec.type === 'plan') {
+      this.stateCounts[rec.state] = (this.stateCounts[rec.state] ?? 0) + 1;
+    } else if (rec.type === 'event') {
+      if (rec.kind === 'emergency_brake') this.emergencyBrakeCount += 1;
+      else if (rec.kind === 'bounds_reset') this.boundsResetCount += 1;
+    }
   }
 
   finish(): Issue[] {

@@ -52,11 +52,17 @@ export function runPerceptionChecks(det: Detector, rec: FrameRecord): void {
       }
     }
 
-    // ⑤ 漏检：逐真值障碍，检查 FOV 内是否被照射
+    // ⑤ 漏检：逐真值障碍，检查 FOV 内是否被照射。
+    // 角分辨率门槛：2° 分辨率的 LiDAR 在远处对窄障碍必然存在采样别名
+    // （障碍角宽 < 角分辨率时可能落在两条射线之间），只有障碍角宽
+    // ≥ 角分辨率时才"必须被看见"，否则不判漏检。
+    const angRes = (Math.PI * 2 / 3) / (angles.length - 1);   // FOV / (射线数-1)
     for (const o of det.world.obstacles) {
       const dx = (o.x as number) - car.x, dy = (o.y as number) - car.y;
       const dist = Math.hypot(dx, dy);
       if (dist >= (MAX_SENSOR_DIST as number)) continue;
+      const angularWidth = Math.atan2((o.width as number) / 2, Math.max(dist, 1)) * 2;
+      if (angularWidth < 2 * angRes) continue;   // 角宽 < 2 倍射线间距：必然存在采样别名
       const rel = Math.atan2(dy, dx) - car.angle;
       const relNorm = Math.atan2(Math.sin(rel), Math.cos(rel));
       if (Math.abs(relNorm) > FOV / 2 - 0.05) continue;    // FOV 外
