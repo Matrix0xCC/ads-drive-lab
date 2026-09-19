@@ -17,6 +17,7 @@ import { Px, PxPerSec, m, mps } from '../shared/dimensions.js';
 import { buildFrenetReference } from '../algo/plan/frenet.js';
 import { runSafetyChecks } from './checks/safety.js';
 import { runPerceptionChecks } from './checks/perception.js';
+import { runPlanningChecks } from './checks/planning.js';
 
 export interface DetectorConfig {
   // 安全（阈值由检查模块各自使用）
@@ -140,6 +141,7 @@ export class Detector {
   feed(rec: FrameRecord): void {
     runSafetyChecks(this, rec);
     runPerceptionChecks(this, rec);
+    runPlanningChecks(this, rec);
   }
 
   finish(): Issue[] {
