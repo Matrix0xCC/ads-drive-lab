@@ -13,6 +13,8 @@ export type {
   FrenetState, FrenetReference,
   TrajectoryPoint, Trajectory,
   Route, GPSReading,
+  RunMeta, ObstaclePlain, WorldFile, BaseRecord, StepRecord, PerceptionRecord,
+  PlanRecord, GpsRecord, EventRecord, FrameRecord, Issue, RunSummary, RunsIndexEntry,
 } from './types/interfaces.js';
 
 export {

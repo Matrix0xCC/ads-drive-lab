@@ -14,3 +14,8 @@ export type {
   FrenetState, FrenetReference, TrajectoryPoint, Trajectory, Route, GPSReading,
 } from './interfaces/planning.js';
 export { createTrajectory, createRoute, createGPSReading } from './interfaces/planning.js';
+
+export type {
+  RunMeta, ObstaclePlain, WorldFile, BaseRecord, StepRecord, PerceptionRecord,
+  PlanRecord, GpsRecord, EventRecord, FrameRecord, Issue, RunSummary, RunsIndexEntry,
+} from './interfaces/archive.js';
