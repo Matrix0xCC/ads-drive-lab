@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "name": "batch-oval-s2",
+  "map": "oval",
+  "seed": 2,
+  "duration": 60,
+  "obstacles": {
+    "mode": "random",
+    "count": 5
+  },
+  "route": {
+    "startS": 0,
+    "goalS": 260
+  }
+}

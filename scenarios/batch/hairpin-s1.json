@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "name": "batch-hairpin-s1",
+  "map": "hairpin",
+  "seed": 1,
+  "duration": 90,
+  "obstacles": {
+    "mode": "random",
+    "count": 4
+  },
+  "route": {
+    "startS": 0,
+    "goalS": 230
+  }
+}
