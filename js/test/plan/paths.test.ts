@@ -83,5 +83,27 @@ describe('路径层：碰撞判定与选路', () => {
     const ord = r.ranked.map(p => p.sBlock);
     for (let i = 1; i < ord.length; i++) assert.ok(ord[i] <= ord[i - 1], '应按 sBlock 降序');
     assert.ok(r.sBlock === ord[0]);
+    assert.strictEqual(r.allBlockedFar, true, '近距全阻塞必然全程全阻塞');
+    assert.strictEqual(r.sBlockFar, r.best.sBlockFar, '全程停车基准=最晚碰撞候选');
+  });
+});
+
+describe('路径层：提交窗口（横向耐心）', () => {
+  it('窗口外障碍（300u=75m）→ 本车道不判近距阻塞；全程记录远距阻塞；停车线不触发', () => {
+    const r = solve(blockedScan(300, 0.025));
+    const inLane = r.ranked.find(p => Math.abs((p.targetL as number) - LO) < 1)!;
+    assert.ok(inLane && !inLane.blocked, '窗口外不应判近距阻塞（不提前选边）');
+    assert.ok(inLane.sBlockFar < Infinity, '但全程应记录远距阻塞（供停车线）');
+    assert.strictEqual(r.allBlocked, false);
+    assert.strictEqual(r.best.targetL, inLane.targetL, '近距全清 → 最优应为本车道');
+    assert.strictEqual(r.allBlockedFar, false, '侧向候选全程畅通 → 停车线不触发');
+    assert.strictEqual(r.sBlockFar, Infinity);
+  });
+
+  it('窗口内障碍（200u=50m）→ 本车道判阻塞，最优选侧', () => {
+    const r = solve(blockedScan(200, 0.025));
+    const inLane = r.ranked.find(p => Math.abs((p.targetL as number) - LO) < 1)!;
+    assert.ok(inLane && inLane.blocked, '窗口内应判阻塞');
+    assert.ok(Math.abs((r.best.targetL as number) - LO) > 8, '应选侧向路径');   // >2m
   });
 });

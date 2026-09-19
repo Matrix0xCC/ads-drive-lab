@@ -6,7 +6,13 @@
 //
 // 【为什么路径可以看很远】l(s) 是纯几何、无时间耦合——视程不受 2s 轨迹时域限制。
 // 旧的耦合采样里"本车道被障碍判阻塞"发生得太晚（第七轮晚横移分析），
-// 解耦后路径层用 120m 视程提前决策。
+// 解耦后路径层用 120m 视程做碰撞检查。
+//
+// 【横向耐心、纵向保守】横向排名只看 COMMIT_WINDOW 内的阻塞（晚承诺），
+// 停车线由全程阻塞（allBlockedFar）触发。旧版直接用 120m 视程排名选路，
+// 障碍还在几十米外就提前承诺到侧向路径，随后新障碍堵死该侧 → 死口袋
+// （hairpin-s5 批量回归实测，plan#44 提前选边）。两个窗口分别扫描：
+// 近距决定"走哪条"，远距只决定"要不要停"。
 
 import { FrenetReference, LidarScan } from '../../shared/types.js';
 import { Radians, Px, DimLess, m, px, perpx, dimless } from '../../shared/dimensions.js';
@@ -19,6 +25,9 @@ export const PATH_HORIZON: Px = m(120);
 /** 横移发展距离：在前 40m 内完成横移到目标，其后保持偏移。
  *  若横移按整段 120m 发展，到障碍处偏移还太小（测试实证），不能完成避让。 */
 export const PATH_DEVELOP: Px = m(40);
+/** 横向选路提交窗口：只有窗口内的阻塞参与候选排名（"横向耐心"——障碍还远时
+ *  不提前选边；进入窗口再决策仍有 60m 完成横移）。停车线不看此窗口。 */
+export const COMMIT_WINDOW: Px = m(60);
 export const PATH_STEPS = 40;
 
 const W_PATH_CENTER = 0.3;    // 中心偏离²（沿用旧 W_CENTER 量级）
@@ -29,9 +38,14 @@ const NUDGE = m(2.5);         // 挪移档横向偏移
 export interface PathCandidate {
   targetL: Px;
   points: { s: number; l: Px; x: Px; y: Px; yaw: Radians }[];
+  /** 窗口（COMMIT_WINDOW）内是否被堵——决定横向排名 */
   blocked: boolean;
-  /** 首次碰撞命中的绝对弧长（blocked 时有效，否则 Infinity） */
+  /** 窗口内首次碰撞命中的绝对弧长（blocked 时有效，否则 Infinity） */
   sBlock: number;
+  /** 全程（PATH_HORIZON）内是否被堵——决定停车线 */
+  blockedFar: boolean;
+  /** 全程首次碰撞命中的绝对弧长（blockedFar 时有效，否则 Infinity） */
+  sBlockFar: number;
   cost: number;
   /** 合成阶段按相对弧长求横向偏移（供 l(s(t)) 采样）；内部 clamp 到 [0, PATH_HORIZON] */
   evalL(s: number): Px;
@@ -39,9 +53,11 @@ export interface PathCandidate {
 
 export interface PathLayerResult {
   best: PathCandidate;
-  ranked: PathCandidate[];   // 非阻塞按 cost 升序在前；阻塞按 sBlock 降序在后
-  allBlocked: boolean;
+  ranked: PathCandidate[];   // 窗口内非阻塞按 cost 升序在前；阻塞按 sBlock 降序在后
+  allBlocked: boolean;       // 窗口内全部候选阻塞
   sBlock: number;            // best 的 sBlock（阻塞时）
+  allBlockedFar: boolean;    // 全程无清晰候选 → 停车线触发条件
+  sBlockFar: number;         // 全程下最晚的首个阻塞弧长（allBlockedFar 时有效，否则 Infinity）
 }
 
 /** 线段 AB 到点 P 的最短距离 */
@@ -138,7 +154,6 @@ export function solvePathLayer(o: {
     const latPoly = solveQuintic(o.l0, o.dl0, perpx(0), px(targetL), dimless(0), perpx(0), PATH_DEVELOP as number);
     const evalLat = (sRel: number): Px => latPoly.eval(Math.min(sRel, PATH_DEVELOP as number));
     const points: PathCandidate['points'] = [];
-    let blocked = false, sBlock = Infinity;
     let centerSum = 0, curvSum = 0, prevYaw: number | null = null;
 
     for (let i = 0; i <= PATH_STEPS; i++) {
@@ -155,46 +170,40 @@ export function solvePathLayer(o: {
         curvSum += Math.abs(dyaw);
       }
       prevYaw = cart.yaw as number;
-
-      // 阻塞判定在循环外以"点-线段距离"完成后统一处理（避免采样混叠）
     }
 
-    // 阻塞判定：路径折线到"命中点/命中表面折线"的最短距离 ≤ 间隙。
-    // 用线段而非采样点（路径采样间距 3m > 间隙半径 1.5m，会混叠漏判，实测）。
-    if (!blocked) {
-      // 命中点（孤立点形式）
-      for (const h of hits) {
-        const tol = h.low ? CLEAR_LOW : CLEAR;
-        for (let i = 0; i < points.length - 1 && !blocked; i++) {
-          const a = points[i], b = points[i + 1];
-          const d = segPointDist((a.x as number), (a.y as number), (b.x as number), (b.y as number), h.x, h.y);
-          if (d <= tol) {
-            blocked = true;
-            sBlock = a.s;
+    // 阻塞判定：路径折线到"命中点/命中表面折线"的最短距离 ≤ 间隙，返回沿路径
+    // 首个命中的绝对弧长（Infinity = 无命中）。用线段而非采样点（路径采样间距
+    // 3m > 间隙半径，会混叠漏判，实测）。
+    // 两个窗口分别扫描——近距（COMMIT_WINDOW）决定横向排名，全程决定停车线。
+    const firstBlockArc = (windowRel: number): number => {
+      for (let i = 0; i < points.length - 1; i++) {
+        if (points[i].s - o.s0 > windowRel) break;
+        const a = points[i], b = points[i + 1];
+        for (const h of hits) {
+          const tol = h.low ? CLEAR_LOW : CLEAR;
+          if (segPointDist((a.x as number), (a.y as number), (b.x as number), (b.y as number), h.x, h.y) <= tol) {
+            return a.s;
           }
         }
-        if (blocked) break;
-      }
-      // 命中表面折线（线段-线段距离）
-      for (const sgm of hitSegs) {
-        for (let i = 0; i < points.length - 1 && !blocked; i++) {
-          const a = points[i], b = points[i + 1];
-          const d = segSegDist((a.x as number), (a.y as number), (b.x as number), (b.y as number),
-            sgm.ax, sgm.ay, sgm.bx, sgm.by);
-          if (d <= sgm.tol) {
-            blocked = true;
-            sBlock = a.s;
+        for (const sgm of hitSegs) {
+          if (segSegDist((a.x as number), (a.y as number), (b.x as number), (b.y as number),
+            sgm.ax, sgm.ay, sgm.bx, sgm.by) <= sgm.tol) {
+            return a.s;
           }
         }
-        if (blocked) break;
       }
-    }
+      return Infinity;
+    };
+    const sBlock = firstBlockArc(COMMIT_WINDOW as number);
+    const sBlockFar = firstBlockArc(Infinity);
+    const blocked = sBlock < Infinity;
 
     let cost = W_PATH_CENTER * centerSum / points.length + W_PATH_CURV * curvSum / points.length;
     if (o.prevTargetL !== null && Math.abs(targetL - o.prevTargetL) > 5 && targetL !== 0) cost += W_SWITCH_PATH;
 
     candidates.push({
-      targetL: px(targetL), points, blocked, sBlock, cost,
+      targetL: px(targetL), points, blocked, sBlock, blockedFar: sBlockFar < Infinity, sBlockFar, cost,
       evalL: (s) => evalLat(Math.max(0, Math.min(s, PATH_HORIZON as number))),
     });
   }
@@ -203,5 +212,14 @@ export function solvePathLayer(o: {
   const stopped = candidates.filter(c => c.blocked).sort((a, b) => b.sBlock - a.sBlock);
   const ranked = [...clear, ...stopped];
   const best = ranked[0];
-  return { best, ranked, allBlocked: clear.length === 0, sBlock: best.sBlock };
+  // 停车线基准：全程均被堵时，取"最晚碰撞"（sBlockFar 最大）作为可抵达的最远点
+  const farSorted = candidates.filter(c => c.blockedFar).sort((a, b) => b.sBlockFar - a.sBlockFar);
+  const allBlockedFar = farSorted.length === candidates.length;
+  return {
+    best, ranked,
+    allBlocked: clear.length === 0,
+    sBlock: best.sBlock,
+    allBlockedFar,
+    sBlockFar: allBlockedFar ? farSorted[0].sBlockFar : Infinity,
+  };
 }

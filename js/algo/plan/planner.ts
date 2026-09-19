@@ -10,8 +10,8 @@
 //   2. 车辆投影 + dl/ds
 //   3. ARRIVED 检测
 //   4. 纵向巡航目标（vCap 单值版 + 终点 DECEL 缩放）
-//   5. solvePathLayer → 最优路径（全阻塞时=最晚碰撞的停车基准）
-//   6. solveSpeedLayer → 巡航 / 停车线 / 兜底剖面
+//   5. solvePathLayer → 最优路径（窗口内排名；全程阻塞时给出停车基准）
+//   6. solveSpeedLayer → 巡航 / 停车线（全程阻塞触发）/ 兜底剖面
 //   7. 合成 l(s(t)) → Trajectory；状态机 + 兼容类型标签
 
 import {
@@ -95,8 +95,10 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
   });
 
   // ─── 6. 速度层 ───
-  const stObstacles: STObstacle[] = pathLayer.allBlocked
-    ? [{ sMin: pathLayer.sBlock - fl.s, sMax: pathLayer.sBlock - fl.s + (STOP_ASSUMED_LEN as number), tMin: 0, tMax: Infinity }]
+  // 停车线由"全程阻塞"（allBlockedFar）触发：所有候选在整段视程内都被堵（全宽墙/
+  // 死口袋）才刹车；只要还有候选远端畅通，速度交给 vCap（横向耐心、纵向保守）。
+  const stObstacles: STObstacle[] = pathLayer.allBlockedFar
+    ? [{ sMin: pathLayer.sBlockFar - fl.s, sMax: pathLayer.sBlockFar - fl.s + (STOP_ASSUMED_LEN as number), tMin: 0, tMax: Infinity }]
     : [];
   const speedLayer = solveSpeedLayer({ stObstacles, v0: (car.speed as number) * cosHD, targetV });
 
@@ -116,7 +118,7 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
   _currentState = nextState({
     routeActive,
     nearEnd: routeActive && remainingDist < DECEL_ZONE,
-    allBlocked: pathLayer.allBlocked,
+    allBlockedFar: pathLayer.allBlockedFar,
     stopInfeasible: speedLayer.mode === 'emergency',
     avoiding: Math.abs((pathLayer.best.targetL as number) - (laneOffset as number)) > 3,
   });

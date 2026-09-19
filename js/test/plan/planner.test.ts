@@ -64,9 +64,18 @@ describe('planner 巡航', () => {
     assert.ok(traj.points.length > 0);
   });
 
-  it('前方 75m 障碍 → 提前选侧避让（120m 视程下横移有充分距离）', () => {
+  it('前方 75m 障碍（提交窗口外）→ 选路与无障碍一致：不提前选边（横向耐心）', () => {
     const car = makeCar(100, 0, 0, 120);
-    const traj = plan(makeSnapshot(car), makeBlockedLidar([0], 300, 0.025));   // 单射线（现实尺寸）
+    plan(makeSnapshot(car), makeClearLidar());
+    const freeTargetL = debug.planning!.bestTargetL;
+    plan(makeSnapshot(car), makeBlockedLidar([0], 300, 0.025));   // 单射线（现实尺寸）
+    assert.strictEqual(debug.planning!.bestTargetL, freeTargetL);
+    assert.strictEqual(debug.planning!.speedMode, 'cruise');
+  });
+
+  it('前方 50m 障碍（进入提交窗口）→ 选侧避让', () => {
+    const car = makeCar(100, 0, 0, 120);
+    const traj = plan(makeSnapshot(car), makeBlockedLidar([0], 200, 0.025));   // 单射线
     assert.ok(traj.type !== 'lane_keep');
     assert.ok(traj.type !== 'emergency');
   });
@@ -75,12 +84,6 @@ describe('planner 巡航', () => {
     const car = makeCar(100, 0, 0, 120);
     const traj = plan(makeSnapshot(car), makeBlockedLidar([0], 80));
     assert.strictEqual(traj.type, 'emergency');
-  });
-
-  it('远处 200px 障碍物 → 不触发紧急', () => {
-    const car = makeCar(100, 0, 0, 120);
-    const traj = plan(makeSnapshot(car), makeBlockedLidar([0], 200, 0.025));   // 单射线
-    assert.ok(traj.type !== 'emergency');
   });
 });
 
