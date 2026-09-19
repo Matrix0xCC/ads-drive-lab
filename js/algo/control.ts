@@ -153,8 +153,12 @@ export function control(trajectory: Trajectory, car: CarState): ControlCommand {
   const steerAngle = atan2(2 * (WHEELBASE as number) * (sin(alpha) as number), ld);
 
   // 5. 油门：使用轨迹终点的目标速度（points[0].v 是当前速度，不是目标）
-  const targetSpeed = points[points.length - 1].v;
-  const throttle = Math.max(0.15, Math.min(1, (targetSpeed as number) / (car.maxSpeed as number)));
+  // 终点速度≈0（速度层停车/紧急剖面）→ 油门必须为 0：0.15 怠速下限会把
+  // "停车"变成 6.375m/s 恒速爬行，架空停车语义（批量 A/B 回归根因，2026-09-19）。
+  const targetSpeed = points[points.length - 1].v as number;
+  const throttle = targetSpeed < 1
+    ? 0
+    : Math.max(0.15, Math.min(1, targetSpeed / (car.maxSpeed as number)));
 
   debug.control = {
     lookaheadDist: lookaheadVal,
