@@ -85,3 +85,30 @@ describe('候选横向目标：可行驶域约束', () => {
       `不可避让时应降级到最低速度，实际 ${debug.planning!.bestTargetV / 4}m/s`);
   });
 });
+
+describe('速度适应：按最近障碍距离限速（≈2s 横向机动窗口）', () => {
+  it('障碍 30m 内 → 所有候选 targetV ≤ 17.5m/s', () => {
+    const car = makeCar(100, 0, 0, 150);          // 高速接近
+    plan(makeSnapshot(car), makeBlockedLidar([0], 120));  // 30m
+    for (const c of debug.planning!.candidates) {
+      assert.ok((c.targetV as number) <= (mps(17.5) as number) + 1e-6,
+        `30m 内应限速 17.5m/s，出现 ${c.targetV / 4}m/s`);
+    }
+  });
+
+  it('障碍 50m → 所有候选 targetV ≤ 25m/s', () => {
+    const car = makeCar(100, 0, 0, 150);
+    plan(makeSnapshot(car), makeBlockedLidar([0], 200));  // 50m
+    for (const c of debug.planning!.candidates) {
+      assert.ok((c.targetV as number) <= (mps(25) as number) + 1e-6,
+        `50m 应限速 25m/s，出现 ${c.targetV / 4}m/s`);
+    }
+  });
+
+  it('无障碍 → 不限速（存在 35m/s 候选）', () => {
+    const car = makeCar(100, 0, 0, 150);
+    plan(makeSnapshot(car), makeClearLidar());
+    assert.ok(debug.planning!.candidates.some(c => (c.targetV as number) === (mps(35) as number)),
+      '无障碍时应保留 35m/s 候选');
+  });
+});

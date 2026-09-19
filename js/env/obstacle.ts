@@ -1,34 +1,40 @@
 // ==================== 环境：障碍物生成 ====================
 //
-// 【职责】在赛道上随机生成静态矩形障碍物
+// 【职责】在赛道上随机生成静态障碍物
 //
-// 【生成策略】
-// 1. 从赛道中心线随机采样位置
-// 2. 随机尺寸（宽度 10~25px，高度 6~16px）
-// 3. 随机朝向角
+// 【生成策略】（2026-09-19 现实化，见 ISSUE_HISTORY 遗留问题 #4）
+// 1. 从赛道中心线随机采样位置，横向偏置 ±3m（不再恒定压在中心线上）
+// 2. 尺寸按车辆量级：宽 2-3.5m、长 3-5m（默认参数，仿真单位 = px）
+// 3. 朝向对齐赛道切线 ± 0.3rad 抖动（模拟沿路停放的车辆/杂物，
+//    旧版完全随机朝向会以对角跨占车道）
 //
-// 输入：TrackGeometry + 数量
+// 输入：TrackGeometry + 数量 + 随机源
 // 输出：Obstacle[]
 
 import { TrackGeometry, Obstacle, obstacleToSegments } from '../shared/types.js';
-import { Radians, Px, rad, px } from '../shared/dimensions.js';
+import { Radians, Px, rad, px, m } from '../shared/dimensions.js';
 import { Rng } from '../shared/rng.js';
 
 export { obstacleToSegments };
+
+/** 横向偏置最大值（±3m） */
+const MAX_LATERAL_OFFSET: Px = m(3);
+/** 朝向相对切线抖动最大值（±0.3 rad） */
+const MAX_YAW_JITTER = 0.3;
 
 /**
  * 在赛道上生成随机障碍物
  *
  * @param track   赛道几何数据
  * @param count   目标数量
- * @param minSize 最小宽度（px）
- * @param maxSize 最大宽度（px）
+ * @param minSize 最小宽度（px，默认 8 = 2m）
+ * @param maxSize 最大宽度（px，默认 14 = 3.5m）
  * @param rng     随机源（缺省 Math.random；headless 传入可播种 RNG 以复现）
  * @returns Obstacle[]
  */
 export function generateObstacles(
   track: TrackGeometry, count: number,
-  minSize = 10, maxSize = 25, rng: Rng = Math.random,
+  minSize = 8, maxSize = 14, rng: Rng = Math.random,
 ): Obstacle[] {
   const obstacles: Obstacle[] = [];
   const n = track.centerPoints.length - 1;
@@ -43,11 +49,23 @@ export function generateObstacles(
   for (const idx of indices) {
     if (obstacles.length >= count) break;
     const pt = track.centerPoints[idx];
-    const w = px(minSize + rng() * (maxSize - minSize));
-    const h = px(6 + rng() * 10);
-    const zH = 5 + rng() * 12;  // 3D 高度（仅渲染使用）
-    const angle = rad(rng() * Math.PI * 2);
-    obstacles.push({ x: pt.x, y: pt.y, width: w, height: h, zHeight: zH, angle });
+    const next = track.centerPoints[(idx + 1) % n];
+    const dx = (next.x as number) - (pt.x as number);
+    const dy = (next.y as number) - (pt.y as number);
+    const len = Math.hypot(dx, dy) || 1;
+
+    const w = px(minSize + rng() * (maxSize - minSize));  // 宽 2-3.5m
+    const h = px(12 + rng() * 8);                          // 长 3-5m
+    const zH = 5 + rng() * 12;                             // 3D 高度（仅渲染使用）
+    const offset = (rng() * 2 - 1) * (MAX_LATERAL_OFFSET as number);
+    const nx = -dy / len, ny = dx / len;                   // 赛道法向
+    const angle = rad(Math.atan2(dy, dx) + (rng() * 2 - 1) * MAX_YAW_JITTER);
+
+    obstacles.push({
+      x: px((pt.x as number) + nx * offset),
+      y: px((pt.y as number) + ny * offset),
+      width: w, height: h, zHeight: zH, angle,
+    });
   }
 
   return obstacles;

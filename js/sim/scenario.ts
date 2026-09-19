@@ -145,7 +145,7 @@ export function buildScenarioWorld(scenario: Scenario, width: number, height: nu
     });
   } else {
     const rng = createRng(deriveSeed(scenario.seed, 'obstacles'));
-    obstacles = generateObstacles(track, scenario.obstacles.count, 10, 25, rng);
+    obstacles = generateObstacles(track, scenario.obstacles.count, 8, 14, rng);
   }
 
   let route: Route | null = null;

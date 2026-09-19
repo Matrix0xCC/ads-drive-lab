@@ -48,13 +48,12 @@ describe('SimEngine 路线模式', () => {
     assert.ok((e.car.speed as number) <= (mps(42.5) as number) + 1e-9);
 
     // 黄金基线（防重构回归；数值来自实现后实测值，
-    // 人工核验：5s 前进 ~100m 沿赛道、末速 33.7 m/s、无 NaN。
-    // 2026-09-19 角度源头归一化后更新：normalizeAngle 逐步引入 ~1 ULP
-    // 扰动，x/y 第 13 位有效数字漂移，物理语义不变，speed 完全一致）
-    assert.strictEqual(e.car.x, 1043.0474534107166);
-    assert.strictEqual(e.car.y, 710.5696776418487);
-    assert.strictEqual(e.car.angle, 2.9241545686507044);
-    assert.strictEqual(e.car.speed, 134.8597863124635);
+    // 人工核验：5s 前进 ~100m 沿赛道、末速 27.2m/s（=当前最近障碍的限速值）、无 NaN。
+    // 2026-09-19 更新：速度适应（限速）与障碍生成器现实化各引入一次行为变化）
+    assert.strictEqual(e.car.x, 1048.5396272227804);
+    assert.strictEqual(e.car.y, 709.1712146447594);
+    assert.strictEqual(e.car.angle, 2.9157850486338828);
+    assert.strictEqual(e.car.speed, 108.87548610429882);
   });
 });
 

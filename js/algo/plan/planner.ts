@@ -105,6 +105,18 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
     duration = secs(Math.max(0.5, Math.min(TRAJECTORY_DURATION as number, remainingDist / cs * 1.2)));
   }
 
+  // ─── 4b. 速度适应：最近障碍距离决定速度上限 ───
+  // 横向机动需要 ≈2s 窗口：vCap = clamp(最近障碍距离 / 2, 17.5, 35) m/s
+  // （70m 外不限速；50m → 25；35m 内 → 17.5）。与 DECEL 缩放取更严者，去重。
+  const minObsDist = Math.min(...lidarScan.distances);
+  const vCap = Math.min(mps(35) as number, Math.max(mps(17.5) as number, minObsDist / 2));
+  const capped: PxPerSec[] = [];
+  for (const v of speedTargets) {
+    const c = Math.min(v as number, vCap);
+    if (!capped.some(t => Math.abs((t as number) - c) < 0.5)) capped.push(pxps(c));
+  }
+  speedTargets = capped;
+
   // ─── 5. 候选评估 ───
   const cx = car.x as number, cy = car.y as number;
   let best: Trajectory | null = null;          // 安全候选中的最优

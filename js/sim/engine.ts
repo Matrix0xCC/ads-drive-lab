@@ -104,7 +104,7 @@ export class SimEngine {
     const obsRng: Rng = seed === undefined ? Math.random : createRng(deriveSeed(seed, 'obstacles'));
     this._gpsRng = seed === undefined ? Math.random : createRng(deriveSeed(seed, 'gps'));
     const count = cfg.obstacleCount ?? (3 + Math.floor(obsRng() * 3));
-    this.obstacles = cfg.obstacles ?? generateObstacles(this.track, count, 10, 25, obsRng);
+    this.obstacles = cfg.obstacles ?? generateObstacles(this.track, count, 8, 14, obsRng);
 
     this.car = createCar(this.track.centerPoints[0], this.track.centerPoints[1]);
     if (cfg.carStart) {
