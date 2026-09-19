@@ -1,0 +1,72 @@
+// ==================== 测试：UI 控制器（状态 → 副作用） ====================
+import { describe, it } from 'node:test';
+import assert from 'node:assert';
+import { UiController } from '../../ui/controller.js';
+
+function makeCtl() {
+  const calls = { pause: [] as boolean[], mode: [] as string[], insp: [] as boolean[], hint: [] as string[] };
+  const ctl = new UiController({
+    onLivePaused: (p) => calls.pause.push(p),
+    onMode: (m) => calls.mode.push(m),
+    onInspector: (o) => calls.insp.push(o),
+    onHint: (h) => calls.hint.push(h),
+  }, () => 'NONE');
+  return { ctl, calls };
+}
+
+describe('UiController.dispatch', () => {
+  it('LIVE TOGGLE_PAUSE → onLivePaused(true) + 提示变为已暂停', () => {
+    const { ctl, calls } = makeCtl();
+    ctl.dispatch({ type: 'TOGGLE_PAUSE' });
+    assert.deepStrictEqual(calls.pause, [true]);
+    assert.strictEqual(calls.hint[calls.hint.length - 1], '已暂停（Space 继续）');
+  });
+
+  it('REPLAY 中 TOGGLE_PAUSE → 零副作用（状态未变）', () => {
+    const { ctl, calls } = makeCtl();
+    ctl.dispatch({ type: 'ENTER_REPLAY' });
+    calls.pause.length = calls.mode.length = calls.hint.length = 0;
+    ctl.dispatch({ type: 'TOGGLE_PAUSE' });
+    assert.deepStrictEqual(calls.pause, []);
+    assert.deepStrictEqual(calls.mode, []);
+    assert.deepStrictEqual(calls.hint, []);
+  });
+
+  it('回放进出：onMode 触发、onLivePaused 从不触发（暂停保持）', () => {
+    const { ctl, calls } = makeCtl();
+    ctl.dispatch({ type: 'TOGGLE_PAUSE' });          // 先暂停
+    calls.pause.length = 0;
+    ctl.dispatch({ type: 'ENTER_REPLAY' });
+    ctl.dispatch({ type: 'EXIT_REPLAY' });
+    assert.deepStrictEqual(calls.mode, ['REPLAY', 'LIVE']);
+    assert.deepStrictEqual(calls.pause, []);
+    assert.strictEqual(ctl.state.livePaused, true);
+  });
+
+  it('RIGHT_CLICK 两步流程：第二步状态不变 → 无副作用；ROUTE_SET 收尾', () => {
+    const { ctl, calls } = makeCtl();
+    ctl.dispatch({ type: 'RIGHT_CLICK', idx: 3 });
+    assert.strictEqual(ctl.state.routePick, 'picking-goal');
+    calls.hint.length = 0;
+    ctl.dispatch({ type: 'RIGHT_CLICK', idx: 9 });   // 无变化
+    assert.deepStrictEqual(calls.hint, []);
+    ctl.dispatch({ type: 'ROUTE_SET' });
+    assert.strictEqual(ctl.state.routePick, 'idle');
+    assert.strictEqual(calls.hint[calls.hint.length - 1], '右键设置路线起点 · 左键查看物体 · Space 暂停 · R 重置视角');
+  });
+
+  it('TOGGLE_INSPECTOR → onInspector(false)', () => {
+    const { ctl, calls } = makeCtl();
+    ctl.dispatch({ type: 'TOGGLE_INSPECTOR' });
+    assert.deepStrictEqual(calls.insp, [false]);
+  });
+
+  it('refresh 按当前状态重发全部副作用（初始化用）', () => {
+    const { ctl, calls } = makeCtl();
+    ctl.refresh();
+    assert.deepStrictEqual(calls.pause, [false]);
+    assert.deepStrictEqual(calls.mode, ['LIVE']);
+    assert.deepStrictEqual(calls.insp, [true]);
+    assert.strictEqual(calls.hint.length, 1);
+  });
+});
