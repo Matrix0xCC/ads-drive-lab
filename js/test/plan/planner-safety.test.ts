@@ -7,6 +7,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import { plan } from '../../algo/plan/index.js';
+import { debug } from '../../shared/debug.js';
 import { CarState, WorldSnapshot, LidarScan } from '../../shared/types.js';
 import { rad, m, mps, mps2, px, pxps, pxps2, dimless } from '../../shared/dimensions.js';
 
@@ -53,12 +54,24 @@ function isBehindObstacle(px: number, py: number, carX: number, carY: number, ob
 // ═══════════════════════════════════════════════════
 
 describe('不变量', () => {
-  it('正前方 15m 障碍 → 轨迹不穿障碍物', () => {
+  it('正前方 15m 障碍（可行驶域内不可避让）→ 降级为最低速度目标且不出域', () => {
+    // 25m/s 下 15m 内的横向避让物理上不可行；正确行为是最低速度最小化碰撞能量，
+    // 而不是借道界外"绕开"（旧行为，见 ISSUE_HISTORY 2026-09-19 第二根因）
     const car = makeCar(500, 0, 0, 100);  // 100 sim-units = 25 m/s
     const lidar = lidarWithObstacle(0, 60, 10);  // 15m ahead, 2.5m wide
     const traj = plan(makeSnapshot(car), lidar);
+    assert.strictEqual(debug.planning!.bestTargetV, mps(17.5) as number, '不可避让时应降级到最低速度');
     for (const pt of traj.points) {
-      const behind = isBehindObstacle(pt.x as number, pt.y as number, car.x as number, car.y as number, 0, 60, 10);
+      assert.ok(Math.abs(pt.y as number) <= 30, `轨迹点出域: y=${pt.y}`);  // 直线赛道 l≈y，半宽 30
+    }
+  });
+
+  it('正前方 50m 障碍（可避让）→ 轨迹不穿障碍物', () => {
+    const car = makeCar(500, 0, 0, 100);
+    const lidar = lidarWithObstacle(0, 200, 10);  // 50m ahead, 2.5m wide
+    const traj = plan(makeSnapshot(car), lidar);
+    for (const pt of traj.points) {
+      const behind = isBehindObstacle(pt.x as number, pt.y as number, car.x as number, car.y as number, 0, 200, 10);
       assert.ok(!behind, `轨迹点穿过障碍物`);
     }
   });

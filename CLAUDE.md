@@ -71,7 +71,7 @@ requestAnimationFrame 主循环 (~60Hz)
 ### 规划器（js/algo/plan/）
 
 - `planner.ts` 编排入口，`states.ts` 显式状态机：CRUISE / FOLLOW / AVOID / DECEL / ARRIVED / EMERGENCY
-- 每帧流程：选 Frenet 参考线（有 route → 开环路线，无 route → 闭环赛道中心线）→ 车辆投影到 Frenet → 生成 5×3=15 条候选轨迹（横向 ±7/±14m × 速度 17.5/25/35 m/s）→ LiDAR 碰撞剪枝 + 代价评估 → 取最优
+- 每帧流程：选 Frenet 参考线（有 route → 开环路线，无 route → 闭环赛道中心线）→ 车辆投影到 Frenet → 生成候选轨迹（横向 ±7/±14m 偏移 **clamp 到可行驶域 |l|≤4.75m 后去重**，典型 3×3=9 条；速度 17.5/25/35 m/s）→ LiDAR 碰撞剪枝 + 代价评估 → 安全候选取最优，**全部碰撞时降级为最低速度**（最小化碰撞能量）
 - `polynomial.ts` 五次多项式（保证曲率 C² 连续）；`candidate.ts` 轨迹生成+代价；`collision.ts` 锥形搜索碰撞检测（低置信命中用更大安全余量）
 - `W_SWITCH` 切换惩罚防止帧间左右摇摆，改代价权重时勿删
 - 路线终点自动减速（DECEL_ZONE=25m）+ 到达检测（剩余 <10px → ARRIVED）

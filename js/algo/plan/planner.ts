@@ -13,7 +13,7 @@
 //   2. 车辆笛卡尔→Frenet 投影，计算 dl/ds
 //   3. ARRIVED 检测 → 提前返回空轨迹
 //   4. 按状态配置速度目标 + 轨迹时长（DECEL 时减速+缩短时长）
-//   5. 遍历 5×3=15 个候选 (targetL, targetV)：
+//   5. 遍历候选 (targetL 横向目标已 clamp 到可行驶域, targetV 三档速度)：
 //      a. generateCandidate → 轨迹点序列
 //      b. 快速剪枝：前 4 点是否碰撞
 //      c. evaluateTrajectory → 代价
@@ -29,6 +29,7 @@ import {
   m, mps, px, pxps, pxps2, dimless, perpx, secs,
 } from '../../shared/dimensions.js';
 import { buildFrenetReference, cartesianToFrenet } from './frenet.js';
+import { TRACK_HALF_WIDTH } from '../../env/track.js';
 import { PlanState, nextState, stateTrajectoryType } from './states.js';
 import { debug } from '../../shared/debug.js';
 import { detectObstacle, isLidarCollision, SAFETY_MARGIN } from './collision.js';
@@ -106,19 +107,32 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
 
   // ─── 5. 候选评估 ───
   const cx = car.x as number, cy = car.y as number;
-  let best: Trajectory | null = null;
+  let best: Trajectory | null = null;          // 安全候选中的最优
   let bestCost = Infinity;
   let bestTL = 0, bestTV = 0;
+  // 全碰撞降级候选：优先最低速度（最小化碰撞能量），同速比代价。
+  // 域内不可避让（如高速近距障碍）时用它替代"最便宜的碰撞轨迹"
+  let fallback: Trajectory | null = null;
+  let fallbackCost = Infinity;
+  let fallbackTL = 0, fallbackTV = 0;
   const margin = (SAFETY_MARGIN as number) + (car.collisionRadius as number);
   const candidates: { targetL: number; targetV: number; cost: number; collision: boolean }[] = [];
 
-  // 横向候选：以当前车道中心为基准，±7m/±14m 偏移（用于避障）
+  // 横向候选：以当前车道中心为基准，±7m/±14m 偏移（用于避障），
+  // 但必须 clamp 到可行驶域内——域边界与 checkBounds 复位阈值一致
+  //（半宽 − 车半宽 − 1.5m 复位缓冲），再留 0.25m 跟踪超调余量。
+  // 越界目标会把车带向界外 → 复位传送 → 常在障碍正前方"复活"引发碰撞
+  //（见 ISSUE_HISTORY 2026-09-19"横向候选超出可行驶域"）。clamp 后去重，
+  // 该赛道上典型结果为 3 个横向目标（当前车道 / 左缘 / 右缘）。
   const lo = laneOffset as number;
-  const latTargets: Px[] = [
-    laneOffset,
-    px(lo - m(7) as number), px(lo + m(7) as number),
-    px(lo - m(14) as number), px(lo + m(14) as number),
-  ];
+  const L_MAX = (TRACK_HALF_WIDTH as number)
+    - ((car.width as number) / 2 + (m(1.5) as number))
+    - (m(0.25) as number);
+  const latTargets: Px[] = [];
+  for (const v of [lo, lo - (m(7) as number), lo + (m(7) as number), lo - (m(14) as number), lo + (m(14) as number)]) {
+    const c = Math.max(-L_MAX, Math.min(L_MAX, v));
+    if (!latTargets.some(t => Math.abs((t as number) - c) < 0.5)) latTargets.push(px(c));
+  }
 
   for (const tL of latTargets) {
     for (const tV of speedTargets) {
@@ -137,9 +151,23 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
       const ev = evaluateTrajectory(points, frenetRef, cx, cy, lidarScan, lo, margin);
       let cost = ev.cost;
       if (_prevBestTargetL !== null && Math.abs((tL as number) - _prevBestTargetL) > 5 && (tL as number) !== 0) cost += W_SWITCH;
-      if (cost < bestCost) { bestCost = cost; best = createTrajectory(points, cost, ''); bestTL = tL as number; bestTV = tV as number; }
+      if (!ev.collided) {
+        if (cost < bestCost) { bestCost = cost; best = createTrajectory(points, cost, ''); bestTL = tL as number; bestTV = tV as number; }
+      } else if (fallback === null || (tV as number) < fallbackTV - 1e-9
+                 || (Math.abs((tV as number) - fallbackTV) < 1e-9 && cost < fallbackCost)) {
+        fallback = createTrajectory(points, cost, ''); fallbackCost = cost;
+        fallbackTL = tL as number; fallbackTV = tV as number;
+      }
       candidates.push({ targetL: tL as number, targetV: tV as number, cost, collision: ev.collided });
     }
+  }
+
+  // ─── 5b. 选择：安全候选优先；无安全候选时用降级候选（最低速度） ───
+  if (!best && fallback) {
+    best = fallback;
+    bestCost = fallbackCost;
+    bestTL = fallbackTL;
+    bestTV = fallbackTV;
   }
 
   // ─── 6. EMERGENCY ───
