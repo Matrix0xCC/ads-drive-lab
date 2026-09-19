@@ -134,10 +134,11 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
       }
       if (skip) continue;
 
-      let cost = evaluateTrajectory(points, frenetRef, cx, cy, lidarScan, lo);
+      const ev = evaluateTrajectory(points, frenetRef, cx, cy, lidarScan, lo, margin);
+      let cost = ev.cost;
       if (_prevBestTargetL !== null && Math.abs((tL as number) - _prevBestTargetL) > 5 && (tL as number) !== 0) cost += W_SWITCH;
       if (cost < bestCost) { bestCost = cost; best = createTrajectory(points, cost, ''); bestTL = tL as number; bestTV = tV as number; }
-      candidates.push({ targetL: tL as number, targetV: tV as number, cost, collision: cost >= W_COLLISION });
+      candidates.push({ targetL: tL as number, targetV: tV as number, cost, collision: ev.collided });
     }
   }
 

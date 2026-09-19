@@ -29,7 +29,7 @@
 // 且计算量极小（每帧只需几次浮点运算）。
 
 import { CarState, ControlCommand, TrackGeometry, Point2D } from '../shared/types.js';
-import { Radians, Px, PxPerSec, PxPerSec2, DimLess, rad, m, mps, mps2, px, pxps, pxps2, dimless, yawRate } from '../shared/dimensions.js';
+import { Radians, Px, PxPerSec, PxPerSec2, DimLess, rad, m, mps, mps2, px, pxps, pxps2, dimless, yawRate, normalizeAngle } from '../shared/dimensions.js';
 
 /** 轴距 3m（与 algo/control.ts 保持一致） */
 const WHEELBASE: Px = m(3.0);
@@ -125,6 +125,9 @@ export function stepPhysics(car: CarState, command: ControlCommand, dt: number):
   const step = (car.speed as number) * dt;
   car.x = px((car.x as number) + Math.cos(avgAngle) * step);
   car.y = px((car.y as number) + Math.sin(avgAngle) * step);
+
+  // 角度归一化到 [-π, π]（放在位置更新之后：中点法需要未折叠的前后角均值）
+  car.angle = normalizeAngle(car.angle);
 }
 
 // ═══════════════════════════════════════════════════

@@ -53,7 +53,7 @@
 //   对现代浏览器 < 1ms。
 
 import { WorldSnapshot, LidarScan, TrackGeometry, createLidarScan, obstacleToSegments, FrenetReference } from '../shared/types.js';
-import { Radians, Px, m, rad, px } from '../shared/dimensions.js';
+import { Radians, Px, m, rad, px, normalizeAngle } from '../shared/dimensions.js';
 import { buildFrenetReference, cartesianToFrenet } from './plan/frenet.js';
 import { debug } from '../shared/debug.js';
 
@@ -254,7 +254,7 @@ export function sense(snapshot: WorldSnapshot): LidarScan {
     }
 
     confidences.push(confidence);
-    angles.push(rad(worldAngle));
+    angles.push(normalizeAngle(rad(worldAngle)));   // 归一化到 [-π,π]，下游无需再处理环绕
     distances.push(px(filteredDist));
   }
 

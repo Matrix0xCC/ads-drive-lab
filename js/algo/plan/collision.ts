@@ -64,10 +64,14 @@ export function isLidarCollision(
   const coneHalf = ptDist < 30 ? 6 : ptDist < 80 ? 4 : 2;
 
   // 线性扫描找最近射线（61 条射线，O(61) 完全足够）
+  // 归一化必须先取模再折叠：扫描角是未归一化的绝对角（car.angle 可累积
+  // 超过 ±π），与 atan2 得到的 ptAngle 之差可达 2π 以上；直接 2π - diff
+  // 在 diff > 2π 时产生负值，会被误选为"最近射线"（历史缺陷，见
+  // ISSUE_HISTORY：2026-09-19 角度归一化缺陷）
   let bestIdx = 0, bestDiff = Infinity;
   for (let i = 0; i < angles.length; i++) {
-    let diff = Math.abs((angles[i] as number) - ptAngle);
-    if (diff > Math.PI) diff = 2 * Math.PI - diff;  // 角度归一化
+    let diff = Math.abs((angles[i] as number) - ptAngle) % (2 * Math.PI);
+    if (diff > Math.PI) diff = 2 * Math.PI - diff;
     if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
   }
 

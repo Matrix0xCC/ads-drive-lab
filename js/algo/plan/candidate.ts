@@ -124,14 +124,15 @@ export function evaluateTrajectory(
   carX: number, carY: number,
   lidarScan: LidarScan,
   laneCenter: number = 0,
-): number {
-  let cost = 0, jerkSum = 0, latAccSum = 0, centerSum = 0;
+  margin: number = SAFETY_MARGIN as number,
+): { cost: number; collided: boolean } {
+  let cost = 0, collided = false, jerkSum = 0, latAccSum = 0, centerSum = 0;
 
   for (let i = 0; i < points.length; i++) {
     const pt = points[i];
-    // 硬约束：碰撞检测
-    if (isLidarCollision(pt.x as number, pt.y as number, carX, carY, lidarScan, SAFETY_MARGIN as number)) {
-      cost += W_COLLISION; break;
+    // 硬约束：碰撞检测（margin 与快速剪枝保持一致，由调用方传入）
+    if (isLidarCollision(pt.x as number, pt.y as number, carX, carY, lidarScan, margin)) {
+      cost += W_COLLISION; collided = true; break;
     }
     // 中心偏离
     const fl = cartesianToFrenet(pt.x, pt.y, ref);
@@ -156,5 +157,5 @@ export function evaluateTrajectory(
   // 进度奖励：越长越好，越快越好
   cost += W_PROGRESS * (points[points.length - 1]?.t as number ?? 0) * (points[points.length - 1]?.v as number ?? 0);
   cost += W_CENTER   * centerSum / n;
-  return cost;
+  return { cost, collided };
 }
