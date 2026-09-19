@@ -21,16 +21,20 @@
     #hud .state-normal  { color: #44ff44; font-weight: bold; }
     #hud .state-avoid  { color: #ff4444; font-weight: bold; }
 
-    #map-select {
-      position: absolute; top: 10px; right: 15px;
-      z-index: 20; pointer-events: all; display: flex; gap: 8px; align-items: center;
+    /* 顶栏两簇（世界 / 控制） */
+    #world-cluster, #control-cluster {
+      position: absolute; right: 15px; z-index: 20; pointer-events: all;
+      display: flex; gap: 8px; align-items: center;
     }
-    #map-select select, #map-select button {
+    #world-cluster { top: 10px; }
+    #control-cluster { top: 52px; }
+    .cluster-label { color: #888; font-family: monospace; font-size: 11px; margin-right: 2px; }
+    #world-cluster select, #control-cluster button {
       background: #333; color: #fff; border: 1px solid #666;
       padding: 6px 10px; font-family: monospace; font-size: 13px;
       border-radius: 4px; cursor: pointer;
     }
-    #map-select button:hover { background: #444; }
+    #world-cluster select:hover, #control-cluster button:hover { background: #444; }
 
     #replay-bar button, #replay-bar select {
       background: #333; color: #fff; border: 1px solid #666;
@@ -43,10 +47,21 @@
       border-radius: 50%; background: #ff4444; cursor: pointer; pointer-events: auto;
     }
 
-    #hud-instructions {
+    /* 底部上下文提示条（文案由 UI 状态机驱动） */
+    #hint-bar {
       position: absolute; bottom: 10px; left: 15px;
       z-index: 10; pointer-events: none;
       color: #888; font-family: monospace; font-size: 11px;
+    }
+
+    /* inspect 面板标题栏（可折叠） */
+    #inspect-header {
+      display: flex; justify-content: space-between; align-items: center;
+      pointer-events: auto; margin-bottom: 4px;
+    }
+    #btn-inspect-toggle {
+      background: #222; color: #0f0; border: 1px solid #555; cursor: pointer;
+      font-family: monospace; font-size: 11px; border-radius: 3px; padding: 0 6px;
     }
   </style>
 </head>
@@ -54,8 +69,9 @@
   <div id="canvas-container">
     <canvas id="canvas"></canvas>
 
-    <!-- 地图选择 -->
-    <div id="map-select">
+    <!-- 世界选择（地图 + 场景） -->
+    <div id="world-cluster">
+      <span class="cluster-label">世界</span>
       <select id="map-dropdown">
         <option value="oval">Oval</option>
         <option value="hairpin">Hairpin</option>
@@ -65,11 +81,16 @@
       <select id="scenario-dropdown" title="加载场景（与 headless 同源）">
         <option value="">随机场景</option>
       </select>
-      <button id="btn-reset-view" title="重置视角 (R)">&#8634;</button>
-      <button id="btn-export" title="导出运行归档 (.run.json)">&#128190;</button>
-      <button id="btn-import" title="导入归档并回放">&#128194;</button>
+    </div>
+
+    <!-- 控制（仿真 / 数据 / 视图） -->
+    <div id="control-cluster">
+      <span class="cluster-label">控制</span>
       <button id="btn-pause" title="暂停/继续 (Space)">&#9208;</button>
       <button id="btn-replay-mode" title="回放已归档运行">&#9194;</button>
+      <button id="btn-export" title="导出运行归档 (.run.json)">&#128190;</button>
+      <button id="btn-import" title="导入归档并回放">&#128194;</button>
+      <button id="btn-reset-view" title="重置视角 (R)">&#8634;</button>
     </div>
 
     <!-- 回放栏 -->
@@ -110,9 +131,8 @@
       <div id="hud-gps" style="color:#8888ff;font-size:10px;margin-top:2px;min-height:14px;">GPS: ---</div>
     </div>
 
-    <div id="hud-instructions">
-      左键点击物体查看尺寸 | 右键赛道设置路线 | Space 暂停
-    </div>
+    <!-- 底部上下文提示（文案由 UI 状态机驱动，当前为静态占位） -->
+    <div id="hint-bar">右键设置路线起点 · 左键查看物体 · Space 暂停 · R 重置视角</div>
 
     <!-- 物体点击提示 -->
     <div id="object-tooltip" style="display:none;position:fixed;z-index:100;pointer-events:none;
@@ -125,6 +145,10 @@
       z-index:20;pointer-events:none;color:#0f0;font-family:monospace;font-size:10px;
       background:rgba(0,0,0,0.85);padding:8px 10px;border-radius:4px;line-height:1.4;
       max-height:400px;overflow-y:auto;width:280px;">
+      <div id="inspect-header">
+        <span>Inspect</span>
+        <button id="btn-inspect-toggle" title="折叠/展开 (I)">&#9662;</button>
+      </div>
     </div>
   </div>
 
