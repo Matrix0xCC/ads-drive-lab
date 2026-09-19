@@ -69,12 +69,14 @@ requestAnimationFrame 主循环 (~60Hz)
 5. **单位系统** — 所有物理量配置用 `m()` / `mps()` / `mps2()` 书写（`SIM_UNITS_PER_METER = 4`，改比例尺只需改这一个常量），不要硬编码 px 值
 6. **UI 状态单一来源** — 所有 UI 行为经 `ui/state.ts` 的纯函数 reduce 驱动，DOM 只是状态的渲染投影；`ui/controller.ts` 是"状态变化 → 副作用"的唯一边界；main 只通过 `UiDeps.actions` 改世界。快捷键：Space 暂停/回放播放、Esc 取消选点/退出回放、R 视角、I 折叠 Inspect
 
-### 规划器（js/algo/plan/）
+### 规划器（js/algo/plan/）——纵向-横向解耦（spec: docs/superpowers/specs/2026-09-19-decoupled-planner-design.md）
 
-- `planner.ts` 编排入口，`states.ts` 显式状态机：CRUISE / FOLLOW / AVOID / DECEL / ARRIVED / EMERGENCY
-- 每帧流程：选 Frenet 参考线（有 route → 开环路线，无 route → 闭环赛道中心线）→ 车辆投影到 Frenet → **速度适应**（`vCap = clamp(最近障碍距离/2, 17.5, 35)` m/s，≈2s 横向机动窗口）→ 生成候选轨迹（横向 ±7/±14m 偏移 **clamp 到可行驶域 |l|≤4.4m 后去重**（0.6m 跟踪过冲预留），典型 3×3=9 条；速度档 17.5/25/35 经 vCap 截断去重）→ LiDAR 碰撞剪枝 + 代价评估 → 安全候选取最优，**全部碰撞时降级为最低速度**（最小化碰撞能量）
-- `polynomial.ts` 五次多项式（保证曲率 C² 连续）；`candidate.ts` 轨迹生成+代价；`collision.ts` 锥形搜索碰撞检测（低置信命中用更大安全余量）
-- `W_SWITCH` 切换惩罚防止帧间左右摇摆，改代价权重时勿删
+- **架构**：`paths.ts`（SL 路径层）决定"走哪条"，`speed.ts`（ST 速度层）决定"什么速度"，`planner.ts` 单轮协调后按 l(s(t)) 合成 Trajectory（控制/回放/归档契约不变）；`states.ts` 状态机：CRUISE / FOLLOW / AVOID / DECEL / ARRIVED / EMERGENCY
+- **每帧流程**：Frenet 参考线（有 route → 开环，无 route → 闭环）→ 车辆投影 → 巡航目标 `vCap = clamp(最近障碍/2, 17.5, 35)` → `solvePathLayer` → `solveSpeedLayer` → 合成
+- **路径层**：候选目标 {车道中心, ±2.5m/±5m 挪移, ±走廊边界 4.4m} clamp 去重；两段式横向（前 40m 五次多项式横移、其后保持），**横向路径夹紧 [l0, target]**（防贴边棘轮复位）；120m 视程、命中点/链段-折线距离做碰撞检查
+- **双阈值**：CLEAR = 车半宽+1.5m（舒适，只影响排名）；HARD_CLEAR = 车半宽+0.4m（物理可过性，决定停车线）。横向排名只看 COMMIT_WINDOW=60m（晚承诺，不提前选边）；全部候选连 HARD_CLEAR 都过不去 → 停车线（速度层在障碍前停）；存在物理可过候选则选最优并限速 8m/s 慢行；**可达性闸门**：紧段起点前减速到 8m/s 的距离不够（≈70m@30m/s）视为真无解（emergency）
+- **速度层**：ST 条目（tMin=0 静态）→ cruise / stop（五次多项式停车线，T 取最小单调解）/ emergency（A_MAX 兜底）
+- `polynomial.ts` 五次多项式（曲率 C² 连续）；`collision.ts` 锥形搜索（供旧耦合路径的遗留工具）
 - 路线终点自动减速（DECEL_ZONE=25m）+ 到达检测（剩余 <10px → ARRIVED）
 
 ### 感知（js/algo/perception.ts）
@@ -83,7 +85,7 @@ LiDAR 单线 2D：±60° FOV、2° 分辨率、61 条射线、最大 125m。核�
 
 ### 控制（js/algo/control.ts）
 
-Pure Pursuit：δ = atan2(2·L·sin α, ld)，预瞄距离 = clamp(0.4×speed, 10m, 20m)。
+Pure Pursuit：δ = atan2(2·L·sin α, ld)，预瞄距离 = clamp(0.4×speed, 10m, 20m)。油门目标 = 轨迹终点速度；**终点速度 ≈0（停车/紧急剖面）→ 油门 0**（0.15 怠速下限只对正值目标保留——否则"停车"变成 6.375m/s 恒速爬行，批量 A/B 回归根因）。
 
 ### 路线设置（js/ui.ts + js/algo/routePlanner.ts）
 
