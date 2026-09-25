@@ -15,7 +15,7 @@
 //   7. 合成 l(s(t)) → Trajectory；状态机 + 兼容类型标签
 
 import {
-  WorldSnapshot, LidarScan, Route, FrenetReference,
+  WorldSnapshot, LidarScan, Route, FrenetReference, TrackGeometry,
   Trajectory, TrajectoryPoint, createTrajectory,
 } from '../../shared/types.js';
 import {
@@ -39,9 +39,13 @@ let laneOffset: Px = m(1.875);
 
 // ==================== 状态 ====================
 
+// 参考线缓存按"世界对象身份"失效（track/route 对象变化 → 重建）。
+// 浏览器在同一进程内 rebuildWorld 切换地图/场景（headless 每次新进程不会遇到），
+// 若缓存不失效，换图后会继续用旧地图几何投影 → 规划/避障全错。
 let _loopFrenetRef: FrenetReference | null = null;
+let _loopRefTrack: TrackGeometry | null = null;
 let _routeFrenetRef: FrenetReference | null = null;
-let _lastRouteKey: string | null = null;
+let _lastRoute: Route | null = null;
 let _currentState: PlanState = PlanState.CRUISE;
 let _prevBestTargetL: number | null = null;
 
@@ -54,15 +58,18 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
   let frenetRef: FrenetReference;
   let routeActive = false;
   if (route && route.waypoints.length >= 2) {
-    const key = `${route.startIndex}-${route.goalIndex}`;
-    if (key !== _lastRouteKey) {
+    if (route !== _lastRoute) {
       _routeFrenetRef = buildFrenetReference(route.waypoints, false);
-      _lastRouteKey = key;
+      _lastRoute = route;
       _prevBestTargetL = null;
     }
     frenetRef = _routeFrenetRef!; routeActive = true;
   } else {
-    if (!_loopFrenetRef) _loopFrenetRef = buildFrenetReference(track.centerPoints, true);
+    if (!_loopFrenetRef || _loopRefTrack !== track) {
+      _loopFrenetRef = buildFrenetReference(track.centerPoints, true);
+      _loopRefTrack = track as TrackGeometry;
+      _prevBestTargetL = null;
+    }
     frenetRef = _loopFrenetRef;
   }
 

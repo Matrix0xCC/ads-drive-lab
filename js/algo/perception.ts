@@ -136,13 +136,22 @@ function raySegmentIntersect(
 
 /**
  * 背景减除用的 Frenet 参考线。
- * 赛道不变则只构建一次（`buildFrenetReference` O(n) ≈ 200 点）。
+ * 按轨道对象身份缓存（`buildFrenetReference` O(n) ≈ 200 点）。
  * 始终使用闭环参考线——围墙在整个环道上存在。
+ *
+ * 【必须按对象失效】浏览器在同一进程内 rebuildWorld 切换地图/场景（headless
+ * 每次新进程，不会遇到）：若只缓存一次，切图后背景减除会继续用旧地图参考线，
+ * 障碍命中被 |l| 误判为边界并过滤 → 规划器"看不见"障碍 → 小车直穿障碍物
+ * （batch-hairpin-s4 浏览器实测，回归测试见 test/algo/perception-ref.test.ts）。
  */
 let _bgFrenetRef: FrenetReference | null = null;
+let _bgRefTrack: TrackGeometry | null = null;
 
 function getBackgroundFrenetRef(track: TrackGeometry): FrenetReference {
-  if (!_bgFrenetRef) _bgFrenetRef = buildFrenetReference(track.centerPoints, true);
+  if (!_bgFrenetRef || _bgRefTrack !== track) {
+    _bgFrenetRef = buildFrenetReference(track.centerPoints, true);
+    _bgRefTrack = track;
+  }
   return _bgFrenetRef;
 }
 
