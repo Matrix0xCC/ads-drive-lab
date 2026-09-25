@@ -37,6 +37,28 @@ describe('recordFrom（主题 → 归档记录）', () => {
     assert.strictEqual(r.trajectory.type, 'avoid_left');
   });
 
+  it('planning:result → plan 记录带收敛轮数（rounds）；墙钟耗时 planMs 不进逐帧归档', () => {
+    const r: any = recordFrom('planning:result', {
+      t: 1, step: 60, state: 'AVOID',
+      planning: { frenetS: 100, frenetL: 14, dl_ds: 0.1, headingDiff: 0.05, paths: [],
+        bestCost: 1, bestTargetL: 7.5, speedTarget: 100, speedMode: 'cruise',
+        rounds: 2, planMs: 1.5, vAssume: 32 },
+      trajectory: { points: [], type: 'avoid_left', cost: 1 },
+    });
+    assert.strictEqual(r.rounds, 2);
+    assert.strictEqual(r.planMs, undefined, 'planMs 非确定量，不得进逐帧归档（确定性契约）');
+  });
+
+  it('planning:result 快照无 rounds（旧运行）→ 兜底 1', () => {
+    const r: any = recordFrom('planning:result', {
+      t: 1, step: 60, state: 'CRUISE',
+      planning: { frenetS: 0, frenetL: 0, dl_ds: 0, headingDiff: 0, paths: [],
+        bestCost: 0, bestTargetL: 0, speedTarget: 0, speedMode: 'cruise' },
+      trajectory: { points: [], type: 'lane_keep', cost: 0 },
+    });
+    assert.strictEqual(r.rounds, 1);
+  });
+
   it('planning:result 无 debug 快照时字段回退为 0/空', () => {
     const r: any = recordFrom('planning:result', {
       t: 1, step: 60, state: 'CRUISE', planning: null,

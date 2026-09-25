@@ -33,6 +33,7 @@ export function updateInspectPanel(dt: number) {
     html += `  dl/ds=${pl.dl_ds.toFixed(4)} | Δheading=${(pl.headingDiff*180/Math.PI).toFixed(1)}°\n`;
     if (pl.remainingDist > 0) html += `  剩余: ${toM(pl.remainingDist)}m\n`;
     html += `  速度: 目标 ${toM(pl.speedTarget)}m/s 模式 ${pl.speedMode}\n`;
+    html += `  紧间隙: ${pl.tight} | 迭代 ${pl.rounds} 轮 ${pl.planMs.toFixed(1)}ms (v假设 ${toM(pl.vAssume)}m/s)\n`;
     html += `  最优路径: L=${toM(pl.bestTargetL, 1)}m cost=${pl.bestCost.toFixed(1)}\n`;
     html += '  路径候选:\n';
     for (const p of pl.paths) {

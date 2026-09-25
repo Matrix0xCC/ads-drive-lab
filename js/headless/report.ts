@@ -19,8 +19,17 @@ export function verdictOf(issues: Issue[]): {
   return { verdict: issues.length > 0 ? 'ISSUES' : 'PASS', counts };
 }
 
-/** 从检测器累积量产出聚合指标（速度/RMSE/最小障碍距离/状态计数/事件） */
-export function buildSummary(det: Detector, engineInfo: { steps: number; simTime: number }): RunSummary {
+/** 升序分位取值（样本量小、只需稳健分位；idx 取 floor(p·n) 并 clamp） */
+function quantile(xs: number[], p: number): number {
+  const s = [...xs].sort((a, b) => a - b);
+  return s[Math.min(s.length - 1, Math.max(0, Math.floor(p * s.length)))];
+}
+
+/** 从检测器累积量产出聚合指标（速度/RMSE/最小障碍距离/状态计数/事件/收敛迭代） */
+export function buildSummary(
+  det: Detector,
+  engineInfo: { steps: number; simTime: number; planMs?: number[] },
+): RunSummary {
   const avg = det.speedN > 0 ? det.speedSum / det.speedN : 0;
   return {
     steps: engineInfo.steps,
@@ -33,6 +42,10 @@ export function buildSummary(det: Detector, engineInfo: { steps: number; simTime
     // 路线进度：未到达的运行也给出 0..1 的完成度（停在 30% 与 90% 才可区分）
     progress: det.routeLength !== null && det.routeLength > 0
       ? Math.min(1, det.maxFrenetS / det.routeLength) : null,
+    // 收敛迭代指标（spec §5.3）：多轮帧占比 + 单帧规划耗时分位（旧归档无字段 → null）
+    multiRoundPct: det.planCount > 0 ? (100 * det.multiRoundPlans) / det.planCount : null,
+    planMsP50: engineInfo.planMs?.length ? quantile(engineInfo.planMs, 0.5) : null,
+    planMsP95: engineInfo.planMs?.length ? quantile(engineInfo.planMs, 0.95) : null,
     trackingRmseM: det.trackingErrN > 0 ? Math.sqrt(det.trackingErrSum / det.trackingErrN) / 4 : null,
     minObstacleDistM: Number.isFinite(det.minObstacleDist) ? det.minObstacleDist / 4 : null,
     stateCounts: det.stateCounts,
@@ -63,6 +76,8 @@ export function buildReportMd(o: {
   lines.push(`| 最大/平均速度 | ${summary.speed.maxMps.toFixed(1)} / ${summary.speed.avgMps.toFixed(1)} m/s |`);
   lines.push(`| 到达用时 | ${summary.arrivalTimeS != null ? `${summary.arrivalTimeS.toFixed(1)} s（step ${summary.arrivedAtStep}）` : '未到达'} |`);
   lines.push(`| 路线进度 | ${summary.progress != null ? `${(summary.progress * 100).toFixed(0)}%` : 'n/a'} |`);
+  lines.push(`| 需迭代修正的帧 | ${summary.multiRoundPct != null ? `${summary.multiRoundPct.toFixed(0)}%` : 'n/a'} |`);
+  lines.push(`| 单帧规划耗时 p50/p95 | ${summary.planMsP50 != null ? `${summary.planMsP50.toFixed(2)} / ${(summary.planMsP95 as number).toFixed(2)} ms` : 'n/a'} |`);
   lines.push(`| 交叉跟踪 RMSE | ${summary.trackingRmseM?.toFixed(3) ?? 'n/a'} m |`);
   lines.push(`| 最近障碍距离 | ${summary.minObstacleDistM?.toFixed(2) ?? 'n/a'} m |`);
   lines.push(`| 状态分布 | ${Object.entries(summary.stateCounts).map(([k, v]) => `${k}:${v}`).join(' ')} |`);

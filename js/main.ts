@@ -76,7 +76,7 @@ function exportRun(): void {
   if (!currentScenario) return;
   const bundle = assembleBundle({
     scenario: currentScenario, track: engine.track, obstacles: engine.obstacles,
-    route: engine.route, frames, simTime: engine.simTime,
+    route: engine.route, frames, simTime: engine.simTime, planMs: engine.planMsSamples,
     id: `${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}_${currentScenario.name}_browser`,
     createdAt: new Date().toISOString(),
     gitCommit: null, nodeVersion: 'browser',

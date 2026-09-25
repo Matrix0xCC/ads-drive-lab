@@ -53,6 +53,10 @@ export interface PlanRecord extends BaseRecord {
   candidates: { targetL: number; targetV: number; cost: number; collision: boolean }[];
   best: { cost: number; targetL: number; targetV: number };
   trajectory: { points: { t: number; x: number; y: number; v: number }[]; type: string; cost: number };
+  /** 路径-速度收敛迭代求值次数 2..3（spec 2026-09-25 §5；旧归档无此字段） */
+  rounds?: number;
+  /** 种子假设不自洽（确实需要迭代修正；旧归档无此字段） */
+  revised?: boolean;
 }
 
 export interface GpsRecord extends BaseRecord {
@@ -91,6 +95,11 @@ export interface RunSummary {
   arrivalTimeS?: number | null;
   /** 路线进度 0..1（历史最大沿路线弧长 / 路线长度；无路线 = null）。旧归档可能缺此字段 */
   progress?: number | null;
+  /** 需 >1 轮（种子假设不自洽、需迭代修正）的规划帧占比（%；未记录 = null） */
+  multiRoundPct?: number | null;
+  /** 单帧规划耗时 p50 / p95（ms；未记录 = null） */
+  planMsP50?: number | null;
+  planMsP95?: number | null;
   trackingRmseM: number | null;
   minObstacleDistM: number | null;
   stateCounts: Record<string, number>;

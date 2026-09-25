@@ -129,6 +129,9 @@ export class Detector {
   maxFrenetS = 0;
   emergencyBrakeCount = 0;
   boundsResetCount = 0;
+  /** 规划帧数 / 其中需 >1 轮（收敛迭代指标；耗时见 report.buildSummary 的 engineInfo） */
+  planCount = 0;
+  multiRoundPlans = 0;
 
   constructor(cfg?: Partial<DetectorConfig>, world?: Partial<DetectorWorld>) {
     this.cfg = { ...DEFAULT_DETECTOR_CONFIG, ...cfg };
@@ -160,6 +163,8 @@ export class Detector {
       if (typeof md === 'number' && md < this.minObstacleDist) this.minObstacleDist = md;
     } else if (rec.type === 'plan') {
       this.stateCounts[rec.state] = (this.stateCounts[rec.state] ?? 0) + 1;
+      this.planCount += 1;
+      if (rec.revised === true) this.multiRoundPlans += 1;
       const fs = (rec.frenet as { s?: number } | undefined)?.s;
       if (typeof fs === 'number' && fs > this.maxFrenetS) this.maxFrenetS = fs;
     } else if (rec.type === 'event') {

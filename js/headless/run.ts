@@ -111,7 +111,7 @@ function main(): void {
   // 检测 + 报告 + 归档收尾（与浏览器导出共用 assembleBundle）
   const bundle = assembleBundle({
     scenario, track: engine.track, obstacles: engine.obstacles, route: built.route,
-    frames, simTime: engine.simTime,
+    frames, simTime: engine.simTime, planMs: engine.planMsSamples,
     id: args.out ? path.basename(runDir) : id,
     createdAt: new Date().toISOString(),
     gitCommit: gitCommitOf(), nodeVersion: process.version,

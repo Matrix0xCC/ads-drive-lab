@@ -31,7 +31,11 @@ export function recordFrom(topic: string, p: any): FrameRecord {
       // 解耦架构：路径候选映射进归档的旧字段名（detector/回放零改动）——
       // candidates ← 路径层候选（collision 标记 = blocked）；targetV 记巡航目标
       const pl = p.planning;
+      // 注意：planMs（墙钟耗时）不进逐帧归档——它是非确定量，写进 frames.jsonl 会破坏
+      // "同种子两次运行逐字节一致"的确定性契约（E2E 实测）。耗时改由 SimEngine 运行期
+      // 统计、经 summary 汇总（report.buildSummary 的 engineInfo）。
       return { type: 'plan', t: p.t, step: p.step, state: p.state,
+        rounds: pl?.rounds ?? 1, revised: pl?.revised ?? false,
         frenet: { s: pl?.frenetS ?? 0, l: pl?.frenetL ?? 0, dl_ds: pl?.dl_ds ?? 0, headingDiff: pl?.headingDiff ?? 0 },
         candidates: (pl?.paths ?? []).map((x: any) => ({
           targetL: x.targetL, targetV: pl?.speedTarget ?? 0, cost: x.cost, collision: x.blocked })),

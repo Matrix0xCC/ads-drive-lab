@@ -72,6 +72,8 @@ export class SimEngine {
   latestLidarScan: LidarScan;
   latestTrajectory: Trajectory;
   latestGPS: GPSReading | null = null;
+  /** 单帧规划耗时样本（ms；只记录，不参与决策；summary/报告用） */
+  planMsSamples: number[] = [];
   simTime = 0;
   stepCount = 0;
 
@@ -172,6 +174,7 @@ export class SimEngine {
       if (this._planningTimer >= 1 / PLANNING_HZ) {
         const snapshot = createWorldSnapshot(this.car, this.track, this.obstacles);
         this.latestTrajectory = plan(snapshot, this.latestLidarScan, this.route ?? undefined);
+        if (debug.planning) this.planMsSamples.push(debug.planning.planMs);
         const state = getPlannerState();
         if (this._prevPlanState !== null && state !== this._prevPlanState) {
           this._emit('state_change', { from: this._prevPlanState, to: state });

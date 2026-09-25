@@ -32,6 +32,8 @@ export interface AssembleInput {
   route: Route | null;
   frames: FrameRecord[];
   simTime: number;
+  /** 单帧规划耗时样本（ms；可选——不参与确定性契约，仅进 summary/报告） */
+  planMs?: number[];
   id: string;
   createdAt: string;
   gitCommit: string | null;
@@ -52,7 +54,7 @@ export function assembleBundle(o: AssembleInput): RunBundle {
   const issues = det.finish();
   const { verdict, counts } = verdictOf(issues);
   const steps = o.frames.reduce((m, f) => Math.max(m, f.step), 0);
-  const summary = buildSummary(det, { steps, simTime: o.simTime });
+  const summary = buildSummary(det, { steps, simTime: o.simTime, planMs: o.planMs });
   const meta: RunMeta = {
     version: 1, id: o.id, scenario: o.scenario.name, map: o.scenario.map, seed: o.scenario.seed,
     durationS: o.simTime, steps, gitCommit: o.gitCommit, nodeVersion: o.nodeVersion,
