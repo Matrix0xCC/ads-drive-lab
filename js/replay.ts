@@ -42,16 +42,26 @@ export class ReplayController {
 
   constructor(private scene: THREE.Scene, private lidarLines: THREE.Line[]) {}
 
-  /** 运行列表（runs/index.json，供回放面板下拉） */
-  static async listRuns(): Promise<{ id: string; label: string; verdict: string }[]> {
+  /** 运行列表（runs/index.json，供回放运行选择框） */
+  static async listRuns(): Promise<{
+    id: string; scenario: string; map: string; seed: number;
+    createdAt: string; verdict: string; high: number; medium: number;
+  }[]> {
     try {
-      const res = await fetch('runs/index.json');
+      // no-store：index.json 是可变资源（新增运行/清理归档都会变），
+      // 默认缓存模式会在清理后仍返回旧列表（浏览器实测需整页刷新才恢复）
+      const res = await fetch('runs/index.json', { cache: 'no-store' });
       if (!res.ok) return [];
       const idx = await res.json();
       return (idx.runs ?? []).map((r: any) => ({
-        id: r.id,
-        verdict: r.verdict,
-        label: `${r.id} [${r.verdict} h${r.issues?.high ?? 0}/m${r.issues?.medium ?? 0}]`,
+        id: String(r.id),
+        scenario: String(r.scenario ?? ''),
+        map: String(r.map ?? ''),
+        seed: Number(r.seed ?? 0),
+        createdAt: String(r.createdAt ?? ''),
+        verdict: String(r.verdict ?? ''),
+        high: Number(r.issues?.high ?? 0),
+        medium: Number(r.issues?.medium ?? 0),
       }));
     } catch { return []; }
   }

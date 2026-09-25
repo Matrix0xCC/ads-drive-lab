@@ -6,7 +6,8 @@ import { UiController } from '../../ui/controller.js';
 function makeCtl() {
   const calls = {
     pause: [] as boolean[], mode: [] as string[], sect: [] as (string | null)[],
-    info: [] as boolean[], debug: [] as boolean[], hint: [] as string[], unit: [] as string[],
+    info: [] as boolean[], debug: [] as boolean[], picker: [] as boolean[],
+    hint: [] as string[], unit: [] as string[],
   };
   const ctl = new UiController({
     onLivePaused: (p) => calls.pause.push(p),
@@ -14,6 +15,7 @@ function makeCtl() {
     onSidebarSection: (s) => calls.sect.push(s),
     onInfoPanel: (o) => calls.info.push(o),
     onDebugPanel: (o) => calls.debug.push(o),
+    onRunPicker: (o) => calls.picker.push(o),
     onHint: (h) => calls.hint.push(h),
     onSpeedUnit: (u) => calls.unit.push(u),
   }, () => 'NONE');
@@ -77,6 +79,13 @@ describe('UiController.dispatch', () => {
     assert.deepStrictEqual(calls.debug, [false]);
   });
 
+  it('OPEN/CLOSE_RUN_PICKER → onRunPicker 开关', () => {
+    const { ctl, calls } = makeCtl();
+    ctl.dispatch({ type: 'OPEN_RUN_PICKER' });
+    ctl.dispatch({ type: 'CLOSE_RUN_PICKER' });
+    assert.deepStrictEqual(calls.picker, [true, false]);
+  });
+
   it('TOGGLE_SPEED_UNIT → onSpeedUnit 按 kmh/ms 交替', () => {
     const { ctl, calls } = makeCtl();
     ctl.dispatch({ type: 'TOGGLE_SPEED_UNIT' });
@@ -92,6 +101,7 @@ describe('UiController.dispatch', () => {
     assert.deepStrictEqual(calls.sect, [null]);
     assert.deepStrictEqual(calls.info, [true]);
     assert.deepStrictEqual(calls.debug, [true]);
+    assert.deepStrictEqual(calls.picker, [false]);
     assert.deepStrictEqual(calls.unit, ['kmh']);
     assert.strictEqual(calls.hint.length, 1);
   });

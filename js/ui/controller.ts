@@ -14,6 +14,7 @@ export interface UiEffects {
   onSidebarSection(section: SidebarSection | null): void;
   onInfoPanel(open: boolean): void;
   onDebugPanel(open: boolean): void;
+  onRunPicker(open: boolean): void;
   onHint(hint: string): void;
   onSpeedUnit(unit: SpeedUnit): void;
 }
@@ -41,6 +42,7 @@ export class UiController {
     if (next.sidebarSection !== prev.sidebarSection) this.effects.onSidebarSection(next.sidebarSection);
     if (next.infoOpen !== prev.infoOpen) this.effects.onInfoPanel(next.infoOpen);
     if (next.debugOpen !== prev.debugOpen) this.effects.onDebugPanel(next.debugOpen);
+    if (next.runPickerOpen !== prev.runPickerOpen) this.effects.onRunPicker(next.runPickerOpen);
     if (next.speedUnit !== prev.speedUnit) this.effects.onSpeedUnit(next.speedUnit);
     this.effects.onHint(deriveHint(next, this.getRouteState()));
   }
@@ -52,6 +54,7 @@ export class UiController {
     this.effects.onSidebarSection(this._state.sidebarSection);
     this.effects.onInfoPanel(this._state.infoOpen);
     this.effects.onDebugPanel(this._state.debugOpen);
+    this.effects.onRunPicker(this._state.runPickerOpen);
     this.effects.onSpeedUnit(this._state.speedUnit);
     this.effects.onHint(deriveHint(this._state, this.getRouteState()));
   }

@@ -26,6 +26,8 @@ export interface UiState {
   infoOpen: boolean;
   /** 右侧调试面板（Inspect）展开状态 */
   debugOpen: boolean;
+  /** 回放运行选择框（分页列表）开关 */
+  runPickerOpen: boolean;
   /** 速度显示单位（点击 HUD 速度切换；默认 km/h） */
   speedUnit: SpeedUnit;
 }
@@ -41,6 +43,8 @@ export type UiEvent =
   | { type: 'TOGGLE_SECTION'; section: SidebarSection }
   | { type: 'TOGGLE_INFO' }
   | { type: 'TOGGLE_DEBUG' }
+  | { type: 'OPEN_RUN_PICKER' }
+  | { type: 'CLOSE_RUN_PICKER' }
   | { type: 'TOGGLE_SPEED_UNIT' };
 
 export const INITIAL_UI_STATE: UiState = {
@@ -52,6 +56,7 @@ export const INITIAL_UI_STATE: UiState = {
   sidebarSection: null,
   infoOpen: true,
   debugOpen: true,
+  runPickerOpen: false,
   speedUnit: 'kmh',
 };
 
@@ -87,6 +92,10 @@ export function reduce(state: UiState, e: UiEvent): UiState {
       return { ...state, infoOpen: !state.infoOpen };
     case 'TOGGLE_DEBUG':
       return { ...state, debugOpen: !state.debugOpen };
+    case 'OPEN_RUN_PICKER':
+      return state.runPickerOpen ? state : { ...state, runPickerOpen: true };
+    case 'CLOSE_RUN_PICKER':
+      return state.runPickerOpen ? { ...state, runPickerOpen: false } : state;
     case 'TOGGLE_SPEED_UNIT':
       return { ...state, speedUnit: state.speedUnit === 'kmh' ? 'ms' : 'kmh' };
   }

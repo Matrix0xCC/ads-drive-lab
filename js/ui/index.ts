@@ -15,6 +15,7 @@ import { frameCamera } from '../env/renderer.js';
 import { UiController } from './controller.js';
 import { wireToolbar } from './toolbar.js';
 import { wireSidebar, setSidebarSection } from './sidebar.js';
+import { wireRunPicker, setRunPickerOpen } from './runList.js';
 import { wireInteractions } from './interactions.js';
 import { setupReplayPanel } from './replayPanel.js';
 import { renderHint, setInfoOpen } from './hud.js';
@@ -73,6 +74,7 @@ export function setupUI(deps: UiDeps): { tick(dt: number): void } {
     onSidebarSection: (section) => setSidebarSection(section),
     onInfoPanel: (open) => setInfoOpen(open),
     onDebugPanel: (open) => setInspectorOpen(open),
+    onRunPicker: (open) => setRunPickerOpen(open),
     onHint: (hint) => renderHint(hint),
     onSpeedUnit: (unit) => { display.speedUnit = unit; },
   }, () => deps.engine.routeState);
@@ -98,6 +100,7 @@ export function setupUI(deps: UiDeps): { tick(dt: number): void } {
   const replayPanel = setupReplayPanel(deps, enterReplay, exitReplay);
   wireToolbar(deps, controller, { enterReplay, exitReplayIfActive });
   wireSidebar(controller);
+  wireRunPicker(controller, (id) => { void enterReplay(() => deps.replay.load(id)); });
   wireInteractions(deps, controller);
 
   // 右侧面板折叠按钮
@@ -127,7 +130,8 @@ export function setupUI(deps: UiDeps): { tick(dt: number): void } {
         else controller.dispatch({ type: 'TOGGLE_PAUSE' });
         break;
       case 'Escape':
-        if (st.mode === 'REPLAY') exitReplay();
+        if (st.runPickerOpen) controller.dispatch({ type: 'CLOSE_RUN_PICKER' });
+        else if (st.mode === 'REPLAY') exitReplay();
         else controller.dispatch({ type: 'CANCEL' });
         break;
       case 'r': case 'R':

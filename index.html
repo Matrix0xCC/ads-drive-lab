@@ -92,6 +92,51 @@
       border-radius: 50%; background: #ff4444; cursor: pointer; pointer-events: auto;
     }
 
+    /* ── 回放运行选择框（分页列表，Esc/× 关闭） ── */
+    #run-picker {
+      position: absolute; inset: 0; z-index: 40;
+      display: flex; align-items: center; justify-content: center;
+      background: rgba(0,0,0,0.55);
+    }
+    #run-picker-box {
+      display: flex; flex-direction: column; width: 560px; max-width: 90%; max-height: 70%;
+      background: #181818; border: 1px solid #444; border-radius: 6px;
+      color: #ddd; font-family: monospace; font-size: 12px; padding: 10px 12px;
+    }
+    .rp-header button {
+      background: #222; color: #0f0; border: 1px solid #555; cursor: pointer;
+      font-family: inherit; font-size: 12px; border-radius: 3px; padding: 0 8px;
+    }
+    #run-picker-body { flex: 1; overflow-y: auto; margin: 6px 0; }
+    .rp-row {
+      display: flex; gap: 10px; align-items: center;
+      padding: 6px 8px; border-bottom: 1px solid #262626; cursor: pointer;
+    }
+    .rp-row:hover { background: #242424; }
+    .rp-time { flex: none; color: #888; }
+    .rp-name { flex: 1; color: #fff; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .rp-map { flex: none; color: #888; }
+    .rp-verdict { flex: none; font-weight: bold; }
+    .rp-verdict.ok { color: #44ff44; }
+    .rp-verdict.warn { color: #ffaa00; }
+    .rp-empty { color: #888; padding: 16px 8px; line-height: 1.9; }
+    #run-picker-pager { display: flex; gap: 12px; align-items: center; justify-content: center; color: #aaa; }
+    #run-picker-pager button {
+      background: #333; color: #fff; border: 1px solid #555; padding: 4px 10px;
+      font-family: inherit; font-size: 12px; border-radius: 4px; cursor: pointer;
+    }
+    #run-picker-pager button:hover:not(:disabled) { background: #444; }
+    #run-picker-pager button:disabled { opacity: 0.4; cursor: default; }
+    #run-picker-msg { color: #ffaa00; font-size: 11px; min-height: 14px; text-align: center; }
+    #run-picker-actions { display: flex; justify-content: flex-end; margin-top: 6px; }
+    #btn-run-clear {
+      background: #2a2222; color: #ff8866; border: 1px solid #774433;
+      padding: 4px 10px; font-family: inherit; font-size: 12px; border-radius: 4px; cursor: pointer;
+    }
+    #btn-run-clear:hover:not(:disabled) { background: #382a2a; }
+    #btn-run-clear.armed { background: #8b2a2a; color: #fff; border-color: #c33; }
+    #btn-run-clear:disabled { opacity: 0.4; cursor: default; }
+
     /* 底部上下文提示条（文案由 UI 状态机驱动） */
     #hint-bar {
       position: absolute; bottom: 10px; left: 15px;
@@ -195,6 +240,26 @@
         <button id="btn-replay-prev" title="上一帧">&lang;</button>
         <button id="btn-replay-next" title="下一帧">&rang;</button>
         <button id="btn-replay-close" title="退出回放">&times;</button>
+      </div>
+
+      <!-- 回放运行选择框（分页列表；内容由 ui/runList.ts 渲染） -->
+      <div id="run-picker" style="display:none;">
+        <div id="run-picker-box">
+          <div class="panel-header rp-header">
+            <span>回放运行</span>
+            <button id="btn-run-picker-close" title="关闭 (Esc)">&times;</button>
+          </div>
+          <div id="run-picker-body"></div>
+          <div id="run-picker-msg"></div>
+          <div id="run-picker-pager">
+            <button id="btn-run-prev">&#9664; 上一页</button>
+            <span id="run-picker-page">- / -</span>
+            <button id="btn-run-next">下一页 &#9654;</button>
+          </div>
+          <div id="run-picker-actions">
+            <button id="btn-run-clear">清理归档</button>
+          </div>
+        </div>
       </div>
 
       <!-- 底部上下文提示（文案由 UI 状态机驱动） -->

@@ -28,7 +28,9 @@ node --test --test-name-pattern "到达检测" dist/js/test/plan/planner.test.js
 必须通过 HTTP 服务器访问，且从仓库根目录启动（index.html 的 import map 指向 `./node_modules/three`）：
 
 ```bash
-python3 -m http.server 8080   # 或 npx serve -l 8080
+npm run serve                 # 开发服务器（js/dev-server.ts）：静态文件 + DELETE /api/runs
+#                             （「回放运行」面板的「清理归档」按钮需要它；PORT 环境变量可换端口）
+# python3 -m http.server 8080 也可用（纯静态，但清理按钮不可用）
 ```
 
 修改 TS 源码后必须重新 `npx tsc`——浏览器加载的是 `dist/js/main.js`，不是 `js/` 源码。

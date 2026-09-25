@@ -8,6 +8,7 @@ import { ReplayController } from '../replay.js';
 import { parseBundle } from '../headless/bundle.js';
 import { frameCamera } from '../env/renderer.js';
 import { SIM_W, SIM_H } from '../sim/engine.js';
+import { setRunList } from './runList.js';
 
 export interface ToolbarHelpers {
   enterReplay: (load: () => Promise<void> | void) => Promise<void>;
@@ -34,7 +35,8 @@ export function wireToolbar(
   // ── 场景加载（与 headless 同源：scenarios/index.json 列表） ──
   const scenarioSelect = document.getElementById('scenario-dropdown') as HTMLSelectElement | null;
   if (scenarioSelect) {
-    fetch('scenarios/index.json')
+    // no-store：场景索引可变（新增场景后需立即出现在下拉），不吃 HTTP 缓存
+    fetch('scenarios/index.json', { cache: 'no-store' })
       .then(r => (r.ok ? r.json() : { scenarios: [] }))
       .then((idx: any) => {
         for (const entry of idx.scenarios ?? []) {
@@ -54,7 +56,7 @@ export function wireToolbar(
         return;
       }
       try {
-        const res = await fetch(`scenarios/${file}`);
+        const res = await fetch(`scenarios/${file}`, { cache: 'no-store' });   // 场景文件开发中会被编辑，不吃缓存
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const name = deps.actions.loadScenario(await res.json());
         if (name) ctl.dispatch({ type: 'SCENARIO_CHANGED', name });
@@ -72,16 +74,9 @@ export function wireToolbar(
   });
 
   document.getElementById('btn-replay-mode')?.addEventListener('click', async () => {
-    const runs = await ReplayController.listRuns();
-    if (runs.length === 0) {
-      alert('没有可回放的运行。先执行: npm run sim -- --scenario scenarios/oval-cruise.json');
-      return;
-    }
-    const choice = prompt('选择运行（输入编号）:\n' + runs.map((r, i) => `${i}: ${r.label}`).join('\n'), '0');
-    if (choice === null) return;
-    const idx = Number(choice);
-    if (Number.isNaN(idx) || !runs[idx]) return;
-    await enterReplay(() => deps.replay.load(runs[idx].id));
+    // 打开应用内运行列表（分页）；空列表在对话框内提示，不用 alert/prompt
+    setRunList(await ReplayController.listRuns());
+    ctl.dispatch({ type: 'OPEN_RUN_PICKER' });
   });
 
   document.getElementById('btn-export')?.addEventListener('click', () => deps.actions.exportRun());

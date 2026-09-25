@@ -110,6 +110,22 @@ describe('reduce: 右侧面板（信息/调试）', () => {
   });
 });
 
+describe('reduce: 回放运行选择框', () => {
+  it('默认关闭；OPEN/CLOSE 切换', () => {
+    assert.strictEqual(live().runPickerOpen, false);
+    const open = reduce(live(), { type: 'OPEN_RUN_PICKER' });
+    assert.strictEqual(open.runPickerOpen, true);
+    assert.strictEqual(reduce(open, { type: 'CLOSE_RUN_PICKER' }).runPickerOpen, false);
+  });
+
+  it('重复 OPEN/CLOSE 为 no-op（状态引用不变）', () => {
+    const open = reduce(live(), { type: 'OPEN_RUN_PICKER' });
+    assert.strictEqual(reduce(open, { type: 'OPEN_RUN_PICKER' }), open);
+    const closed = reduce(open, { type: 'CLOSE_RUN_PICKER' });
+    assert.strictEqual(reduce(closed, { type: 'CLOSE_RUN_PICKER' }), closed);
+  });
+});
+
 describe('reduce: 速度显示单位', () => {
   it('默认 km/h；TOGGLE_SPEED_UNIT 在 kmh/ms 间翻转', () => {
     assert.strictEqual(live().speedUnit, 'kmh');
