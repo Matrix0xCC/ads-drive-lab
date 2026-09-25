@@ -11,19 +11,25 @@
 // 【横向耐心、纵向保守、双阈值通行】横向排名只看 COMMIT_WINDOW 内的阻塞
 // （晚承诺）——旧版直接用 120m 视程排名选路，障碍还在几十米外就提前承诺到
 // 侧向路径，随后新障碍堵死该侧 → 死口袋（hairpin-s5 批量回归实测）。
-// 停车线由"物理可过"硬阈值（HARD_CLEAR）判定：
-//   CLEAR（舒适，车半宽+1.5m）——判"顺不顺"，只影响排名；
-//   HARD_CLEAR（车半宽+0.4m）——判"能不能过"，决定停车线。
-// 全部候选连硬阈值都过不去才停车；否则选可过的路径并限速慢行。
+// 通行性由**走廊族**（corridor.ts，spec 2026-09-25 §3/§4）判定，四层同一几何、
+// 只差膨胀量（误差感知裕度 marginFor(v) 见 margin.ts）：
+//   舒适走廊（车半宽+1.5m）    —— 判"顺不顺"，只影响排名（窗口内）；
+//   物理走廊（+ marginFor(v)）—— 判"能不能过"，决定停车线（全程）；
+//   更严/更松走廊（±0.15m）    —— 迟滞状态机（tight.ts）的进入/退出判据。
+// 全部候选连物理走廊都过不去才停车；否则选可过的路径并限速慢行。
 // （批量 A/B：只用舒适阈值判停 → 6/10 场景中途永久停车，其中 oval-s4/
 //   hairpin-s5 旧规划器干净通过——存在可行路线，被过保守的判停拒了。）
 
 import { FrenetReference, LidarScan } from '../../shared/types.js';
-import { Radians, Px, DimLess, m, mps2, px, perpx, dimless } from '../../shared/dimensions.js';
+import { Radians, Px, DimLess, m, mps, mps2, px, perpx, dimless } from '../../shared/dimensions.js';
 import { solveQuintic } from './polynomial.js';
 import { frenetToCartesian } from './frenet.js';
+import { buildCorridor, deriveTargets, firstExit, coverageFromScan } from './corridor.js';
+import type { Corridor } from './corridor.js';
+import { marginFor } from './margin.js';
 import { MAX_SENSOR_DIST } from '../perception.js';
 import { TRACK_HALF_WIDTH } from '../../env/track.js';
+import { BOUNDS_BUFFER } from '../../env/car.js';
 
 export const PATH_HORIZON: Px = m(120);
 /** 横移发展距离：在前 40m 内完成横移到目标，其后保持偏移。
@@ -37,6 +43,14 @@ const DEVELOP_MARGIN: Px = m(6);
 const A_LAT_MAX = mps2(3.5);
 /** 归一化五次多项式 10s³−15s⁴+6s⁵ 的峰值 |l''|（发展段内峰值横向加速度系数） */
 const QUINTIC_PEAK_ACCEL = 5.7735;
+/** 横向机动可行速度上限（收敛迭代用）：峰值横向加速度 QUINTIC_PEAK_ACCEL·|Δl|·v²/S²
+ *  ≤ A_LAT_MAX → v ≤ √(A_LAT_MAX·S²/(QUINTIC_PEAK_ACCEL·|Δl|))——与 developMin 同式反解，
+ *  把"路径几何需要多大横移、在多长发展段内完成"反馈成速度上限（仿真单位/s）。 */
+export function lateralSpeedCap(dlU: number, developU: number): number {
+  if (!(dlU > 1e-6)) return Infinity;
+  return Math.sqrt((A_LAT_MAX as number) * developU * developU / (QUINTIC_PEAK_ACCEL * dlU));
+}
+
 /** 横向选路提交窗口：只有窗口内的阻塞参与候选排名（"横向耐心"——障碍还远时
  *  不提前选边；进入窗口再决策仍有 60m 完成横移）。停车线不看此窗口。 */
 export const COMMIT_WINDOW: Px = m(60);
@@ -45,7 +59,26 @@ export const PATH_STEPS = 40;
 const W_PATH_CENTER = 0.3;    // 中心偏离²（沿用旧 W_CENTER 量级）
 const W_PATH_CURV = 1.0;      // 路径曲率（航向变化累计）
 const W_SWITCH_PATH = 100;    // 路径跨档切换惩罚（沿用旧 W_SWITCH）
-const NUDGE = m(2.5);         // 挪移档横向偏移
+/** 横向换边迟滞带：squeeze/hard 档主键是"阻塞点弧长"（阈值穿越量、按网格量化），
+ *  左右两侧差异常在一格（3m）之内 → 逐帧翻边（oval-s9/hairpin-s9 实证：目标在
+ *  ±3.8m 间以 ~0.3s 周期来回，车左右摆着蹭上障碍）。换边候选的主键减此带宽 =
+ *  "换边需要明显更晚（>12m）才阻塞"，把承诺锁到前后帧。 */
+const LATERAL_SWITCH_BAND = m(12);
+const W_EDGE = 0.5;           // 贴边惩罚权重（与 W_PATH_CENTER 同量级起手）
+const EDGE_BAND = m(0.5);     // 贴边惩罚生效带：距走廊边界 0.5m 以内
+/** 迟滞粘滞带（tight.ts 施密特触发）：物理阈值上下各 0.15m */
+const HYST_BAND: Px = m(0.15);
+/** 未观测区（遮挡阴影/视锥外）的口径——A/B 实验开关（离线量指标用；可视化走廊始终不裁，
+ *  灰蓝分色要显示原始自由区）：
+ *   'free'    —— 旧行为：未观测 = 自由（无处理）
+ *   'blocked' —— 未观测 = 不可通行（裁判定走廊）。实测退化：规划视程(120m)总是超出可见距离
+ *                (~70m) → 所有候选都在可见边界外"硬阻塞" → 封死 → 永久停车
+ *   'speed'   —— 见-即-停限速：不裁几何，只按可见距离限制速度 v ≤ √(2·A_BRAKE·d_vis) */
+export type UnknownHandling = 'free' | 'blocked' | 'speed';
+const UNKNOWN_HANDLING: UnknownHandling = 'speed';
+/** 紧间隙慢行限速（双阈值：物理可过但低于舒适间隙时）。速度层在"舒适阻塞但物理可过"
+ *  时不命令超过它；物理走廊的裕度评估也按它取速度下限（见 marginU）。 */
+export const TIGHT_SPEED = mps(8);
 
 export interface PathCandidate {
   targetL: Px;
@@ -59,6 +92,8 @@ export interface PathCandidate {
   /** 全程硬阈值下首次命中的绝对弧长（blockedHard 时有效，否则 Infinity） */
   sBlockHard: number;
   cost: number;
+  /** 实际使用的发展段长度（自适应缩短后的值，仿真单位；供规划器反解横向机动可行速度） */
+  develop: number;
   /** 合成阶段按相对弧长求横向偏移（供 l(s(t)) 采样）；内部 clamp 到 [0, PATH_HORIZON] */
   evalL(s: number): Px;
 }
@@ -68,44 +103,23 @@ export interface PathLayerResult {
   ranked: PathCandidate[];   // 排序分级：舒适畅通（cost 升序）→ 舒适阻塞但物理可过（sBlock 降序）→ 物理阻塞（sBlockHard 降序）
   allBlocked: boolean;       // 窗口内全部候选低于舒适间隙
   sBlock: number;            // best 的 sBlock（舒适阻塞时）
-  allBlockedHard: boolean;   // 全部候选连物理硬阈值都过不去 → 停车线触发条件
+  allBlockedHard: boolean;   // 全部候选连物理硬阈值都过不去（标称）
   sBlockHard: number;        // 物理层最晚首个阻塞弧长（allBlockedHard 时有效，否则 Infinity）
-}
-
-/** 线段 AB 到点 P 的最短距离 */
-function segPointDist(ax: number, ay: number, bx: number, by: number, px0: number, py0: number): number {
-  const dx = bx - ax, dy = by - ay;
-  const len2 = dx * dx + dy * dy;
-  if (len2 === 0) return Math.hypot(px0 - ax, py0 - ay);
-  let t = ((px0 - ax) * dx + (py0 - ay) * dy) / len2;
-  t = Math.max(0, Math.min(1, t));
-  return Math.hypot(px0 - (ax + t * dx), py0 - (ay + t * dy));
-}
-
-/** 两线段最短距离（含交叉与端点最近情形） */
-function segSegDist(
-  ax: number, ay: number, bx: number, by: number,
-  cx: number, cy: number, dx2: number, dy2: number,
-): number {
-  const ux = bx - ax, uy = by - ay;
-  const vx = dx2 - cx, vy = dy2 - cy;
-  const wx = ax - cx, wy = ay - cy;
-  const a = ux * ux + uy * uy;       // |u|²
-  const b = ux * vx + uy * vy;       // u·v
-  const c = vx * vx + vy * vy;       // |v|²
-  const d = ux * wx + uy * wy;       // u·w
-  const e = vx * wx + vy * wy;       // v·w
-  const denom = a * c - b * b;
-  let sN: number, sD = denom, tN: number, tD = denom;
-  if (denom < 1e-9) {                // 平行：取端点组合的最小值
-    sN = 0; sD = 1; tN = e; tD = c;
-  } else {
-    sN = b * e - c * d;
-    tN = a * e - b * d;
-  }
-  const s = sN <= 0 ? 0 : (sN >= sD ? 1 : sN / sD);
-  const t = tN <= 0 ? 0 : (tN >= tD ? 1 : tN / tD);
-  return Math.hypot((ax + s * ux) - (cx + t * vx), (ay + s * uy) - (cy + t * vy));
+  /** 迟滞输入（tight.ts）：∃候选通过"更严走廊"（物理 + 0.15m）——SEALED 退出条件 */
+  deepClear: boolean;
+  /** 迟滞输入：∃候选通过"更松走廊"（物理 − 0.15m）——其反为 SEALED 进入条件 */
+  permissiveClear: boolean;
+  /** 物理走廊实际膨胀量（仿真单位；= 车半宽 + marginFor(几何评估速度)×4）——调试与回归断言用 */
+  marginU: number;
+  /** 可行驶半宽（车中心 |l| 上限，仿真单位）——可视化/调试用 */
+  lMaxU: number;
+  /** 物理走廊（自由段 + 瓶颈）——可视化数据源（可视化几何见 corridor.ts 的纯函数） */
+  corridor: Corridor;
+  /** 本帧未观测区口径（可视化/展示用） */
+  unknownHandling: 'free' | 'blocked' | 'speed';
+  /** 可视化用的细网格物理走廊（2× 采样 = 1.5m；只影响画出来的带子边界平滑度，
+   *  不参与任何判定——判定仍走 3m 网格的 corridor，保证与路径采样索引对齐） */
+  vizCorridor: Corridor;
 }
 
 export function solvePathLayer(o: {
@@ -113,24 +127,24 @@ export function solvePathLayer(o: {
   carX: number; carY: number; lidarScan: LidarScan;
   carWidth: Px; collisionRadius: Px; laneOffset: Px;
   prevTargetL: number | null;
+  /** 路线总弧长（开环）；传入后走廊视程截到路线剩余——mission 之外的障碍
+   *  不参与规划（"路线终点之外"不是车要去的地方）。闭环（巡游）不传。 */
+  sEnd?: number;
 }): PathLayerResult {
-  // 可行驶域（与 checkBounds 复位阈值一致；0.6m 跟踪过冲预留）
+  // 可行驶域 = checkBounds 复位阈值（车半宽 + 复位缓冲）− 0.6m 跟踪过冲预留。
+  // 用同一个 BOUNDS_BUFFER 派生，避免"规划域放宽了、复位崖没动"（会撞复位传送）。
   const L_MAX = (TRACK_HALF_WIDTH as number)
-    - ((o.carWidth as number) / 2 + (m(1.5) as number)) - (m(0.6) as number);
+    - ((o.carWidth as number) / 2 + (BOUNDS_BUFFER as number)) - (m(0.6) as number);
   const lo = o.laneOffset as number;
 
-  // ── 障碍命中点采集（笛卡尔）──
+  // ── 障碍命中点采集（笛卡尔 → 走廊膨胀）──
   // 路径层的判据是几何问题："路径离感知到的障碍表面点是否足够远"。
-  // 直接以命中点为圆心做间隙判定——不绕道极坐标锥形（锥形窗口在长视程下
-  // 反复出现边界误判，2026-09-19 解耦升级实测）。
+  // 命中点/链段按"车半宽 + 裕度"的圆/胶囊膨胀成阻塞区（不绕道极坐标锥形——
+  // 锥形窗口在长视程下反复出现边界误判，2026-09-19 解耦升级实测）。
   // 职责分工：路径层判"几何上过得去"（含跟踪误差余量）；速度层管"安全距离"
-  // （刹车/停车线）。间隙 = 车半宽 + 1.5m：含跟踪误差（实测 ~0.2m）与表面
+  // （刹车/停车线）。舒适间隙 = 车半宽 + 1.5m：含跟踪误差（实测 ~0.2m）与表面
   // 采样误差的余量——初版 0.5m 实测过乐观（接受紧通过后易进入死口袋，
   // 批量 A/B 劣化 6/195→7/407，2026-09-19）。
-  const CLEAR = ((o.carWidth as number) / 2 + (m(1.5) as number));
-  const CLEAR_LOW = CLEAR + (m(2.0) as number);         // 低置信命中（边缘模糊）更大间隙
-  // 物理可通过硬阈值：车半宽 + 0.4m 车身余量。路径低于此值才算"过不去"。
-  const HARD_CLEAR = ((o.carWidth as number) / 2 + (m(0.4) as number));
   const maxDist = MAX_SENSOR_DIST as number;
   const DISCONT = m(2.0) as number;                     // 表面连续性阈值（相邻命中深度差）
 
@@ -154,19 +168,51 @@ export function solvePathLayer(o: {
     }
   }
 
-  // 候选目标：{车道中心, ±2.5m/±5m 挪移, ±走廊边界} clamp + 去重。
-  // 两级挪移覆盖中间间隙：单级 2.5m 时，障碍贴一侧的宽间隙里只有走廊边缘候选
-  // 可清，车被推上边缘（距复位崖 |l|=5.0 仅 0.6m 跟踪余量）→ 越界复位
-  // （oval-s2 批量实证：复位后落回障碍正前方导致连锁碰撞）。
-  const raw = [lo, lo - (NUDGE as number), lo + (NUDGE as number),
-    lo - 2 * (NUDGE as number), lo + 2 * (NUDGE as number), -L_MAX, L_MAX];
-  const targets: number[] = [];
-  for (const v of raw) {
-    const c = Math.max(-L_MAX, Math.min(L_MAX, v));
-    if (!targets.some(t => Math.abs(t - c) < 0.5)) targets.push(c);
-  }
+  // ── 走廊族（A 走廊表示 + B 误差裕度/迟滞带，spec 2026-09-25 §3/§4）──
+  //   舒适走廊（车半宽 + max(1.5m, 标定 p95)）：横向排名 + "要不要慢行"（晚承诺窗口内）
+  //   物理走廊（车半宽 + marginFor(v)）：能不能过 → 停车线；候选由它派生（必须用
+  //     物理走廊：舒适走廊在紧间隙处可能整体封死，用它派生会丢掉紧间隙候选）
+  //   更严走廊（物理 + 0.15m）  ：迟滞退出条件（确实过得去才恢复）
+  //   更松走廊（物理 − 0.15m）  ：迟滞进入条件（确实过不去才封死）
+  //
+  // 【裕度口径（spec §4.1/§5）】物理走廊用**标定速度表** marginFor(v)（v = 几何评估
+  //   速度 = max(v0, 慢行档)，解析见 planner 的收敛迭代）；舒适走廊取 max(1.5m, 标定 p95)
+  //   ——实测 p95 ≤1.15m < 1.5m，故舒适档在当前速度域内仍是 1.5m（有实测下界兜底）。
+  const halfW = (o.carWidth as number) / 2;
+  // 几何评估速度（m/s）：v0 换成 m/s 后与慢行档取大——注意 TIGHT_SPEED 是仿真单位（32），
+  // 必须 /4 再进 marginFor（评审实测教训：直接传 32 会让裕度恒为表尾 0.615m，标定表失效）
+  const marginU = marginFor(Math.max((o.v0 as number) / 4, (TIGHT_SPEED as number) / 4)) * 4;
+  const comfortU = Math.max(m(1.5) as number, marginU);        // 舒适裕度（配不配，实测下界）
+  const bandU = HYST_BAND as number;
+  // 走廊视程：默认 120m；有路线时截到"路线剩余"（步长不变 → 网格与路径采样
+  // 索引仍一一对应，firstExit 按索引比较依然成立；超出走廊的路径点不判阻塞）。
+  const stepU = (PATH_HORIZON as number) / PATH_STEPS;
+  const corridorHorizon = o.sEnd === undefined ? (PATH_HORIZON as number)
+    : Math.max(stepU, Math.floor((o.sEnd - o.s0) / stepU) * stepU);
+  const coverage = UNKNOWN_HANDLING === 'blocked' ? coverageFromScan(o.lidarScan, o.carX, o.carY) : undefined;
+  const mkCorridor = (extra: number, steps = Math.round(corridorHorizon / stepU), useCoverage = true) => buildCorridor({
+    ref: o.ref, s0: o.s0, hits, hitSegs,
+    inflate: halfW + extra, inflateLow: halfW + extra + (m(2.0) as number),
+    lMax: L_MAX, horizon: corridorHorizon, steps,
+    windowRel: COMMIT_WINDOW as number,
+    coverage: useCoverage ? coverage : undefined,
+  });
+  const comfort = mkCorridor(comfortU);
+  const physical = mkCorridor(marginU);
+  const deep = mkCorridor(marginU + bandU);
+  const permissive = mkCorridor(Math.max(0, marginU - bandU));
+  // 可视化专用：2× 采样（1.5m）的物理走廊——带子边界更贴曲率（纯绘制用，判定不受影响）
+  const vizCorridor = mkCorridor(marginU, PATH_STEPS * 2, false);   // 可视化不裁（灰蓝标注未观测区）
+
+  // 候选由走廊瓶颈处派生（间隙中心必被覆盖——旧版固定档位打不中缝隙中心，
+  // 障碍贴一侧时被迫贴走廊边缘，oval-s2 类越界复位由此而来）
+  const targets = deriveTargets({
+    corridor: physical, laneOffset: lo, l0: o.l0 as number, lMax: L_MAX, maxTargets: 7,
+  });
 
   const candidates: PathCandidate[] = [];
+  let sawDeepClear = false;         // ∃候选通过"更严走廊"（迟滞退出条件）
+  let sawPermissiveClear = false;   // ∃候选通过"更松走廊"（迟滞进入条件的反）
   for (const targetL of targets) {
     // 横向夹在 [l0, target] 内：为满足初值斜率（车头指向），五次多项式会先向
     // 端点外下沉，逐帧重读 l0 形成棘轮 → 车贴走廊边缘时撞 |l|=5.0 复位崖
@@ -198,33 +244,9 @@ export function solvePathLayer(o: {
       return { points, evalLat, centerSum, curvSum };
     };
 
-    // 阻塞判定：路径折线到"命中点/命中表面折线"的最短距离 ≤ 阈值，返回沿路径
-    // 首个命中的绝对弧长（Infinity = 无命中）。用线段而非采样点（路径采样间距
-    // 3m > 间隙半径，会混叠漏判，实测）。
-    const firstBlockArc = (points: PathCandidate['points'], windowRel: number, hard: boolean): number => {
-      for (let i = 0; i < points.length - 1; i++) {
-        if (points[i].s - o.s0 > windowRel) break;
-        const a = points[i], b = points[i + 1];
-        for (const h of hits) {
-          const tol = hard ? HARD_CLEAR : (h.low ? CLEAR_LOW : CLEAR);
-          if (segPointDist((a.x as number), (a.y as number), (b.x as number), (b.y as number), h.x, h.y) <= tol) {
-            return a.s;
-          }
-        }
-        for (const sgm of hitSegs) {
-          const tol = hard ? HARD_CLEAR : (sgm.low ? CLEAR_LOW : CLEAR);
-          if (segSegDist((a.x as number), (a.y as number), (b.x as number), (b.y as number),
-            sgm.ax, sgm.ay, sgm.bx, sgm.by) <= tol) {
-            return a.s;
-          }
-        }
-      }
-      return Infinity;
-    };
-
-    // 自适应发展段（adaptive development）：默认 40m 内若已出现首个阻塞，说明
+    // 自适应发展段（adaptive development）：默认 40m 内若已越出走廊，说明
     // 路径还没横移到位就从障碍横向范围里穿过（判的是实际曲线而非终点目标）——
-    // 把发展段缩到阻塞点之前，让横移提前完成（hairpin-s7 实测停车根因：
+    // 把发展段缩到越界点之前，让横移提前完成（hairpin-s7 实测停车根因：
     // 障碍 20.8m 处，40m 发展段到那里只走完一半 → 连硬阈值都过不去 → 停死）。
     // 下限按运动学随速度缩放：峰值横向加速度 = 5.77·|Δl|·v²/S² ≤ A_LAT_MAX
     // → S_min = √(5.77·|Δl|·v²/A_LAT_MAX)。高速时不得规划跟不上的急横移
@@ -235,43 +257,80 @@ export function solvePathLayer(o: {
       PATH_DEVELOP as number,
       Math.sqrt(QUINTIC_PEAK_ACCEL * dl * o.v0 * o.v0 / (A_LAT_MAX as number)),
     ));
-    let { points, evalLat, centerSum, curvSum } = buildPath(PATH_DEVELOP as number);
-    const firstAny = firstBlockArc(points, Infinity, false);
+    let usedDevelop = PATH_DEVELOP as number;
+    let { points, evalLat, centerSum, curvSum } = buildPath(usedDevelop);
+    const firstAny = firstExit(comfort, points, Infinity);
     if (firstAny - o.s0 < (PATH_DEVELOP as number)) {
-      const develop = Math.max(developMin,
+      usedDevelop = Math.max(developMin,
         Math.min(PATH_DEVELOP as number, firstAny - o.s0 - (DEVELOP_MARGIN as number)));
-      ({ points, evalLat, centerSum, curvSum } = buildPath(develop));
+      ({ points, evalLat, centerSum, curvSum } = buildPath(usedDevelop));
     }
 
-    // 舒适层只看窗口（COMMIT_WINDOW，决定横向排名）；硬阈值看全程
-    // （决定停车线——只有物理上真的过不去才停）。
-    const sBlock = firstBlockArc(points, COMMIT_WINDOW as number, false);
-    const sBlockHard = firstBlockArc(points, Infinity, true);
+    // 阻塞判定 = 越出走廊：舒适走廊只看窗口（决定横向排名）；物理走廊看全程
+    // （决定停车线）；更严/更松走廊的全程结果供迟滞状态机（tight.ts）消费。
+    const sBlock = firstExit(comfort, points, COMMIT_WINDOW as number);
+    const sBlockHard = firstExit(physical, points, Infinity);
     const blocked = sBlock < Infinity;
     const blockedHard = sBlockHard < Infinity;
+    if (firstExit(deep, points, Infinity) === Infinity) sawDeepClear = true;
+    if (firstExit(permissive, points, Infinity) === Infinity) sawPermissiveClear = true;
 
-    let cost = W_PATH_CENTER * centerSum / points.length + W_PATH_CURV * curvSum / points.length;
+    // 贴边惩罚（edge penalty）：逼近物理走廊边界时平滑加代价，与"间隙中心
+    // 偏好"一致（也抑制贴走廊边缘——贴边距复位崖仅 0.6m，oval-s2 类教训）。
+    let edgeSum = 0;
+    for (let i = 0; i < points.length; i++) {
+      const step = physical.steps[i];
+      if (!step) break;                                       // 走廊之外（路线结束后）不惩罚
+      const l = points[i].l as number;
+      let dEdge = 0;
+      for (const sg of step.free) {
+        if (l >= sg.lmin && l <= sg.lmax) { dEdge = Math.min(l - sg.lmin, sg.lmax - l); break; }
+      }
+      const over = (EDGE_BAND as number) - dEdge;
+      if (over > 0) edgeSum += over * over;
+    }
+
+    let cost = W_PATH_CENTER * centerSum / points.length + W_PATH_CURV * curvSum / points.length
+      + W_EDGE * edgeSum / points.length;
     if (o.prevTargetL !== null && Math.abs(targetL - o.prevTargetL) > 5 && targetL !== 0) cost += W_SWITCH_PATH;
 
     candidates.push({
       targetL: px(targetL), points, blocked, sBlock, blockedHard, sBlockHard, cost,
+      develop: usedDevelop,
       evalL: (s) => evalLat(Math.max(0, Math.min(s, PATH_HORIZON as number))),
     });
   }
 
   // 分级排序：舒适畅通（按代价）→ 舒适阻塞但物理可过（按最晚舒适碰撞）→ 物理阻塞（按最晚硬碰撞）
+  // 注意 tier3 必须带 `c.blocked` 条件：blocked 是**窗口内**判定、blockedHard 是**全程**
+  // 判定——"窗口内畅通但远处（>60m）被挡"是合法组合（晚承诺哲学：远处障碍不参与选路），
+  // 该候选属 tier1；若 tier3 只按 blockedHard 过滤会把它重复计入（ranked 出现重复项）。
+  // 换边代价：与 cost 里的 W_SWITCH_PATH 同判据，折算进分级主键（见 LATERAL_SWITCH_BAND）
+  const switchU = (t: number) => (o.prevTargetL !== null && Math.abs(t - o.prevTargetL) > 5 && t !== 0)
+    ? (LATERAL_SWITCH_BAND as number) : 0;
   const tierClear = candidates.filter(c => !c.blocked).sort((a, b) => a.cost - b.cost);
-  const tierSqueeze = candidates.filter(c => c.blocked && !c.blockedHard).sort((a, b) => b.sBlock - a.sBlock);
-  const tierHard = candidates.filter(c => c.blockedHard).sort((a, b) => b.sBlockHard - a.sBlockHard);
+  const tierSqueeze = candidates.filter(c => c.blocked && !c.blockedHard).sort((a, b) =>
+    (b.sBlock - switchU(b.targetL as number)) - (a.sBlock - switchU(a.targetL as number)));
+  const tierHard = candidates.filter(c => c.blocked && c.blockedHard).sort((a, b) =>
+    (b.sBlockHard - switchU(b.targetL as number)) - (a.sBlockHard - switchU(a.targetL as number)));
   const ranked = [...tierClear, ...tierSqueeze, ...tierHard];
   const best = ranked[0];
-  // 停车线基准：全部候选物理阻塞时，取"最晚硬碰撞"作为可抵达的最远点
-  const allBlockedHard = tierHard.length === candidates.length;
+  // 停车线基准：全部候选物理阻塞（全程）时触发。判据必须直接对候选全查
+  // `blockedHard`——tierHard 里只有"窗口内也阻塞"的子集（tier 互斥修复后），
+  // 用 tierHard.length 会在"窗口外全宽墙"（窗口内畅通、全程硬阻塞）下漏判为
+  // 可通行 → 停车线取到 Infinity → 速度剖面 NaN（planner-safety 115m 实测）。
+  const allBlockedHard = candidates.every(c => c.blockedHard);
   return {
     best, ranked,
     allBlocked: tierClear.length === 0,
     sBlock: best.sBlock,
     allBlockedHard,
+    // 迟滞输入（tight.ts）：deepClear = ∃候选通过"更严走廊"（m+0.15）；
+    // permissiveClear = ∃候选通过"更松走廊"（m−0.15）
+    deepClear: sawDeepClear,
+    permissiveClear: sawPermissiveClear,
+    marginU, lMaxU: L_MAX, corridor: physical, vizCorridor,
+    unknownHandling: UNKNOWN_HANDLING,
     sBlockHard: allBlockedHard ? best.sBlockHard : Infinity,
   };
 }

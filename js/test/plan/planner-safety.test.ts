@@ -91,6 +91,23 @@ describe('不变量', () => {
     assert.ok(traj.type !== 'emergency', '无障碍不应急');
   });
 
+  it('封死 → 畅通抖动：退封需连续 3 帧确证（迟滞状态机接线）', () => {
+    // 同一 snapshot（同一 track 对象）连续 plan()，迟滞状态才被记忆
+    const snap = makeSnapshot(makeCar(500, 0, 0, 60));
+    plan(snap, lidarWithObstacle(0, 60, 200));            // 15m 全宽墙 → 封死
+    assert.strictEqual(debug.planning!.tight, 'SEALED');
+    plan(snap, lidarClear());
+    assert.strictEqual(debug.planning!.tight, 'SEALED', '单帧畅通不得退封');
+    plan(snap, lidarClear());
+    assert.strictEqual(debug.planning!.tight, 'SEALED', '2 帧仍不退封');
+    plan(snap, lidarClear());
+    assert.strictEqual(debug.planning!.tight, 'NONE', '3 帧连续畅通后退封');
+    // 停车线不得在退封窗口内产生 NaN 剖面（记忆滞后窗口的兜底）
+    for (const pt of plan(snap, lidarWithObstacle(0, 60, 200)).points) {
+      assert.ok(Number.isFinite(pt.v as number) && Number.isFinite(pt.x as number), '轨迹不得含 NaN');
+    }
+  });
+
   it('轨迹点速度不超 maxSpeed=170', () => {
     const traj = plan(makeSnapshot(makeCar(500, 0, 0, 150)), lidarClear());
     for (const pt of traj.points) {

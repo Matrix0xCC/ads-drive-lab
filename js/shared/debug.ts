@@ -15,6 +15,33 @@ export interface PerceptionDebug {
   filteredHits: number;        // 背景减除后保留数
 }
 
+/** 走廊可视化载荷（渲染层读取；直接引用路径层已有对象，零拷贝。
+ *  shared 不依赖 algo，故此处结构化声明（字段与 corridor.ts 的 Corridor/PathCandidate 对齐）。 */
+export interface PlanningViz {
+  /** 自由带四边形（笛卡尔；每对相邻网格步的自由段交集） */
+  bands: { x: number; y: number }[][];
+  /** 瓶颈横断线（笛卡尔；全封死时一条 ±lMax 满宽标记） */
+  pinchSegments: { x: number; y: number }[][];
+  /** 瓶颈摘要（sealed = 无任何自由位置） */
+  pinch: { s: number; width: number; sealed: boolean } | null;
+  /** 每条自由带是否被本帧雷达真正扫到（与 bands 一一对应；false = 遮挡阴影/视锥外，属"未知"） */
+  bandObserved: boolean[];
+  /** 观测极限横断线（笛卡尔；空数组 = 全观测，不画） */
+  obsLimitSegments: { x: number; y: number }[][];
+  /** 未观测区外边界线段（笛卡尔；共享边已去重，供渲染层描边） */
+  unobsBoundary: { x: number; y: number }[][];
+  /** 可视化网格步长（仿真单位；= 规划网格的一半，带子边界更贴曲率） */
+  stepU: number;
+  /** 候选路径（targetL/develop/阻塞标记/首次越界弧长/路径点——路径点带 s 供画发展段与截断） */
+  candidates: {
+    targetL: number; develop: number; blocked: boolean; blockedHard: boolean;
+    sBlock: number; sBlockHard: number;
+    points: { s: number; x: number; y: number }[];
+  }[];
+  /** 最优候选目标横向偏移（渲染层高亮用） */
+  bestTargetL: number;
+}
+
 /** 规划模块内部状态（解耦架构：路径层候选 + 速度层模式） */
 export interface PlanningDebug {
   state: string;               // 当前状态机状态
@@ -33,6 +60,18 @@ export interface PlanningDebug {
   speedTarget: number;
   /** 速度层模式：cruise | stop | emergency */
   speedMode: string;
+  /** 紧间隙迟滞状态（tight.ts）：NONE | CREEPING | SEALED */
+  tight: string;
+  /** 路径-速度收敛迭代的路径层求值次数（2..3；spec 2026-09-25 §5） */
+  rounds: number;
+  /** 种子假设不自洽（速度上限 ≠ 假设）→ 本帧确实需要迭代修正 */
+  revised: boolean;
+  /** 本帧 plan() 总耗时（ms；只记录，不参与决策） */
+  planMs: number;
+  /** 迭代末轮的速度假设（仿真单位/s；几何评估速度，供 inspect 面板与不动点断言） */
+  vAssume: number;
+  /** 走廊可视化载荷（渲染层用；未接线时为 null） */
+  viz: PlanningViz | null;
   remainingDist: number;
 }
 

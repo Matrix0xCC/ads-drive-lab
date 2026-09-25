@@ -1,11 +1,14 @@
 // ==================== 测试：路径层（SL 空间） ====================
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { solvePathLayer, PATH_HORIZON } from '../../algo/plan/paths.js';
+import { solvePathLayer, PATH_HORIZON, PATH_DEVELOP, TIGHT_SPEED, lateralSpeedCap } from '../../algo/plan/paths.js';
+import { marginFor } from '../../algo/plan/margin.js';
 import { buildFrenetReference } from '../../algo/plan/frenet.js';
 import { CarState, LidarScan } from '../../shared/types.js';
 import { Px, rad, m, mps, mps2, px, pxps, dimless } from '../../shared/dimensions.js';
 import { MAX_SENSOR_DIST } from '../../algo/perception.js';
+import { TRACK_HALF_WIDTH } from '../../env/track.js';
+import { BOUNDS_BUFFER } from '../../env/car.js';
 
 const LO = m(1.875) as number;
 
@@ -50,8 +53,10 @@ describe('路径层：候选生成与域约束', () => {
   it('全部候选在可行驶域内，采样覆盖整个视程', () => {
     const r = solve(clearScan());
     assert.ok(r.ranked.length >= 3);
+    // 规划域 = TRACK_HALF_WIDTH − (车半宽 + 复位缓冲 BOUNDS_BUFFER) − 0.6m 过冲预留
+    const lMaxU = (TRACK_HALF_WIDTH as number) - ((m(1.0) as number) + (BOUNDS_BUFFER as number)) - (m(0.6) as number);
     for (const p of r.ranked) {
-      assert.ok(Math.abs(p.targetL as number) <= 17.6 + 1e-6, `越界 targetL=${p.targetL}`);
+      assert.ok(Math.abs(p.targetL as number) <= lMaxU + 1e-6, `越界 targetL=${p.targetL}（域 ±${lMaxU}）`);
       assert.strictEqual(p.points.length, 41);   // PATH_STEPS + 1
       assert.ok((p.points[40].s - p.points[0].s) > (PATH_HORIZON as number) - 1);
     }
@@ -100,11 +105,17 @@ describe('路径层：提交窗口（横向耐心）', () => {
     assert.strictEqual(r.sBlockHard, Infinity);
   });
 
-  it('窗口内障碍（200u=50m）→ 本车道判阻塞，最优选侧', () => {
+  it('窗口内障碍（200u=50m）→ 本车道判阻塞，最优选侧（间隙中心）', () => {
+    // 候选取自走廊瓶颈处自由段（间隙中心 + 边界内缩），不再是从固定档位里挑——
+    // 窄障碍的避让幅度只比间隙边界多出"内缩前的中心"，故"侧移 >2m"这类旧断言
+    // 不再成立；要判的是"最优不在本车道、且舒适畅通"。
     const r = solve(blockedScan(200, 0.025));
     const inLane = r.ranked.find(p => Math.abs((p.targetL as number) - LO) < 1)!;
     assert.ok(inLane && inLane.blocked, '窗口内应判阻塞');
-    assert.ok(Math.abs((r.best.targetL as number) - LO) > 8, '应选侧向路径');   // >2m
+    assert.strictEqual(r.allBlocked, false, '存在舒适畅通候选');
+    assert.strictEqual(r.best.blocked, false, '最优应舒适畅通');
+    assert.ok((r.best.targetL as number) > (inLane.targetL as number), '最优应位于本车道右侧（间隙中心）');
+    assert.strictEqual(r.sBlockHard, Infinity, '物理层畅通 → 停车线不触发');
   });
 });
 
@@ -124,11 +135,12 @@ describe('路径层：横向路径不越出 [l0, target]', () => {
 });
 
 describe('路径层：自适应发展段（adaptive development）', () => {
-  it('障碍落在默认发展段内 → 缩短发展段提前完成横移，候选恢复可过', () => {
+  it('障碍落在默认发展段内 → 缩短发展段提前完成横移，左侧候选恢复可过', () => {
     // 车在 l=+3.5m 偏右；前方 25m 有横跨 l≈±0.9m 的障碍链（命中链段）。
-    // 默认 40m 发展段：路径到障碍处才横移约 1/3（l≈−2.2m）→ 距链段仅 ~1.3m，
-    // 硬阈值（HARD_CLEAR=1.4m）也过不去 → 停车线（hairpin-s7 实测停车根因）。
-    // 自适应后：发展段缩到 ~16m，到障碍前已到位 (−4.4m) → 可通过。
+    // 默认 40m 发展段：路径到障碍处才横移约 1/3 → 连硬阈值也过不去 → 停车线
+    // （hairpin-s7 实测停车根因）。自适应后发展段缩到 ~18m，到障碍前已到位。
+    // 反事实核验（临时禁用自适应分支重跑）：左侧候选 sBlockHard=96（硬阻塞）——
+    // 自适应分支是可过性的必要条件，本测试确实卡在该机制上。
     const n = 61, angles: any[] = [], distances: any[] = [];
     for (let i = 0; i < n; i++) {
       const a = -Math.PI / 3 + (i / (n - 1)) * 2 * Math.PI / 3;
@@ -137,20 +149,24 @@ describe('路径层：自适应发展段（adaptive development）', () => {
     }
     const scan: LidarScan = { angles, distances, rawDistances: [...distances], confidences: new Array(61).fill(1), timestamp: 0 };
     const r = solve(scan, { l0: 14, speed: 20 });   // 车在 l=+3.5m、低速 5m/s（停车后起步的情境：允许急横移）
-    const left = r.ranked.find(p => Math.abs((p.targetL as number) + 17.6) < 0.5)!;
-    assert.ok(left, '应有 −4.4m 走廊候选');
-    assert.strictEqual(left.blocked, false,
-      `−4.4 候选应通过（实际 comfort=${left.blocked} hard=${left.blockedHard}）`);
+    const leftmost = r.ranked.reduce((a, b) => ((b.targetL as number) < (a.targetL as number) ? b : a));
+    assert.ok((leftmost.targetL as number) < -(m(3) as number), `应存在左侧走廊候选，最左 ${leftmost.targetL}`);
+    assert.strictEqual(leftmost.blocked, false,
+      `最左候选 ${(leftmost.targetL as number) / 4}m 应舒适通过（实际 comfort=${leftmost.blocked} hard=${leftmost.blockedHard}）`);
     assert.strictEqual(r.allBlockedHard, false, '物理层应有可过候选（不得触发停车线）');
+    // 候选记录实际使用的发展段（自适应缩短后）——规划器按它反解横向机动可行速度
+    assert.ok((leftmost.develop as number) > 0 && (leftmost.develop as number) < (PATH_DEVELOP as number),
+      `发展段应被自适应缩短，实际 ${leftmost.develop}`);
   });
 });
 
 describe('路径层：双阈值（舒适选路 / 物理通行）', () => {
   it('全部候选低于舒适间隙、但存在物理可过候选 → allBlockedHard=false，最优为可过候选', () => {
     // 夹具（笛卡尔命中点，直线参考、车在 l0=0）：
-    //   P1 右中 (143.2, 5.0)  —— 把车道/右侧候选压进舒适阻塞，但 −0.625m 档与它留 7.5u（>硬阈值 5.6u）
+    //   P1 右中 (143.2, 5.0)  —— 把车道/右侧候选压进舒适阻塞，但右侧间隙中心硬阈值可过
     //   P2 远右 (189.9, 20.0) —— 堵 +4.375/+4.4
     //   P3 左  (214.3, −15.0) —— 堵 −3.125/−4.4
+    // 实测：最优 = 右侧间隙中心 +3.19m（舒适阻塞、物理可过）；左侧 −2.39/−4.10 与右岸 3.64/4.10 硬阻塞。
     const n = 61, angles: any[] = [], distances: any[] = [];
     for (let i = 0; i < n; i++) {
       const a = -Math.PI / 3 + (i / (n - 1)) * 2 * Math.PI / 3;
@@ -161,10 +177,15 @@ describe('路径层：双阈值（舒适选路 / 物理通行）', () => {
     const r = solve(scan);
     assert.strictEqual(r.allBlocked, true, '舒适层：应全部候选阻塞');
     assert.strictEqual(r.allBlockedHard, false, '物理层：存在可通过候选（不停车）');
-    assert.strictEqual(r.best.targetL, px(-2.5), '最优应为物理可过的 −0.625m 档');
-    assert.strictEqual(r.best.blocked, true);
-    assert.strictEqual(r.best.blockedHard, false);
-    assert.ok(r.ranked[1].blockedHard, '硬阻塞候选应排在其后');
+    assert.strictEqual(r.best.blocked, true, '最优为"紧间隙慢行"候选（舒适阻塞）');
+    assert.strictEqual(r.best.blockedHard, false, '最优必须物理可过');
+    assert.strictEqual(r.sBlockHard, Infinity, '存在可过候选 → 停车线不触发');
+    // 分级互斥且分层：全部硬阻塞候选排在所有可过候选之后
+    const firstHard = r.ranked.findIndex(c => c.blockedHard);
+    assert.ok(firstHard > 0, '应存在硬阻塞候选且不在首位');
+    for (let i = firstHard; i < r.ranked.length; i++) {
+      assert.ok(r.ranked[i].blockedHard, `ranked[${i}] 应为硬阻塞（分级不得重复计入）`);
+    }
   });
 });
 
@@ -184,5 +205,34 @@ describe('路径层：候选覆盖间隙', () => {
     assert.strictEqual(r.best.blocked, false);
     assert.ok(Math.abs((r.best.targetL as number) - (LO - 20)) < 2,
       `最优应在间隙内（车道中心−5m），实际 ${(r.best.targetL as number) / 4}m`);
+  });
+});
+
+describe('路径层：横向机动速度上限（lateralSpeedCap，供收敛迭代反解）', () => {
+  it('无横移需求 → Infinity；有横移 → 与 developMin 互为反解', () => {
+    assert.strictEqual(lateralSpeedCap(0, 160), Infinity, '无横移 → 不设速度上限');
+    // 与 paths.ts 的 developMin 同式：S_min = √(5.7735·|Δl|·v²/A_LAT_MAX)
+    // 反解得 v = √(A_LAT_MAX·S²/(5.7735·|Δl|))。量纲核对（mps2(3.5)=14 u/s²，
+    // 单位换算后恰等于 SI 的 A_LAT_MAX=3.5 m/s²）：|Δl|=22u=5.5m、S=160u=40m
+    // → v = 53.12 u/s = 13.28 m/s，此时峰值横向加速度 5.7735·5.5·13.28²/40² = 3.5 ✓
+    const cap = lateralSpeedCap(22, 160);
+    assert.ok(Math.abs(cap - 53.12) < 0.05, `实际 ${cap.toFixed(2)} u/s`);
+    // 横移越大 → 上限越低；发展段越长 → 上限越高
+    assert.ok(lateralSpeedCap(44, 160) < cap, '横移加倍 → 上限下降');
+    assert.ok(lateralSpeedCap(22, 320) > cap, '发展段加倍 → 上限上升');
+  });
+});
+
+describe('路径层：物理走廊裕度（标定表 + 几何评估速度下限）', () => {
+  it('裕度 = marginFor(max(v0, 慢行档))：静止车取慢行档 0.91m；高速取表值', () => {
+    // 回归测试（评审 Critical）：曾把 TIGHT_SPEED=mps(8)=32 直接与 v0/4（m/s）比较 →
+    // marginFor(32)=0.615m 恒定，标定表实际失效（8m/s 慢行档应为 0.91m）。
+    const stop = solve(clearScan(), { speed: 0 });
+    assert.ok(Math.abs((stop.marginU as number) / 4 - marginFor((TIGHT_SPEED as number) / 4)) < 1e-9,
+      `静止车应取慢行档裕度 ${marginFor((TIGHT_SPEED as number) / 4).toFixed(3)}m，实际 ${((stop.marginU as number) / 4).toFixed(3)}m`);
+    const fast = solve(clearScan(), { speed: 35 * 4 });
+    assert.ok(Math.abs((fast.marginU as number) / 4 - marginFor(35)) < 1e-9,
+      `35m/s 应取表值 ${marginFor(35).toFixed(3)}m，实际 ${((fast.marginU as number) / 4).toFixed(3)}m`);
+    assert.ok((stop.marginU as number) > (fast.marginU as number), '低速裕度应大于高速（标定表随速度下降）');
   });
 });

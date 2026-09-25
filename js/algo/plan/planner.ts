@@ -10,7 +10,8 @@
 //   2. 车辆投影 + dl/ds
 //   3. ARRIVED 检测
 //   4. 纵向巡航目标（vCap 单值版 + 终点 DECEL 缩放）
-//   5. solvePathLayer → 最优路径（窗口内排名；物理层全阻塞时给出停车基准）
+//   5. 路径层 × 速度上限收敛迭代（≤3 轮）→ 最优路径（窗口内排名；物理层全阻塞时给出停车基准）
+//      与迭代末轮速度上限（横向机动/紧间隙/封死）
 //   6. solveSpeedLayer → 巡航 / 停车线（物理层全阻塞触发）/ 兜底剖面
 //   7. 合成 l(s(t)) → Trajectory；状态机 + 兼容类型标签
 
@@ -24,15 +25,59 @@ import {
 import { buildFrenetReference, cartesianToFrenet, frenetToCartesian } from './frenet.js';
 import { PlanState, nextState } from './states.js';
 import { debug } from '../../shared/debug.js';
-import { solvePathLayer, PATH_STEPS, PATH_HORIZON } from './paths.js';
+import { solvePathLayer, lateralSpeedCap, PATH_STEPS, PATH_HORIZON, TIGHT_SPEED } from './paths.js';
+import type { PathLayerResult } from './paths.js';
 import { solveSpeedLayer, STObstacle } from './speed.js';
+import { nextTight, INITIAL_TIGHT, TightMemory } from './tight.js';
+import { corridorBandPolygons, corridorBandObserved, corridorObservedLimitS, corridorPinchSegments, corridorCrossSectionSegments, coverageFromScan, bandBoundary as unobservedBoundarySegments } from './corridor.js';
 
 // ==================== 参数 ====================
 
 const DECEL_ZONE = m(25) as number;        // 路线终点减速区
 const STOP_ASSUMED_LEN = m(8) as number;   // 阻塞条目假定的障碍长度（仅影响 ST 条目 sMax）
-const TIGHT_SPEED = mps(8);                // 紧间隙慢行限速（双阈值：物理可过但低于舒适间隙时）
 const A_BRAKE = mps2(6);                   // 保守制动能力（与速度层 A_MAX 一致；紧间隙可达性评估用）
+/** 收敛迭代上限（spec §5.1：最多 3 轮） */
+const MAX_ROUNDS = 3;
+/** 横向目标收敛阈（0.2m） */
+const CONV_TARGET_L = m(0.2) as number;
+/** 速度上限收敛阈（0.5m/s） */
+const CONV_SPEED = mps(0.5) as number;
+
+/** 走廊可视化载荷：带子（2× 采样，边界更贴曲率）+ 观测覆盖 + 瓶颈线 + 候选（引用路径层对象）。
+ *  观测覆盖用 **rawDistances**（真实命中含边界）：边界命中被 HD Map 背景减除从规划输入里剔除了，
+ *  墙后的阴影区在走廊看来是"自由"，可视化必须标成"未观测"，否则图会撒谎。 */
+function buildVizPayload(
+  pl: PathLayerResult, ref: FrenetReference, scan: LidarScan, carX: number, carY: number,
+) {
+  const bands = corridorBandPolygons(pl.vizCorridor, ref);
+  const cov = coverageFromScan(scan as { angles: number[]; distances: number[]; rawDistances?: number[] }, carX, carY);
+  const bandObserved = corridorBandObserved(bands, cov.rays, carX, carY, cov.halfSpacing);
+  const limitS = corridorObservedLimitS(pl.vizCorridor, ref, cov.rays, carX, carY, cov.halfSpacing);
+  const unseenQuads = bands.filter((q, i) => !bandObserved[i] && q.length >= 4);
+  return {
+    bands,
+    bandObserved,
+    unobsBoundary: unobservedBoundarySegments(unseenQuads),
+    obsLimitSegments: limitS === null ? [] : corridorCrossSectionSegments(pl.vizCorridor, ref, limitS, pl.lMaxU),
+    pinchSegments: corridorPinchSegments(pl.vizCorridor, ref, pl.lMaxU),
+    pinch: pl.vizCorridor.pinch
+      ? { s: pl.vizCorridor.pinch.s, width: pl.vizCorridor.pinch.width,
+          sealed: pl.vizCorridor.pinch.seg === null }
+      : null,
+    stepU: (PATH_HORIZON as number) / (PATH_STEPS * 2),
+    candidates: pl.ranked,
+    bestTargetL: pl.best.targetL as number,
+  };
+}
+
+/** 路径几何 → 速度上限（spec §5.1 的"速度上限 u_k"）：物理封死 → 0；紧间隙 → 慢行档；
+ *  横向机动 → lateralSpeedCap（发展的横向加速度不超舒适上限）；否则巡航目标 vCap。 */
+function pathSpeedCap(pl: PathLayerResult, l0: number, vCap: number): number {
+  if (pl.allBlockedHard) return 0;
+  const lateral = lateralSpeedCap(Math.abs((pl.best.targetL as number) - l0), pl.best.develop);
+  const tight = pl.best.blocked ? (TIGHT_SPEED as number) : Infinity;
+  return Math.max(0, Math.min(vCap, lateral, tight));
+}
 
 /** 车道中心偏移量（Lane 3 = +1.875m）。切换车道改此值即可。 */
 let laneOffset: Px = m(1.875);
@@ -48,6 +93,8 @@ let _routeFrenetRef: FrenetReference | null = null;
 let _lastRoute: Route | null = null;
 let _currentState: PlanState = PlanState.CRUISE;
 let _prevBestTargetL: number | null = null;
+/** 紧间隙迟滞状态（tight.ts；世界切换时重置） */
+let _tight: TightMemory = INITIAL_TIGHT;
 
 // ==================== 主入口 ====================
 
@@ -62,6 +109,7 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
       _routeFrenetRef = buildFrenetReference(route.waypoints, false);
       _lastRoute = route;
       _prevBestTargetL = null;
+      _tight = INITIAL_TIGHT;
     }
     frenetRef = _routeFrenetRef!; routeActive = true;
   } else {
@@ -69,6 +117,7 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
       _loopFrenetRef = buildFrenetReference(track.centerPoints, true);
       _loopRefTrack = track as TrackGeometry;
       _prevBestTargetL = null;
+      _tight = INITIAL_TIGHT;
     }
     frenetRef = _loopFrenetRef;
   }
@@ -95,37 +144,107 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
     targetV *= Math.max(0.1, remainingDist / DECEL_ZONE);
   }
 
-  // ─── 5. 路径层 ───
-  const pathLayer = solvePathLayer({
-    ref: frenetRef, l0: fl.l, dl0, s0: fl.s, v0: (car.speed as number) * cosHD,
-    carX: car.x as number, carY: car.y as number, lidarScan,
-    carWidth: car.width, collisionRadius: car.collisionRadius,
-    laneOffset, prevTargetL: _prevBestTargetL,
-  });
+  // ─── 5. 路径层 × 速度上限：收敛迭代（spec 2026-09-25 §5.1，EM 风格交替）───
+  // 为什么迭代：路径几何（物理走廊裕度 margin(v)、发展段 S(v)）依赖"通过时的速度"，
+  // 而"能通过多快"又由路径几何决定（横向机动上限 / 紧间隙慢行档 / 停车线）——单轮
+  // 顺序传递丢掉这层反馈：车停下时按 v=0 取几何（标定裕度最大 1.15m）→ 窄口判死 →
+  // 规划速度 0 → 下一帧依旧 v=0（自锁，批量实证 4 场景中途停车）。故把 v 当变量求解：
+  // 初值 = max(当前速度, 慢行档)，几何评估速度下限取慢行档（裕度差异 ≤0.1m，换不自锁；
+  // 紧间隙通过一律限速 ≤TIGHT_SPEED）。收敛阈 0.2m / 0.5m·s⁻¹；变化不降反增则提前停
+  // （防极限环）。兜底 = 末轮结果（确定性）。
+  const t0 = performance.now();
+  const vCap = targetV;                                          // 巡航目标（含终点减速缩放）
+  const vLo = TIGHT_SPEED as number;
+  const v0u = (car.speed as number) * cosHD;
+  let vAssume = Math.min(Math.max(v0u, vLo), Math.max(vCap, vLo));
+  let pathLayer!: PathLayerResult;   // MAX_ROUNDS ≥ 1 → 循环体至少执行一次
+  let uCap = Infinity;
+  let prevA: number | null = null, prevU: number | null = null, prevDelta = Infinity;
+  let rounds = 0;                                   // 路径层求值次数（首次必然发生）
+  let revised = false;                              // 种子假设不自洽（速度上限 ≠ 假设）
+  let seedBlocked = false, seedBlockS = Infinity;   // 种子档=当前速度档几何（可达性闸门用）
+  for (; rounds < MAX_ROUNDS; ) {
+    pathLayer = solvePathLayer({
+      ref: frenetRef, l0: fl.l, dl0, s0: fl.s, v0: vAssume,
+      carX: car.x as number, carY: car.y as number, lidarScan,
+      carWidth: car.width, collisionRadius: car.collisionRadius,
+      laneOffset, prevTargetL: _prevBestTargetL,
+      sEnd: routeActive ? (frenetRef.totalS as number) : undefined,
+    });
+    rounds += 1;
+    const a = pathLayer.best.targetL as number;
+    if (rounds === 1) {
+      seedBlocked = pathLayer.best.blocked; seedBlockS = pathLayer.best.sBlock;
+    }
+    uCap = pathSpeedCap(pathLayer, fl.l as number, vCap);
+    if (rounds === 1 && uCap < vAssume) revised = true;         // 路径几何压低种子假设（需修正）
+    const converged = prevA !== null
+      && Math.abs(a - prevA) < CONV_TARGET_L
+      && Math.abs(uCap - (prevU as number)) < CONV_SPEED;
+    const diverging = prevA !== null && Math.abs(a - prevA) > prevDelta;   // 变化不降反增 → 防极限环
+    if (converged || diverging) break;
+    prevDelta = prevA === null ? Infinity : Math.abs(a - prevA);
+    prevA = a; prevU = uCap;
+    vAssume = Math.max(vLo, Math.min(uCap, vCap));                // 下一轮速度假设
+  }
+  // 规划速度目标：迭代末轮的几何上限（0 = 物理封死 → 交给停车线，不把 0 当巡航目标）
+  targetV = Math.min(vCap, uCap > 0 ? uCap : vLo);
 
-  // 双阈值：走的路径低于舒适间隙（舒适阻塞但物理可过）→ 慢行通过
-  if (pathLayer.best.blocked) targetV = Math.min(targetV, TIGHT_SPEED as number);
+  // 未观测区口径 'speed'（见-即-停）：按"可见距离内能刹停"限速——不得超出视程行驶。
+  // 不裁几何、不产生停止线，因此不会像 'blocked' 那样因"规划视程 > 可见距离"而永久停车。
+  if (pathLayer.unknownHandling === 'speed') {
+    const cov = coverageFromScan(lidarScan as { angles: number[]; distances: number[]; rawDistances?: number[] },
+      car.x as number, car.y as number);
+    const limitS = corridorObservedLimitS(pathLayer.corridor, frenetRef, cov.rays, car.x as number, car.y as number, cov.halfSpacing);
+    if (limitS !== null) {
+      const dVis = Math.max(m(5) as number, limitS - (fl.s as number));
+      targetV = Math.min(targetV, Math.sqrt(2 * (A_BRAKE as number) * dVis));
+    }
+  }
 
   // ─── 6. 速度层 ───
   // 停车线触发条件（二选一）：
-  //   ① 物理层全阻塞（allBlockedHard）——所有候选连硬阈值都过不去（全宽墙/真死口袋）；
+  //   ① 迟滞状态机 SEALED（tight.ts）——连"更松走廊"（物理 −0.15m）都无候选：
+  //      进入需确实过不去、退出需确实过得去（施密特带 + 3 帧防抖），消除临界抖动；
   //   ② 紧间隙候选不可达——慢行通过需在紧段起点前降到 TIGHT_SPEED，制动距离不够
   //      （30m/s 时需 ~70m；20m 外才发现只能减速通行的紧口 = 物理上停不住也绕不开）。
   // 只要存在"可达的物理可过"候选，就不停车（横向耐心、纵向保守、双阈值通行）。
-  let stopEngaged = pathLayer.allBlockedHard;
+  _tight = nextTight(_tight, {
+    hasComfortClear: !pathLayer.allBlocked,
+    hasHardClear: !pathLayer.allBlockedHard,
+    hasDeepClear: pathLayer.deepClear,
+    hasDeepBlocked: !pathLayer.permissiveClear,
+  });
+  let stopEngaged = _tight.state === 'SEALED';
   let stopLineS = pathLayer.sBlockHard;
-  if (!stopEngaged && pathLayer.best.blocked) {
+  if (stopEngaged && !Number.isFinite(stopLineS)) {
+    // 单帧内 SEALED ⟹ 无候选通过"更松"走廊 ⟹ 无候选通过物理走廊 ⟹ sBlockHard 有限。
+    // 走到这里只可能是"记忆滞后窗口"：上帧封死已记忆，本帧已有硬可过候选，但恢复还需
+    // 连续 3 帧确证（或本帧 deepClear 仍为否）。此时 sBlockHard=Infinity 会喂给停车
+    // 剖面 → NaN 轨迹污染（"停车后 NaN"同类缺陷）。兜底：按舒适制动距离设虚拟停车点。
     const v0u = (car.speed as number) * cosHD;
-    const dReq = (v0u * v0u - (TIGHT_SPEED as number) ** 2) / (2 * (A_BRAKE as number));
-    if ((pathLayer.best.sBlock as number) - (fl.s as number) < dReq) {
-      stopEngaged = true;
-      stopLineS = pathLayer.best.sBlock;
+    stopLineS = (fl.s as number) + Math.max(v0u * v0u / (2 * (A_BRAKE as number)), m(5) as number);
+  }
+  {
+    // 可达性闸门：取"种子档（当前速度）几何"与"末轮几何"中更早的阻塞点为界——迭代把速度
+    // 当变量后，末轮可以在低速假设下找到"舒适畅通的候选"，但"车能不能在到达该点前降到目标
+    // 速度"与假设无关；只用末轮会出现"规划低速绕障、车却以 30m/s 撞上去"（实测：20m 障碍
+    // @30m/s → 假 avoid），只用种子档则漏掉"末轮（更低假设速度 ⇒ 更长发展段）才暴露的阻塞"。
+    const bindS = Math.min(
+      seedBlocked ? seedBlockS : Infinity,
+      pathLayer.best.blocked ? (pathLayer.best.sBlock as number) : Infinity,
+    );
+    if (!stopEngaged && Number.isFinite(bindS)) {
+      const dReq = (v0u * v0u - targetV * targetV) / (2 * (A_BRAKE as number));
+      if (bindS - (fl.s as number) < dReq) {
+        stopEngaged = true; stopLineS = bindS;
+      }
     }
   }
   const stObstacles: STObstacle[] = stopEngaged
     ? [{ sMin: stopLineS - fl.s, sMax: stopLineS - fl.s + (STOP_ASSUMED_LEN as number), tMin: 0, tMax: Infinity }]
     : [];
-  const speedLayer = solveSpeedLayer({ stObstacles, v0: (car.speed as number) * cosHD, targetV });
+  const speedLayer = solveSpeedLayer({ stObstacles, v0: v0u, targetV });
 
   // ─── 7. 合成 l(s(t)) ───
   const duration = speedLayer.profile.duration;
@@ -165,6 +284,13 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
     bestTargetL: pathLayer.best.targetL as number,
     speedTarget: targetV,
     speedMode: speedLayer.mode,
+    tight: _tight.state,
+    rounds,
+    revised,
+    planMs: performance.now() - t0,
+    vAssume,
+    // 走廊可视化载荷：直接引用末轮路径层的走廊/候选对象（零拷贝）；带子/横断线在此换算成笛卡尔
+    viz: buildVizPayload(pathLayer, frenetRef, lidarScan, car.x as number, car.y as number),
     remainingDist: routeActive ? remainingDist : -1,
   };
 

@@ -209,9 +209,14 @@ function isCarInsideTrack(cx: number, cy: number, r: number, track: TrackGeometr
   return true;
 }
 
+/** 复位缓冲（车半宽之外的额外余量）：车到赛道边界近于此值即复位到中心线。
+ *  它同时决定规划域上限（paths.ts 的 L_MAX = TRACK_HALF_WIDTH − (车半宽 + 本值) − 0.6m 过冲预留），
+ *  两者必须同步改——早期只放宽规划域会撞上复位崖（P8 贴边棘轮家族）。
+ *  A/B：1.5m（旧）→ 0.5m 让车能多用两侧各约 1m 路面（复位崖 5.0 → 6.0m）。 */
+export const BOUNDS_BUFFER: Px = m(0.5);
+
 export function checkBounds(car: CarState, track: TrackGeometry): boolean {
-  // 用车宽一半（4 sim-units = 1m）+ 1.5m 缓冲，< 车道半宽 3.75m，不会误触发
-  const r = (car.width as number) / 2 + (m(1.5) as number);
+  const r = (car.width as number) / 2 + (BOUNDS_BUFFER as number);
   if (!isCarInsideTrack(car.x as number, car.y as number, r, track)) {
     resetToTrack(car, track.centerPoints);
     return true;
