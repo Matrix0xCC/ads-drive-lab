@@ -66,11 +66,18 @@ export function updateHUD(
   if (elRays)  elRays.textContent = lidarScan ? String(lidarScan.angles.length) : '0';
   if (elObs)   elObs.textContent = String(obstacles.length);
 
-  // 转向/油门
+  // 转向/油门（回放旧归档可能缺字段/含 NaN→null：显示 '---'，不崩溃）
   const elSteer = document.getElementById('hud-steer');
   const elThrottle = document.getElementById('hud-throttle');
-  if (elSteer) elSteer.textContent = (car.steerAngle as number).toFixed(3);
-  if (elThrottle) elThrottle.textContent = ((car.speed as number) / (car.maxSpeed as number)).toFixed(2);
+  if (elSteer) {
+    elSteer.textContent = Number.isFinite(car.steerAngle as number)
+      ? (car.steerAngle as number).toFixed(3) : '---';
+  }
+  if (elThrottle) {
+    const maxV = car.maxSpeed as number;
+    elThrottle.textContent = Number.isFinite(maxV) && maxV > 0
+      ? ((car.speed as number) / maxV).toFixed(2) : '---';
+  }
 
   // 状态行（state 现在是 PlanState 枚举值）
   const stateLabel: Record<string, string> = {

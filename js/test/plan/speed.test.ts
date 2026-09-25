@@ -1,7 +1,7 @@
 // ==================== 测试：速度层（ST 空间） ====================
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { solveSpeedLayer, STObstacle, A_COMFORT } from '../../algo/plan/speed.js';
+import { solveSpeedLayer, STObstacle, A_COMFORT, T_STOP_MIN } from '../../algo/plan/speed.js';
 
 /** 采样峰值 |加速度| */
 function peakAccel(profile: { eval(t: number): number; deriv1(t: number): number; duration: number }): number {
@@ -59,5 +59,18 @@ describe('速度层：停车线', () => {
   it('动态条目（tMin>0）→ cruise（接口预留）', () => {
     const r = solveSpeedLayer({ stObstacles: [{ sMin: 300, sMax: 350, tMin: 2, tMax: 5 }], v0: 100, targetV: 100 });
     assert.strictEqual(r.mode, 'cruise');
+  });
+
+  it('v0≈0（已停住）且有停车线 → 静止剖面（不得出现 Infinity/NaN）', () => {
+    // 回归：T = 2·sStop/v0 在 v0=0 时为 Infinity → 五次多项式系数 NaN →
+    // 停车后每帧规划出 NaN 轨迹（归档为 null，回放 HUD 崩溃，实测 2026-09-24）
+    const r = solveSpeedLayer({ stObstacles: [staticObstacle(120)], v0: 0, targetV: 140 });
+    assert.strictEqual(r.mode, 'stop');
+    for (const t of [0, 0.1, 0.4, T_STOP_MIN]) {
+      assert.ok(Number.isFinite(r.profile.eval(t)), `s(${t}) 应有限`);
+      assert.ok(Number.isFinite(r.profile.deriv1(t)), `v(${t}) 应有限`);
+    }
+    assert.strictEqual(r.profile.deriv1(0), 0, '已停住应保持 0 速度');
+    assert.strictEqual(r.profile.eval(T_STOP_MIN), 0, '不应再前进');
   });
 });

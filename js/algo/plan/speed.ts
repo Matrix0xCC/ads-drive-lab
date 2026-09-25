@@ -51,6 +51,16 @@ export function solveSpeedLayer(o: { stObstacles: STObstacle[]; v0: number; targ
   const sStop = ahead.sMin - (STOP_MARGIN as number);
   const v0 = o.v0;
 
+  // 已停住（v0≈0，与控制的"停车"阈值一致）且前方有停车线 → 静止剖面。
+  // 必须单独处理：T = 2·sStop/v0 在 v0=0 时为 Infinity → 五次多项式系数 NaN →
+  // 停车后每帧产出 NaN 轨迹（归档为 null、回放 HUD 崩溃，2026-09-24 实测）。
+  if (v0 < 1) {
+    return {
+      mode: 'stop',
+      profile: { eval: () => 0, deriv1: () => 0, duration: T_STOP_MIN },
+    };
+  }
+
   // 物理可行性：停车距离不足 → 最大减速兜底。
   // 五次多项式族的形状关系：D ≈ v0·T/2、peak ≈ 1.875·v0/T ⇒ 峰值恰为 A_MAX 时
   // 所需距离 D_min = 1.875·v0²/(2·A_MAX)（比线性制动的 v0²/2A_MAX 大 1.875 倍）。

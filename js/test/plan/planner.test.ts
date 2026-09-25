@@ -85,6 +85,15 @@ describe('planner 巡航', () => {
     const traj = plan(makeSnapshot(car), makeBlockedLidar([0], 80));
     assert.strictEqual(traj.type, 'emergency');
   });
+
+  it('已停住（v=0）且前方封死 → 轨迹保持有限值（不产生 NaN，实测停车后崩溃根因）', () => {
+    const car = makeCar(100, 0, 0, 0);   // 停住
+    const traj = plan(makeSnapshot(car), makeBlockedLidar([0], 60));
+    for (const p of traj.points) {
+      assert.ok(Number.isFinite(p.x as number) && Number.isFinite(p.y as number) && Number.isFinite(p.v as number),
+        `轨迹点应有限：(${p.x},${p.y},v=${p.v})`);
+    }
+  });
 });
 
 describe('planner 双阈值（紧间隙慢行）', () => {
@@ -156,6 +165,37 @@ describe('planner 一致性', () => {
       lastType = traj.type;
     }
     assert.ok(switches <= 2, `实际切换 ${switches} 次`);
+  });
+});
+
+describe('planner 世界/路线切换（模块级参考线缓存失效）', () => {
+  /** 中心线 y = yOffset 的直线轨道快照（无路线） */
+  function snapshotAt(yOffset: number): WorldSnapshot {
+    const pts: any[] = [];
+    for (let i = 0; i <= 200; i++) pts.push({ x: px(i * 10), y: px(yOffset) });
+    return { car: makeCar(200, yOffset, 0, 100), track: { centerPoints: pts, innerBoundary: [], outerBoundary: [] }, obstacles: [], timestamp: 0 };
+  }
+
+  it('无路线：换轨道后闭环参考线随世界重建（不沿用旧地图）', () => {
+    plan(snapshotAt(1000), makeClearLidar());
+    assert.ok(Math.abs(debug.planning!.frenetL as number) < 10, '地图 A：车应贴中心线');
+    plan(snapshotAt(400), makeClearLidar());
+    assert.ok(Math.abs(debug.planning!.frenetL as number) < 10,
+      `换地图后车仍应贴新中心线（实际 |L|=${Math.abs(debug.planning!.frenetL as number) / 4}m —— 若 ~150m 说明仍在用旧地图参考线）`);
+  });
+
+  it('有路线：换路线对象（索引相同、几何不同）→ 参考线重建', () => {
+    const mkRoute = (yOffset: number): Route => {
+      const pts: any[] = [];
+      for (let i = 0; i <= 100; i++) pts.push({ x: px(i * 10), y: px(yOffset) });
+      const ref = buildFrenetReference(pts, false);
+      return { waypoints: ref.points, waypointIndices: [], startIndex: 0, goalIndex: 100, length: px(ref.totalS) };
+    };
+    plan(snapshotAt(1000), makeClearLidar(), mkRoute(1000));
+    assert.ok(Math.abs(debug.planning!.frenetL as number) < 10, '路线 A：车应贴路线中心线');
+    plan(snapshotAt(400), makeClearLidar(), mkRoute(400));
+    assert.ok(Math.abs(debug.planning!.frenetL as number) < 10,
+      `换路线后车仍应贴新路线（实际 |L|=${Math.abs(debug.planning!.frenetL as number) / 4}m —— 若 ~150m 说明路线索引相同时沿用了旧几何缓存）`);
   });
 });
 
