@@ -58,8 +58,22 @@ export interface UiDeps {
 // 注册所有 UI 事件
 // ═══════════════════════════════════════════════════
 
-export function setupUI(deps: UiDeps): { tick(dt: number): void } {
+export function setupUI(deps: UiDeps): {
+  tick(dt: number): void; isCorridorVisible(): boolean; isFrenetTicksVisible(): boolean;
+} {
   const { canvas, camera, controls } = deps;
+
+  /** Frenet 刻度按钮文案随状态同步 */
+  function renderFrenetTicksButton(visible: boolean) {
+    const btn = document.getElementById('btn-frenet-ticks');
+    if (btn) btn.textContent = visible ? 'Frenet 刻度：开' : 'Frenet 刻度：关';
+  }
+
+  /** 走廊可视化按钮文案随状态同步 */
+  function renderCorridorButton(visible: boolean) {
+    const btn = document.getElementById('btn-corridor');
+    if (btn) btn.textContent = visible ? '走廊可视化：开' : '走廊可视化：关';
+  }
 
   /** 暂停按钮图标随状态同步（只改图标 span，保留按钮文案） */
   function renderPauseButton(paused: boolean) {
@@ -76,6 +90,8 @@ export function setupUI(deps: UiDeps): { tick(dt: number): void } {
     onDebugPanel: (open) => setInspectorOpen(open),
     onRunPicker: (open) => setRunPickerOpen(open),
     onHint: (hint) => renderHint(hint),
+    onCorridorVisible: (v) => renderCorridorButton(v),
+    onFrenetTicksVisible: (v) => renderFrenetTicksButton(v),
     onSpeedUnit: (unit) => { display.speedUnit = unit; },
   }, () => deps.engine.routeState);
 
@@ -111,6 +127,14 @@ export function setupUI(deps: UiDeps): { tick(dt: number): void } {
     controller.dispatch({ type: 'TOGGLE_DEBUG' });
   });
 
+  // 左侧栏「仿真」：走廊可视化开关（快捷键 C）
+  document.getElementById('btn-corridor')?.addEventListener('click', () => {
+    controller.dispatch({ type: 'TOGGLE_CORRIDOR' });
+  });
+  document.getElementById('btn-frenet-ticks')?.addEventListener('click', () => {
+    controller.dispatch({ type: 'TOGGLE_FRENET_TICKS' });
+  });
+
   // 点击 HUD 速度 → 切换 km/h ↔ m/s（渲染层下一帧自动按新单位显示）
   document.getElementById('hud-speed')?.addEventListener('click', () => {
     controller.dispatch({ type: 'TOGGLE_SPEED_UNIT' });
@@ -140,6 +164,12 @@ export function setupUI(deps: UiDeps): { tick(dt: number): void } {
       case 'i': case 'I':
         controller.dispatch({ type: 'TOGGLE_DEBUG' });
         break;
+      case 'c': case 'C':
+        controller.dispatch({ type: 'TOGGLE_CORRIDOR' });
+        break;
+      case 'g': case 'G':
+        controller.dispatch({ type: 'TOGGLE_FRENET_TICKS' });
+        break;
       case 'ArrowLeft':
         if (st.mode === 'REPLAY') deps.replay.seekStep(deps.replay.state.currentStep - 1);
         break;
@@ -154,6 +184,15 @@ export function setupUI(deps: UiDeps): { tick(dt: number): void } {
   return {
     tick(dt: number) {
       if (controller.state.debugOpen) updateInspectPanel(dt);
+    },
+    /** 走廊可视化是否生效（main 的渲染订阅用）：开关打开且处于实时模式——
+     *  回放不跑规划器，debug.planning.viz 是上一帧实时数据，画出来会是陈旧走廊。 */
+    isCorridorVisible(): boolean {
+      return controller.state.corridorVisible && controller.state.mode === 'LIVE';
+    },
+    /** Frenet 刻度显隐（回放模式也显示——刻度只依赖路线/赛道，不依赖规划器） */
+    isFrenetTicksVisible(): boolean {
+      return controller.state.frenetTicksVisible;
     },
   };
 }

@@ -147,3 +147,23 @@ describe('deriveHint', () => {
       '回放中：Space 播放/暂停 · ←/→ 单帧 · 拖动时间轴 · Esc 退出回放');
   });
 });
+
+describe('reduce: 走廊可视化开关', () => {
+  it('默认关；TOGGLE_CORRIDOR 翻转；重复两次回到原值', () => {
+    assert.strictEqual(INITIAL_UI_STATE.corridorVisible, false);
+    const on = reduce(live(), { type: 'TOGGLE_CORRIDOR' });
+    assert.strictEqual(on.corridorVisible, true);
+    assert.strictEqual(reduce(on, { type: 'TOGGLE_CORRIDOR' }).corridorVisible, false);
+  });
+});
+
+describe('reduce: Frenet 刻度开关', () => {
+  it('默认开；TOGGLE_FRENET_TICKS 翻转（与走廊开关互不影响）', () => {
+    assert.strictEqual(INITIAL_UI_STATE.frenetTicksVisible, true);
+    const off = reduce(live(), { type: 'TOGGLE_FRENET_TICKS' });
+    assert.strictEqual(off.frenetTicksVisible, false);
+    assert.strictEqual(off.corridorVisible, false, '不应联动走廊开关');
+    assert.strictEqual(reduce(off, { type: 'TOGGLE_CORRIDOR' }).frenetTicksVisible, false, '走廊开关不影响刻度');
+    assert.strictEqual(reduce(off, { type: 'TOGGLE_FRENET_TICKS' }).frenetTicksVisible, true);
+  });
+});

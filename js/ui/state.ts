@@ -30,6 +30,10 @@ export interface UiState {
   runPickerOpen: boolean;
   /** 速度显示单位（点击 HUD 速度切换；默认 km/h） */
   speedUnit: SpeedUnit;
+  /** 走廊可视化（自由带/瓶颈/候选路径；默认关。回放模式不跑规划器 → 无数据不显示） */
+  corridorVisible: boolean;
+  /** Frenet 刻度（s 横线/l 参考线/数字标签；默认开。与走廊各自独立开关） */
+  frenetTicksVisible: boolean;
 }
 
 export type UiEvent =
@@ -45,7 +49,9 @@ export type UiEvent =
   | { type: 'TOGGLE_DEBUG' }
   | { type: 'OPEN_RUN_PICKER' }
   | { type: 'CLOSE_RUN_PICKER' }
-  | { type: 'TOGGLE_SPEED_UNIT' };
+  | { type: 'TOGGLE_SPEED_UNIT' }
+  | { type: 'TOGGLE_CORRIDOR' }
+  | { type: 'TOGGLE_FRENET_TICKS' };
 
 export const INITIAL_UI_STATE: UiState = {
   mode: 'LIVE',
@@ -58,6 +64,10 @@ export const INITIAL_UI_STATE: UiState = {
   debugOpen: true,
   runPickerOpen: false,
   speedUnit: 'kmh',
+  /** 走廊可视化（默认关；回放模式无数据，不显示） */
+  corridorVisible: false,
+  /** Frenet 刻度（默认开） */
+  frenetTicksVisible: true,
 };
 
 export function reduce(state: UiState, e: UiEvent): UiState {
@@ -98,6 +108,10 @@ export function reduce(state: UiState, e: UiEvent): UiState {
       return state.runPickerOpen ? { ...state, runPickerOpen: false } : state;
     case 'TOGGLE_SPEED_UNIT':
       return { ...state, speedUnit: state.speedUnit === 'kmh' ? 'ms' : 'kmh' };
+    case 'TOGGLE_CORRIDOR':
+      return { ...state, corridorVisible: !state.corridorVisible };
+    case 'TOGGLE_FRENET_TICKS':
+      return { ...state, frenetTicksVisible: !state.frenetTicksVisible };
   }
 }
 

@@ -17,6 +17,8 @@ export interface UiEffects {
   onRunPicker(open: boolean): void;
   onHint(hint: string): void;
   onSpeedUnit(unit: SpeedUnit): void;
+  onCorridorVisible(visible: boolean): void;
+  onFrenetTicksVisible(visible: boolean): void;
 }
 
 export class UiController {
@@ -44,6 +46,8 @@ export class UiController {
     if (next.debugOpen !== prev.debugOpen) this.effects.onDebugPanel(next.debugOpen);
     if (next.runPickerOpen !== prev.runPickerOpen) this.effects.onRunPicker(next.runPickerOpen);
     if (next.speedUnit !== prev.speedUnit) this.effects.onSpeedUnit(next.speedUnit);
+    if (next.corridorVisible !== prev.corridorVisible) this.effects.onCorridorVisible(next.corridorVisible);
+    if (next.frenetTicksVisible !== prev.frenetTicksVisible) this.effects.onFrenetTicksVisible(next.frenetTicksVisible);
     this.effects.onHint(deriveHint(next, this.getRouteState()));
   }
 
@@ -56,6 +60,8 @@ export class UiController {
     this.effects.onDebugPanel(this._state.debugOpen);
     this.effects.onRunPicker(this._state.runPickerOpen);
     this.effects.onSpeedUnit(this._state.speedUnit);
+    this.effects.onCorridorVisible(this._state.corridorVisible);
+    this.effects.onFrenetTicksVisible(this._state.frenetTicksVisible);
     this.effects.onHint(deriveHint(this._state, this.getRouteState()));
   }
 }

@@ -18,6 +18,8 @@ function makeCtl() {
     onRunPicker: (o) => calls.picker.push(o),
     onHint: (h) => calls.hint.push(h),
     onSpeedUnit: (u) => calls.unit.push(u),
+    onCorridorVisible: () => {},
+    onFrenetTicksVisible: () => {},
   }, () => 'NONE');
   return { ctl, calls };
 }
