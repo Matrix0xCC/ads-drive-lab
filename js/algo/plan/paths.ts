@@ -19,7 +19,7 @@
 //   hairpin-s5 旧规划器干净通过——存在可行路线，被过保守的判停拒了。）
 
 import { FrenetReference, LidarScan } from '../../shared/types.js';
-import { Radians, Px, DimLess, m, px, perpx, dimless } from '../../shared/dimensions.js';
+import { Radians, Px, DimLess, m, mps2, px, perpx, dimless } from '../../shared/dimensions.js';
 import { solveQuintic } from './polynomial.js';
 import { frenetToCartesian } from './frenet.js';
 import { MAX_SENSOR_DIST } from '../perception.js';
@@ -29,6 +29,14 @@ export const PATH_HORIZON: Px = m(120);
 /** 横移发展距离：在前 40m 内完成横移到目标，其后保持偏移。
  *  若横移按整段 120m 发展，到障碍处偏移还太小（测试实证），不能完成避让。 */
 export const PATH_DEVELOP: Px = m(40);
+/** 自适应发展段下限：再近也不得短于此（低速横移曲率上限） */
+const PATH_DEVELOP_MIN: Px = m(12);
+/** 自适应提前量：横移应在首个阻塞点之前完成（留几何余量） */
+const DEVELOP_MARGIN: Px = m(6);
+/** 横向加速度舒适上限（与速度层 A_COMFORT 一致）：决定给定速度下最短发展段 */
+const A_LAT_MAX = mps2(3.5);
+/** 归一化五次多项式 10s³−15s⁴+6s⁵ 的峰值 |l''|（发展段内峰值横向加速度系数） */
+const QUINTIC_PEAK_ACCEL = 5.7735;
 /** 横向选路提交窗口：只有窗口内的阻塞参与候选排名（"横向耐心"——障碍还远时
  *  不提前选边；进入窗口再决策仍有 60m 完成横移）。停车线不看此窗口。 */
 export const COMMIT_WINDOW: Px = m(60);
@@ -101,7 +109,7 @@ function segSegDist(
 }
 
 export function solvePathLayer(o: {
-  ref: FrenetReference; l0: Px; dl0: DimLess; s0: number;
+  ref: FrenetReference; l0: Px; dl0: DimLess; s0: number; v0: number;
   carX: number; carY: number; lidarScan: LidarScan;
   carWidth: Px; collisionRadius: Px; laneOffset: Px;
   prevTargetL: number | null;
@@ -160,39 +168,40 @@ export function solvePathLayer(o: {
 
   const candidates: PathCandidate[] = [];
   for (const targetL of targets) {
-    // 两段式路径：前 PATH_DEVELOP 内五次多项式完成横移，其后保持目标偏移。
     // 横向夹在 [l0, target] 内：为满足初值斜率（车头指向），五次多项式会先向
     // 端点外下沉，逐帧重读 l0 形成棘轮 → 车贴走廊边缘时撞 |l|=5.0 复位崖
     // （hairpin-s5 批量实证，l 从 −4.4 逐帧滑到 −4.93 后复位）。
     const lMin = Math.min(o.l0 as number, targetL), lMax = Math.max(o.l0 as number, targetL);
-    const latPoly = solveQuintic(o.l0, o.dl0, perpx(0), px(targetL), dimless(0), perpx(0), PATH_DEVELOP as number);
-    const evalLat = (sRel: number): Px => px(Math.max(lMin, Math.min(lMax,
-      latPoly.eval(Math.min(sRel, PATH_DEVELOP as number)) as number)));
-    const points: PathCandidate['points'] = [];
-    let centerSum = 0, curvSum = 0, prevYaw: number | null = null;
 
-    for (let i = 0; i <= PATH_STEPS; i++) {
-      const sRel = (i / PATH_STEPS) * (PATH_HORIZON as number);
-      const li = evalLat(sRel);
-      const cart = frenetToCartesian(o.s0 + sRel, li, o.ref);
-      points.push({ s: o.s0 + sRel, l: li, x: cart.x, y: cart.y, yaw: cart.yaw });
+    // 路径构造（给定发展段长度 developS）：两段式，前 developS 内完成横移、其后保持
+    const buildPath = (developS: number) => {
+      const latPoly = solveQuintic(o.l0, o.dl0, perpx(0), px(targetL), dimless(0), perpx(0), developS);
+      const evalLat = (sRel: number): Px => px(Math.max(lMin, Math.min(lMax,
+        latPoly.eval(Math.min(sRel, developS)) as number)));
+      const points: PathCandidate['points'] = [];
+      let centerSum = 0, curvSum = 0, prevYaw: number | null = null;
+      for (let i = 0; i <= PATH_STEPS; i++) {
+        const sRel = (i / PATH_STEPS) * (PATH_HORIZON as number);
+        const li = evalLat(sRel);
+        const cart = frenetToCartesian(o.s0 + sRel, li, o.ref);
+        points.push({ s: o.s0 + sRel, l: li, x: cart.x, y: cart.y, yaw: cart.yaw });
 
-      const d = (li as number) - lo;
-      centerSum += d * d;
-      if (prevYaw !== null) {
-        let dyaw = (cart.yaw as number) - prevYaw;
-        dyaw = Math.atan2(Math.sin(dyaw), Math.cos(dyaw));
-        curvSum += Math.abs(dyaw);
+        const d = (li as number) - lo;
+        centerSum += d * d;
+        if (prevYaw !== null) {
+          let dyaw = (cart.yaw as number) - prevYaw;
+          dyaw = Math.atan2(Math.sin(dyaw), Math.cos(dyaw));
+          curvSum += Math.abs(dyaw);
+        }
+        prevYaw = cart.yaw as number;
       }
-      prevYaw = cart.yaw as number;
-    }
+      return { points, evalLat, centerSum, curvSum };
+    };
 
     // 阻塞判定：路径折线到"命中点/命中表面折线"的最短距离 ≤ 阈值，返回沿路径
     // 首个命中的绝对弧长（Infinity = 无命中）。用线段而非采样点（路径采样间距
     // 3m > 间隙半径，会混叠漏判，实测）。
-    // 两次扫描：舒适层只看窗口（COMMIT_WINDOW，决定横向排名）；硬阈值看全程
-    // （决定停车线——只有物理上真的过不去才停）。
-    const firstBlockArc = (windowRel: number, hard: boolean): number => {
+    const firstBlockArc = (points: PathCandidate['points'], windowRel: number, hard: boolean): number => {
       for (let i = 0; i < points.length - 1; i++) {
         if (points[i].s - o.s0 > windowRel) break;
         const a = points[i], b = points[i + 1];
@@ -212,8 +221,32 @@ export function solvePathLayer(o: {
       }
       return Infinity;
     };
-    const sBlock = firstBlockArc(COMMIT_WINDOW as number, false);
-    const sBlockHard = firstBlockArc(Infinity, true);
+
+    // 自适应发展段（adaptive development）：默认 40m 内若已出现首个阻塞，说明
+    // 路径还没横移到位就从障碍横向范围里穿过（判的是实际曲线而非终点目标）——
+    // 把发展段缩到阻塞点之前，让横移提前完成（hairpin-s7 实测停车根因：
+    // 障碍 20.8m 处，40m 发展段到那里只走完一半 → 连硬阈值都过不去 → 停死）。
+    // 下限按运动学随速度缩放：峰值横向加速度 = 5.77·|Δl|·v²/S² ≤ A_LAT_MAX
+    // → S_min = √(5.77·|Δl|·v²/A_LAT_MAX)。高速时不得规划跟不上的急横移
+    // （v=35m/s 时 12m 发展段横向加速度 ~39m/s² 是物理幻想）；低速（含停车后
+    // 起步）才允许急横移穿过紧间隙。
+    const dl = Math.abs((targetL as number) - (o.l0 as number));
+    const developMin = Math.max(PATH_DEVELOP_MIN as number, Math.min(
+      PATH_DEVELOP as number,
+      Math.sqrt(QUINTIC_PEAK_ACCEL * dl * o.v0 * o.v0 / (A_LAT_MAX as number)),
+    ));
+    let { points, evalLat, centerSum, curvSum } = buildPath(PATH_DEVELOP as number);
+    const firstAny = firstBlockArc(points, Infinity, false);
+    if (firstAny - o.s0 < (PATH_DEVELOP as number)) {
+      const develop = Math.max(developMin,
+        Math.min(PATH_DEVELOP as number, firstAny - o.s0 - (DEVELOP_MARGIN as number)));
+      ({ points, evalLat, centerSum, curvSum } = buildPath(develop));
+    }
+
+    // 舒适层只看窗口（COMMIT_WINDOW，决定横向排名）；硬阈值看全程
+    // （决定停车线——只有物理上真的过不去才停）。
+    const sBlock = firstBlockArc(points, COMMIT_WINDOW as number, false);
+    const sBlockHard = firstBlockArc(points, Infinity, true);
     const blocked = sBlock < Infinity;
     const blockedHard = sBlockHard < Infinity;
 

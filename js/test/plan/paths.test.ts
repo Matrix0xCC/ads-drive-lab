@@ -34,11 +34,12 @@ function blockedScan(dist: number, arcHalf = 0.05): LidarScan {
   return { angles, distances, rawDistances: [...distances], confidences: new Array(61).fill(1), timestamp: 0 };
 }
 
-function solve(scan: LidarScan, opts: { s0?: number; l0?: number; prev?: number | null; dl0?: number } = {}) {
+function solve(scan: LidarScan, opts: { s0?: number; l0?: number; prev?: number | null; dl0?: number; speed?: number } = {}) {
   // 直线参考线从 x=0 起算、间距 10u：车与 s0 必须一致（车在参考线该弧长处）
-  const car = makeCar(opts.s0 ?? 0, 0, 0, 100);
+  const car = makeCar(opts.s0 ?? 0, 0, 0, opts.speed ?? 100);
   return solvePathLayer({
     ref: straightRef(), l0: px(opts.l0 ?? 0), dl0: dimless(opts.dl0 ?? 0), s0: opts.s0 ?? 0,
+    v0: car.speed as number,
     carX: car.x as number, carY: car.y as number, lidarScan: scan,
     carWidth: car.width as Px, collisionRadius: car.collisionRadius as Px,
     laneOffset: px(LO), prevTargetL: opts.prev ?? null,
@@ -119,6 +120,28 @@ describe('路径层：横向路径不越出 [l0, target]', () => {
       const worst = Math.min(...p.points.map(pt => pt.l as number));
       assert.ok(worst >= lmin - 1e-6, `路径左漂越过端点：worst=${worst} < ${lmin} (target=${p.targetL})`);
     }
+  });
+});
+
+describe('路径层：自适应发展段（adaptive development）', () => {
+  it('障碍落在默认发展段内 → 缩短发展段提前完成横移，候选恢复可过', () => {
+    // 车在 l=+3.5m 偏右；前方 25m 有横跨 l≈±0.9m 的障碍链（命中链段）。
+    // 默认 40m 发展段：路径到障碍处才横移约 1/3（l≈−2.2m）→ 距链段仅 ~1.3m，
+    // 硬阈值（HARD_CLEAR=1.4m）也过不去 → 停车线（hairpin-s7 实测停车根因）。
+    // 自适应后：发展段缩到 ~16m，到障碍前已到位 (−4.4m) → 可通过。
+    const n = 61, angles: any[] = [], distances: any[] = [];
+    for (let i = 0; i < n; i++) {
+      const a = -Math.PI / 3 + (i / (n - 1)) * 2 * Math.PI / 3;
+      angles.push(rad(a));
+      distances.push((i === 29 || i === 30 || i === 31) ? px(100) : MAX_SENSOR_DIST);
+    }
+    const scan: LidarScan = { angles, distances, rawDistances: [...distances], confidences: new Array(61).fill(1), timestamp: 0 };
+    const r = solve(scan, { l0: 14, speed: 20 });   // 车在 l=+3.5m、低速 5m/s（停车后起步的情境：允许急横移）
+    const left = r.ranked.find(p => Math.abs((p.targetL as number) + 17.6) < 0.5)!;
+    assert.ok(left, '应有 −4.4m 走廊候选');
+    assert.strictEqual(left.blocked, false,
+      `−4.4 候选应通过（实际 comfort=${left.blocked} hard=${left.blockedHard}）`);
+    assert.strictEqual(r.allBlockedHard, false, '物理层应有可过候选（不得触发停车线）');
   });
 });
 

@@ -97,7 +97,7 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
 
   // ─── 5. 路径层 ───
   const pathLayer = solvePathLayer({
-    ref: frenetRef, l0: fl.l, dl0, s0: fl.s,
+    ref: frenetRef, l0: fl.l, dl0, s0: fl.s, v0: (car.speed as number) * cosHD,
     carX: car.x as number, carY: car.y as number, lidarScan,
     carWidth: car.width, collisionRadius: car.collisionRadius,
     laneOffset, prevTargetL: _prevBestTargetL,
