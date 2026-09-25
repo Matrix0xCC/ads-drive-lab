@@ -69,16 +69,18 @@ requestAnimationFrame 主循环 (~60Hz)
 3. **传感器驱动** — 规划器只信任 LiDAR 做碰撞检测，禁止直接使用障碍物列表（真实系统中规划器不知道障碍物绝对坐标）
 4. **量纲安全** — `dimensions.ts` 品牌类型（Px, Radians, PxPerSec, DimLess...）编译时防量纲错误，编译后完全擦除。工厂函数（`px()`, `m()`, `rad()`...）是唯一 unsafe cast 点，只允许在模块边界使用
 5. **单位系统** — 所有物理量配置用 `m()` / `mps()` / `mps2()` 书写（`SIM_UNITS_PER_METER = 4`，改比例尺只需改这一个常量），不要硬编码 px 值
-6. **UI 状态单一来源** — 所有 UI 行为经 `ui/state.ts` 的纯函数 reduce 驱动，DOM 只是状态的渲染投影；`ui/controller.ts` 是"状态变化 → 副作用"的唯一边界；main 只通过 `UiDeps.actions` 改世界。布局：左侧菜单栏（手风琴单开：世界/仿真/数据，`sidebarSection`）+ 画布右上「信息」面板（详细遥测）+ 右下「调试」面板（Inspect，`infoOpen`/`debugOpen` 可折叠）+ 画布左上速度/状态精简行。快捷键：Space 暂停/回放播放、Esc 取消选点/退出回放、R 视角、I 折叠「调试」面板
+6. **UI 状态单一来源** — 所有 UI 行为经 `ui/state.ts` 的纯函数 reduce 驱动，DOM 只是状态的渲染投影；`ui/controller.ts` 是"状态变化 → 副作用"的唯一边界；main 只通过 `UiDeps.actions` 改世界。布局：左侧菜单栏（手风琴单开：世界/仿真/数据，`sidebarSection`）+ 画布右上「信息」面板（详细遥测）+ 右下「调试」面板（Inspect，`infoOpen`/`debugOpen` 可折叠）+ 画布左上速度/状态精简行。快捷键：Space 暂停/回放播放、Esc 取消选点/退出回放、R 视角、I 折叠「调试」面板、C 走廊可视化、G Frenet 刻度
 
 ### 规划器（js/algo/plan/）——纵向-横向解耦（spec: docs/superpowers/specs/2026-09-19-decoupled-planner-design.md）
 
-- **架构**：`paths.ts`（SL 路径层）决定"走哪条"，`speed.ts`（ST 速度层）决定"什么速度"，`planner.ts` 单轮协调后按 l(s(t)) 合成 Trajectory（控制/回放/归档契约不变）；`states.ts` 状态机：CRUISE / FOLLOW / AVOID / DECEL / ARRIVED / EMERGENCY
-- **每帧流程**：Frenet 参考线（有 route → 开环，无 route → 闭环）→ 车辆投影 → 巡航目标 `vCap = clamp(最近障碍/2, 17.5, 35)` → `solvePathLayer` → `solveSpeedLayer` → 合成
-- **路径层**：候选目标 {车道中心, ±2.5m/±5m 挪移, ±走廊边界 4.4m} clamp 去重；两段式横向（前 40m 五次多项式横移、其后保持），**横向路径夹紧 [l0, target]**（防贴边棘轮复位）；120m 视程、命中点/链段-折线距离做碰撞检查
-- **双阈值**：CLEAR = 车半宽+1.5m（舒适，只影响排名）；HARD_CLEAR = 车半宽+0.4m（物理可过性，决定停车线）。横向排名只看 COMMIT_WINDOW=60m（晚承诺，不提前选边）；全部候选连 HARD_CLEAR 都过不去 → 停车线（速度层在障碍前停）；存在物理可过候选则选最优并限速 8m/s 慢行；**可达性闸门**：紧段起点前减速到 8m/s 的距离不够（≈70m@30m/s）视为真无解（emergency）
+- **架构**：`paths.ts`（SL 路径层）决定"走哪条"，`speed.ts`（ST 速度层）决定"什么速度"，`planner.ts` 以收敛迭代协调两层后按 l(s(t)) 合成 Trajectory（控制/回放/归档契约不变）；`states.ts` 状态机：CRUISE / FOLLOW / AVOID / DECEL / ARRIVED / EMERGENCY
+- **每帧流程**：Frenet 参考线（有 route → 开环，无 route → 闭环）→ 车辆投影 → 巡航目标 `vCap = clamp(最近障碍/2, 17.5, 35)` → **路径层 × 速度上限收敛迭代（≤3 轮；收敛阈 0.2m / 0.5m·s⁻¹，变化不降反增则提前停）** → `solveSpeedLayer` → 合成
+- **路径层**：`corridor.ts` 建**走廊族**（舒适 / 物理 / 更严 / 更松，同一几何只差膨胀量），候选由**物理走廊瓶颈处的自由段**派生（间隙中心 + 边界内缩 + 车道中心，≤7 个）；两段式横向（前 40m 五次多项式横移、其后保持），**自适应缩短发展段**（越界点前完成横移，下限按 `S_min=√(5.77·|Δl|·v²/A_LAT_MAX)` 随速度缩放）+ **横向路径夹紧 [l0, target]**（防贴边棘轮复位）；120m 视程（有路线时截到路线剩余，`sEnd`）、越出走廊 = 阻塞
+- **双阈值（走廊版）**：舒适走廊 = 车半宽 + `max(1.5m, 标定 p95)`（只影响排名与慢行档）；物理走廊 = 车半宽 + `marginFor(v)`（标定速度表，决定停车线）；更严/更松 = 物理 ±0.15m（迟滞状态机 `tight.ts` 的进入/退出判据，进入用更松、退出用更严 + 3 帧防抖）。横向排名只看 COMMIT_WINDOW=60m（晚承诺）；全部候选连物理走廊都过不去 → 停车线；存在物理可过候选则限速 8m/s 慢行；**可达性闸门**用"当前速度档几何"判制动可达性（不够则 emergency）
+- **收敛迭代（stage C）**：`vAssume` 从 `max(当前速度, 慢行档)` 起，每轮用 `margin(vAssume)`/`S(vAssume)` 求路径，再由路径几何反推速度上限 `u`（封死 0 / 紧间隙慢行档 / 横向机动 `lateralSpeedCap` / `vCap`）；几何评估速度下限 = 慢行档（破"停车 → 裕度最大 → 封死 → 永不起步"自锁）
 - **速度层**：ST 条目（tMin=0 静态）→ cruise / stop（五次多项式停车线，T 取最小单调解）/ emergency（A_MAX 兜底）
 - `polynomial.ts` 五次多项式（曲率 C² 连续）；`collision.ts` 锥形搜索（供旧耦合路径的遗留工具）
+- **指标**：`summary.json` / `report.md` 含到达用时、路线进度、**收敛轮数 >1 的帧占比、单帧规划耗时 p50/p95**（`planMs` 为墙钟量，**不进逐帧归档**——否则破坏"同种子逐字节一致"）
 - 路线终点自动减速（DECEL_ZONE=25m）+ 到达检测（剩余 <10px → ARRIVED）
 
 ### 感知（js/algo/perception.ts）
@@ -95,7 +97,16 @@ Pure Pursuit：δ = atan2(2·L·sin α, ld)，预瞄距离 = clamp(0.4×speed, 1
 
 ### 调试与记录
 
-- `shared/debug.ts` — 跨模块共享调试对象，各模块写入内部状态，ui.ts 的 inspect 面板读取展示
+- `shared/debug.ts` — 跨模块共享调试对象，各模块写入内部状态，ui.ts 的 inspect 面板读取展示；
+  `debug.planning.viz` 是**走廊可视化载荷**（自由带四边形 / 瓶颈横断线 / 候选路径与发展段，引用路径层对象零拷贝），
+  由渲染层 `env/renderer/overlays.ts` 的 `updateCorridorViz` 绘制（左侧栏「仿真」开关或 C 键；回放模式不画——回放不跑规划器）。
+  带子按**本帧是否被雷达真正扫到**分色：绿 = 观测到（自由）、灰蓝 = 未观测（遮挡阴影/视锥外，属"未知"），
+  并在覆盖极限画横断线——见 `docs/domain.md` P13（HD Map 背景减除的固有盲区）
+- **Frenet 刻度**（`env/renderer/geometry.ts` 的 `buildFrenetTicksGroup`，独立开关 + G 键，默认开）：
+  沿弧长每 10m 一条横线、每 50m 一条亮线 + `s=50m` 数字标签（canvas Sprite）；
+  横向参考线 l=0（赛道中心虚线，已有）/±1.875m（车道中心）/±3.75m（车道分隔，已有）/**±L_MAX（规划域边，与走廊同色）**。
+  **参考线口径与规划器一致**（有路线用路线开环参考线、s 从路线起点算）→ debug 面板的 S/L 值能直接在地上读；
+  路线或地图变化时按对象身份重建该组。
 - 运行归档的导出/导入统一走 headless 格式：浏览器 💾 导出 `.run.json` 归档包（`sim/records.ts` 收集 + `headless/bundle.ts` 组装检测/报告），📂 导入后直接在回放器打开；`.run.json` 包与磁盘 `runs/<id>/` 归档内容同构
 
 ### Headless 运行与归档（AI 自助测试流程）
@@ -109,7 +120,7 @@ Pure Pursuit：δ = atan2(2·L·sin α, ld)，预瞄距离 = clamp(0.4×speed, 1
 - `docs/superpowers/specs/` — 设计规格（写码前）；`docs/superpowers/plans/` — 实施计划
 - `docs/reports/` — 会话/里程碑复盘（冻结快照，按日期一份：`YYYY-MM-DD-<topic>-session.md`）
 - `docs/incidents/` — 缺陷档案（一事一档，规则与模板见该目录 README；架构决策暂用 `[决策]` 前缀并入）
-- `docs/domain.md` — 领域知识活文档（问题图鉴 P1～P11 + 术语表 + 参数表），持续增补、认知更新直接改
+- `docs/domain.md` — 领域知识活文档（问题图鉴 P1～P12 + 术语表 + 参数表），持续增补、认知更新直接改
 - `ISSUE_HISTORY.md`（根目录）— 总台账：新记录一行一条 + 链接到上述文档；老记录保留原位不搬迁
 
 ## 开发规范
