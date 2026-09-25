@@ -3,6 +3,9 @@
 > 2026-09-18 由 `ISSUE_HISTORY.md`（问题记录 + 架构决策）与 `issue_history.md`（问题历史与解决方案）合并整理。
 > 按主题分为三部分：算法实现问题 → 架构决策与重构 → 工程基础设施。
 > 条目记录于 2026-07-26 开发阶段，其中的参数值为当时取值，后续迭代可能已调整，最新参数以代码为准。
+>
+> 本文件为**总台账**；细节文档的落位规则见 `CLAUDE.md` 的「文档地图」：
+> 领域图鉴 `docs/domain.md` ｜ 缺陷档案 `docs/incidents/`（一事一档）｜ 会话复盘 `docs/reports/`
 
 ## 已升级：规划层纵向-横向解耦（2026-09-19，spec: docs/superpowers/specs/2026-09-19-decoupled-planner-design.md）
 

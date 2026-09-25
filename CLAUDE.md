@@ -104,6 +104,14 @@ Pure Pursuit：δ = atan2(2·L·sin α, ld)，预瞄距离 = clamp(0.4×speed, 1
 
 **场景同源**：浏览器与 headless 共用同一管线（`Scenario → parseScenario → buildScenarioWorld → SimEngine`）。浏览器顶栏「场景」下拉可加载 `scenarios/` 任意场景（带路线自动开跑），默认「随机场景」=随机种子+随机 3-5 障碍、无路线（右键设路线）；地图下拉切换保留当前场景配置仅换地图。同场景同种子在浏览器不做任何操作时与 headless 逐帧一致。
 
+## 文档地图（新文档的落位规则）
+
+- `docs/superpowers/specs/` — 设计规格（写码前）；`docs/superpowers/plans/` — 实施计划
+- `docs/reports/` — 会话/里程碑复盘（冻结快照，按日期一份：`YYYY-MM-DD-<topic>-session.md`）
+- `docs/incidents/` — 缺陷档案（一事一档，规则与模板见该目录 README；架构决策暂用 `[决策]` 前缀并入）
+- `docs/domain.md` — 领域知识活文档（问题图鉴 P1～P11 + 术语表 + 参数表），持续增补、认知更新直接改
+- `ISSUE_HISTORY.md`（根目录）— 总台账：新记录一行一条 + 链接到上述文档；老记录保留原位不搬迁
+
 ## 开发规范
 
 - **先讨论方案，再写代码** — 涉及架构决策或新功能，先讨论设计，用户确认后再实现
