@@ -25,19 +25,38 @@ const MAX_YAW_JITTER = 0.3;
 /**
  * 在赛道上生成随机障碍物
  *
- * @param track   赛道几何数据
- * @param count   目标数量
- * @param minSize 最小宽度（px，默认 8 = 2m）
- * @param maxSize 最大宽度（px，默认 14 = 3.5m）
- * @param rng     随机源（缺省 Math.random；headless 传入可播种 RNG 以复现）
+ * @param track     赛道几何数据
+ * @param count     目标数量
+ * @param minSize   最小宽度（px，默认 8 = 2m）
+ * @param maxSize   最大宽度（px，默认 14 = 3.5m）
+ * @param rng       随机源（缺省 Math.random；headless 传入可播种 RNG 以复现）
+ * @param clearance 出生区净空（有路线时传入）：障碍须距 fromIndex 沿弧 ≥ minGap。
+ *                  随机障碍曾落在出生点上（oval 种子 7 重叠 3m）——车一出生即
+ *                  接触、与速度无关、全程碰撞不可避（实测 3600 帧）。
  * @returns Obstacle[]
  */
 export function generateObstacles(
   track: TrackGeometry, count: number,
   minSize = 8, maxSize = 14, rng: Rng = Math.random,
+  clearance?: { fromIndex: number; minGap: number },
 ): Obstacle[] {
   const obstacles: Obstacle[] = [];
   const n = track.centerPoints.length - 1;
+
+  // 累计弧长表（环形），供出生区净空判定（精确沿弧距离，O(1)/次）
+  let cum: number[] | null = null;
+  if (clearance) {
+    cum = [0];
+    for (let i = 0; i < n; i++) {
+      const a = track.centerPoints[i], b = track.centerPoints[(i + 1) % n];
+      cum.push(cum[i] + Math.hypot((b.x as number) - (a.x as number), (b.y as number) - (a.y as number)));
+    }
+  }
+  const tooCloseToStart = (idx: number): boolean => {
+    if (!cum || !clearance) return false;
+    const d = Math.abs(cum[idx] - cum[clearance.fromIndex]);
+    return Math.min(d, cum[n] - d) < clearance.minGap;
+  };
 
   // Fisher–Yates 洗牌 → 随机不重复采样中心线位置
   const indices = Array.from({ length: n }, (_, i) => i);
@@ -48,6 +67,7 @@ export function generateObstacles(
 
   for (const idx of indices) {
     if (obstacles.length >= count) break;
+    if (tooCloseToStart(idx)) continue;   // 出生区净空：跳过起点附近的采样位
     const pt = track.centerPoints[idx];
     const next = track.centerPoints[(idx + 1) % n];
     const dx = (next.x as number) - (pt.x as number);

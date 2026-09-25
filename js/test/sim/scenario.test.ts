@@ -4,7 +4,7 @@ import assert from 'node:assert';
 import { parseScenario, buildScenarioWorld, defaultScenario, ScenarioError } from '../../sim/scenario.js';
 import { createRng } from '../../shared/rng.js';
 import { cartesianToFrenet, buildFrenetReference } from '../../algo/plan/frenet.js';
-import { m } from '../../shared/dimensions.js';
+import { m, mps } from '../../shared/dimensions.js';
 
 const VALID = {
   version: 1, name: 't1', map: 'oval', seed: 42, duration: 30,
@@ -73,5 +73,46 @@ describe('buildScenarioWorld', () => {
     assert.ok(a.route !== null);
     assert.strictEqual(a.route!.startIndex, 0);
     assert.ok(a.route!.waypointIndices.length > 1);
+  });
+
+  it('有路线时随机障碍与起点的沿弧距离 ≥ 80m（出生区净空）', () => {
+    // 回归：随机障碍曾落在出生点上（oval 种子 7 重叠 3m：车一出生即接触、
+    // 全程 3600 帧碰撞）。带路线时障碍须距起点沿弧 ≥ 80m。
+    const arcDist = (track: any, i: number, j: number) => {
+      const n = track.centerPoints.length - 1;
+      const cum = [0];
+      for (let k = 0; k < n; k++) {
+        const a = track.centerPoints[k], b = track.centerPoints[(k + 1) % n];
+        cum.push(cum[k] + Math.hypot((b.x as number) - (a.x as number), (b.y as number) - (a.y as number)));
+      }
+      const d = Math.abs(cum[i] - cum[j]);
+      return Math.min(d, cum[n] - d);
+    };
+    const nearestIdx = (track: any, o: any) => {
+      let best = 0, bd = Infinity;
+      for (let i = 0; i < track.centerPoints.length - 1; i++) {
+        const p = track.centerPoints[i];
+        const d = Math.hypot((o.x as number) - (p.x as number), (o.y as number) - (p.y as number));
+        if (d < bd) { bd = d; best = i; }
+      }
+      return best;
+    };
+    for (const [map, seed] of [['oval', 7], ['oval', 6], ['hairpin', 7], ['hairpin', 6]] as const) {
+      const s = parseScenario({ ...VALID, map, seed, obstacles: { mode: 'random', count: 5 } });
+      const { worldCfg, track, route } = buildScenarioWorld(s, 1800, 800);
+      for (const o of worldCfg.obstacles!) {
+        // 容差 3m：障碍有 ±3m 横向偏置，最近点在索引空间可能偏移一段
+        const d = arcDist(track, nearestIdx(track, o), route!.startIndex);
+        assert.ok(d >= (m(80) as number) - (m(3) as number),
+          `${map} 种子${seed}: 障碍距起点沿弧 ${(d / 4).toFixed(1)}m 不足 80m`);
+      }
+    }
+  });
+
+  it('默认起步速度 5 m/s（低起步避免出生点紧邻障碍不可避）；car.speed 可覆盖', () => {
+    const s = parseScenario(VALID);
+    assert.strictEqual(buildScenarioWorld(s, 1800, 800).worldCfg.carStart!.speed, mps(5) as number);
+    const overridden = parseScenario({ ...VALID, car: { speed: 20 } });
+    assert.strictEqual(buildScenarioWorld(overridden, 1800, 800).worldCfg.carStart!.speed, mps(20) as number);
   });
 });

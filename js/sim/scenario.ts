@@ -151,6 +151,11 @@ export function buildScenarioWorld(scenario: Scenario, width: number, height: nu
   const track = generateTrack(width, height, mapDef.controlRadii);
   const ref = buildFrenetReference(track.centerPoints, true);
 
+  // 路线起点索引先算（随机障碍的出生区净空需要）
+  const routeStartIdx = scenario.route
+    ? sToIndex(track.centerPoints, m(scenario.route.startS) as number)
+    : null;
+
   let obstacles: Obstacle[];
   if (scenario.obstacles.mode === 'explicit') {
     obstacles = scenario.obstacles.list.map(o => {
@@ -164,14 +169,15 @@ export function buildScenarioWorld(scenario: Scenario, width: number, height: nu
     });
   } else {
     const rng = createRng(deriveSeed(scenario.seed, 'obstacles'));
-    obstacles = generateObstacles(track, scenario.obstacles.count, 8, 14, rng);
+    obstacles = generateObstacles(track, scenario.obstacles.count, 8, 14, rng,
+      routeStartIdx !== null ? { fromIndex: routeStartIdx, minGap: m(80) as number } : undefined);
   }
 
   let route: Route | null = null;
   let carStart: WorldConfig['carStart'] = undefined;
-  if (scenario.route) {
+  if (scenario.route && routeStartIdx !== null) {
     const graph = buildRoadGraph(track.centerPoints);
-    const startIdx = sToIndex(track.centerPoints, m(scenario.route.startS) as number);
+    const startIdx = routeStartIdx;
     const goalIdx = sToIndex(track.centerPoints, m(scenario.route.goalS) as number);
     const pathIndices = findRoute(graph, startIdx, goalIdx);
     if (!pathIndices || pathIndices.length < 2) {
@@ -194,7 +200,10 @@ export function buildScenarioWorld(scenario: Scenario, width: number, height: nu
         (np.y as number) - (waypoints[0].y as number),
         (np.x as number) - (waypoints[0].x as number),
       )),
-      speed: scenario.car?.speed !== undefined ? mps(scenario.car.speed) : mps(25),
+      // 默认起步速度 5 m/s（18 km/h）：障碍按随机散布，可能落在出生点紧邻处；
+      // 25m/s 起步时制动距离 ~52m，出生点前十几米的障碍物理上不可避
+      // （oval-s3 实测：障碍在出生点前 13.8m → 任何规划器都撞）。可用 car.speed 覆盖。
+      speed: scenario.car?.speed !== undefined ? mps(scenario.car.speed) : mps(5),
     };
   }
 

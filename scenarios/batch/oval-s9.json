@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "name": "batch-oval-s3",
+  "name": "batch-oval-s9",
   "map": "oval",
-  "seed": 3,
+  "seed": 9,
   "duration": 60,
   "obstacles": {
     "mode": "random",

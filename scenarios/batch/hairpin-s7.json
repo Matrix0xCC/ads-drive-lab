@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "name": "batch-hairpin-s2",
+  "name": "batch-hairpin-s7",
   "map": "hairpin",
-  "seed": 2,
+  "seed": 7,
   "duration": 90,
   "obstacles": {
     "mode": "random",

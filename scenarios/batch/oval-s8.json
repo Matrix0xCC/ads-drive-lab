@@ -1,8 +1,8 @@
 {
   "version": 1,
-  "name": "batch-oval-s4",
+  "name": "batch-oval-s8",
   "map": "oval",
-  "seed": 4,
+  "seed": 8,
   "duration": 60,
   "obstacles": {
     "mode": "random",
