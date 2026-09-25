@@ -8,6 +8,7 @@
 import { Issue, RunMeta, RunSummary } from '../shared/types.js';
 import { Detector } from './detector.js';
 import { Scenario } from '../sim/scenario.js';
+import { FIXED_DT } from '../sim/engine.js';
 
 export function verdictOf(issues: Issue[]): {
   verdict: 'PASS' | 'ISSUES';
@@ -26,6 +27,12 @@ export function buildSummary(det: Detector, engineInfo: { steps: number; simTime
     simSeconds: engineInfo.simTime,
     speed: { maxMps: det.speedMax / 4, avgMps: avg / 4 },
     arrivedAtStep: det.arrivedAtStep,
+    // 到达用时：评估"到达质量"的效率维度——仅看到达率时，更慢但更安全的改动
+    // （如紧间隙限速下调）的代价不可见（批次 A/B 的教训）
+    arrivalTimeS: det.arrivedAtStep !== null ? det.arrivedAtStep * FIXED_DT : null,
+    // 路线进度：未到达的运行也给出 0..1 的完成度（停在 30% 与 90% 才可区分）
+    progress: det.routeLength !== null && det.routeLength > 0
+      ? Math.min(1, det.maxFrenetS / det.routeLength) : null,
     trackingRmseM: det.trackingErrN > 0 ? Math.sqrt(det.trackingErrSum / det.trackingErrN) / 4 : null,
     minObstacleDistM: Number.isFinite(det.minObstacleDist) ? det.minObstacleDist / 4 : null,
     stateCounts: det.stateCounts,
@@ -54,7 +61,8 @@ export function buildReportMd(o: {
   lines.push('| 指标 | 值 |');
   lines.push('|---|---|');
   lines.push(`| 最大/平均速度 | ${summary.speed.maxMps.toFixed(1)} / ${summary.speed.avgMps.toFixed(1)} m/s |`);
-  lines.push(`| 到达 step | ${summary.arrivedAtStep ?? '未到达'} |`);
+  lines.push(`| 到达用时 | ${summary.arrivalTimeS != null ? `${summary.arrivalTimeS.toFixed(1)} s（step ${summary.arrivedAtStep}）` : '未到达'} |`);
+  lines.push(`| 路线进度 | ${summary.progress != null ? `${(summary.progress * 100).toFixed(0)}%` : 'n/a'} |`);
   lines.push(`| 交叉跟踪 RMSE | ${summary.trackingRmseM?.toFixed(3) ?? 'n/a'} m |`);
   lines.push(`| 最近障碍距离 | ${summary.minObstacleDistM?.toFixed(2) ?? 'n/a'} m |`);
   lines.push(`| 状态分布 | ${Object.entries(summary.stateCounts).map(([k, v]) => `${k}:${v}`).join(' ')} |`);

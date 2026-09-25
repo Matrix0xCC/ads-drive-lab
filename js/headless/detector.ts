@@ -125,6 +125,8 @@ export class Detector {
   speedMax = 0;
   minObstacleDist = Infinity;
   stateCounts: Record<string, number> = {};
+  /** 历史最大沿路线弧长（进度指标用，防弧长回落时进度倒退） */
+  maxFrenetS = 0;
   emergencyBrakeCount = 0;
   boundsResetCount = 0;
 
@@ -158,6 +160,8 @@ export class Detector {
       if (typeof md === 'number' && md < this.minObstacleDist) this.minObstacleDist = md;
     } else if (rec.type === 'plan') {
       this.stateCounts[rec.state] = (this.stateCounts[rec.state] ?? 0) + 1;
+      const fs = (rec.frenet as { s?: number } | undefined)?.s;
+      if (typeof fs === 'number' && fs > this.maxFrenetS) this.maxFrenetS = fs;
     } else if (rec.type === 'event') {
       if (rec.kind === 'emergency_brake') this.emergencyBrakeCount += 1;
       else if (rec.kind === 'bounds_reset') this.boundsResetCount += 1;

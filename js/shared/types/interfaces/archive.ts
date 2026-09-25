@@ -87,6 +87,10 @@ export interface RunSummary {
   simSeconds: number;
   speed: { maxMps: number; avgMps: number };
   arrivedAtStep: number | null;
+  /** 到达用时（秒，= arrivedAtStep/60；未到达 = null）。旧归档可能缺此字段 */
+  arrivalTimeS?: number | null;
+  /** 路线进度 0..1（历史最大沿路线弧长 / 路线长度；无路线 = null）。旧归档可能缺此字段 */
+  progress?: number | null;
   trackingRmseM: number | null;
   minObstacleDistM: number | null;
   stateCounts: Record<string, number>;
