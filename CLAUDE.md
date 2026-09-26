@@ -89,6 +89,10 @@ requestAnimationFrame 主循环 (~60Hz)
 - **收敛迭代（stage C）**：`vAssume` 从 `max(当前速度, 慢行档)` 起，每轮用 `margin(vAssume)`/`S(vAssume)` 求路径，再由路径几何反推速度上限 `u`（封死 0 / 紧间隙慢行档 / 横向机动 `lateralSpeedCap` / `vCap`）；几何评估速度下限 = 慢行档（破"停车 → 裕度最大 → 封死 → 永不起步"自锁）
 - **曲率限速（A/B 开关 `CURVATURE_SPEED_LIMIT`，默认关）**：开则按道路曲率限速 `v ≤ √(A_LAT_MAX/κ(s))` 并叠加前视制动可行性（`v² ≤ v_lim² + 2·a_brake·Δs`，取全程最小）。**默认关的原因**：它改变所有地图的速度剖面（径向图半径 80~100m → 限速 17~19m/s），属语义变更需单独 A/B；OSM 高速图（最急 R=141m）关闭时会以 vCap 上限 35m/s 跑完含弯全程。headless 用 `--curvature-limit` 打开
 - **道路半宽随地图**：`solvePathLayer` 收 `trackHalfWidth`（规划域 `L_MAX` 随地图半宽收窄）；感知的 |l| 分级阈值改为**半宽比例**（0.6/0.8，径向图 0.6×7.5=4.5m / 0.8×7.5=6.0m 与历史写死值一致 → 行为零变化）
+- **地图语义进决策（"地图起作用了吗"的可测判据：几何相同、语义不同 → 行为必须不同）**：
+  - **地图限速 → vCap**：`track.speedLimitMps`（OSM `maxspeed`）作为巡航速度**硬上限**，取在 17.5m/s 防呆下限**之后**（低限速图 60km/h=16.7m/s 不会被下限抬高）。实测：G4 图最高速 34.9 → **33.27m/s**（=120km/h）
+  - **车道语义 → 车道中心**：`laneCentersOf(halfWidth, laneWidth)` 推出车道数与车道中心，名义车道取最靠近路中心者（径向 4 车道 → +1.875m 与历史硬编码**逐位一致**；OSM 3 车道 → 中间车道 `l=0`）。实测：G4 图车的 |l| p50 由 **1.87m → 0.02m**（旧硬编码值在 3 车道路面上是跨车道线的位置）
+  - 两者都在 `debug.planning` 暴露（`mapSpeedLimitMps` / `laneOffsetU` / `laneCentersU`）并在调试面板显示
 - **速度层**：ST 条目（tMin=0 静态）→ cruise / stop（五次多项式停车线，T 取最小单调解）/ emergency（A_MAX 兜底）
 - `polynomial.ts` 五次多项式（曲率 C² 连续）；`collision.ts` 锥形搜索（供旧耦合路径的遗留工具）
 - **指标**：`summary.json` / `report.md` 含到达用时、路线进度、**收敛轮数 >1 的帧占比、单帧规划耗时 p50/p95**（`planMs` 为墙钟量，**不进逐帧归档**——否则破坏"同种子逐字节一致"）

@@ -33,6 +33,11 @@ export function updateInspectPanel(dt: number) {
     html += `  dl/ds=${pl.dl_ds.toFixed(4)} | Δheading=${(pl.headingDiff*180/Math.PI).toFixed(1)}°\n`;
     if (pl.remainingDist > 0) html += `  剩余: ${toM(pl.remainingDist)}m\n`;
     html += `  速度: 目标 ${toM(pl.speedTarget)}m/s 模式 ${pl.speedMode}\n`;
+    if (pl.mapSpeedLimitMps != null) html += `  地图限速: ${toM(pl.mapSpeedLimitMps)}m/s（maxspeed）\n`;
+    if (pl.laneOffsetU != null) {
+      const cs = (pl.laneCentersU ?? []).map(v => toM(v, 2)).join(' / ');
+      html += `  车道: 名义 ${toM(pl.laneOffsetU, 2)}m${cs ? `｜中心 [${cs}]m` : ''}\n`;
+    }
     if (pl.rounds !== undefined && pl.planMs !== undefined && pl.vAssume !== undefined) {
       html += `  紧间隙: ${pl.tight ?? '—'} | 迭代 ${pl.rounds} 轮 ${pl.planMs.toFixed(1)}ms (v假设 ${toM(pl.vAssume)}m/s)\n`;
     }

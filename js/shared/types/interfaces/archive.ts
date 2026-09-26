@@ -31,6 +31,8 @@ export interface WorldFile {
     closed?: boolean;
     /** 道路半宽（px）；旧归档缺省由消费方回退 */
     halfWidth?: number;
+    /** 名义车道中心（px）；旧归档缺省由消费方回退 */
+    laneOffset?: number;
   };
   obstacles: ObstaclePlain[];
   route: { waypoints: [number, number][]; startIndex: number; goalIndex: number; length: number } | null;

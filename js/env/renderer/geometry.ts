@@ -69,7 +69,7 @@ export function buildTrackGroup(track: TrackGeometry): THREE.Group {
   // OSM 图 11.25m/3.75m = 3 车道 → 分隔线 ±1.875m）。l=0 的中线由中心虚线承载，不重复画。
   const laneRef = buildFrenetReference(track.centerPoints, track.closed ?? true);
   const halfW = (track.halfWidth ?? TRACK_HALF_WIDTH) as number;
-  const laneW = m(3.75) as number;
+  const laneW = (track.laneWidth ?? m(3.75)) as number;   // 车道宽来自地图
   const laneCount = Math.max(2, Math.round(2 * halfW / laneW));
   for (let k = 1; k < laneCount; k++) {
     const lv = px((-halfW + k * (2 * halfW / laneCount)));

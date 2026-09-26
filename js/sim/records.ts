@@ -68,6 +68,7 @@ export function buildWorldFile(
       closed: track.closed ?? true,
       // 只在有值时写（undefined 会被 JSON.stringify 丢掉，写进去会让"往返一致"断言失败）
       ...(track.halfWidth !== undefined ? { halfWidth: track.halfWidth as number } : {}),
+      ...(track.laneOffset !== undefined ? { laneOffset: track.laneOffset as number } : {}),
     },
     obstacles: obstacles.map(o => ({
       x: o.x as number, y: o.y as number, width: o.width as number,

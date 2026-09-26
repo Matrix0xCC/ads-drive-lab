@@ -60,6 +60,12 @@ export interface PlanningDebug {
   speedTarget: number;
   /** 速度层模式：cruise | stop | emergency */
   speedMode: string;
+  /** 地图限速（仿真单位/s；null = 该地图未声明）——让"地图语义在起作用"可见 */
+  mapSpeedLimitMps?: number | null;
+  /** 名义车道中心（仿真单位，Frenet l）——来自地图 */
+  laneOffsetU?: number;
+  /** 本图全部车道中心（仿真单位，升序） */
+  laneCentersU?: number[];
   /** 紧间隙迟滞状态（tight.ts）：NONE | CREEPING | SEALED（回放无此数据） */
   tight?: string;
   /** 数据来源：'replay' = 回放（用归档扫描重算走廊，迭代/耗时等实时字段缺省） */

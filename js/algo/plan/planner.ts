@@ -58,13 +58,14 @@ const CONV_SPEED = mps(0.5) as number;
  *  参考线由调用方缓存传入（ref 按路线/赛道建一次即可）。 */
 export function corridorVizForReplay(
   ref: FrenetReference, lidarScan: LidarScan, carX: number, carY: number, sEnd?: number,
+  laneOffsetU?: number,
 ): PlanningViz {
   const fl = cartesianToFrenet(px(carX), px(carY), ref);
   const pathLayer = solvePathLayer({
     ref, l0: fl.l, dl0: dimless(0), s0: fl.s, v0: 0,
     carX, carY, lidarScan,
     carWidth: m(2.0), collisionRadius: px(Math.hypot(m(2.0) as number, m(4.5) as number) / 2),
-    laneOffset: laneOffset, prevTargetL: null,
+    laneOffset: px(laneOffsetU ?? (LEGACY_LANE_OFFSET as number)), prevTargetL: null,
     sEnd,
   });
   return buildVizPayload(pathLayer, ref, lidarScan, carX, carY);
@@ -106,8 +107,10 @@ function pathSpeedCap(pl: PathLayerResult, l0: number, vCap: number): number {
   return Math.max(0, Math.min(vCap, lateral, tight));
 }
 
-/** 车道中心偏移量（Lane 3 = +1.875m）。切换车道改此值即可。 */
-let laneOffset: Px = m(1.875);
+/** 名义车道的**历史回退值**（径向图 4 车道的内侧右车道 +1.875m）。
+ *  现在名义车道来自**地图**（`track.laneOffset`，由半宽/车道宽推导——见 track.ts 的 laneCentersOf）；
+ *  这里只用于"地图未声明"的场景（例如回放可视化无 track）。 */
+const LEGACY_LANE_OFFSET: Px = m(1.875);
 
 // ==================== 状态 ====================
 
@@ -173,6 +176,10 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
   }
 
   // ─── 2. Frenet 状态 ───
+  // 名义车道来自**地图语义**（车道数 × 车道宽 → 车道中心，见 track.ts 的 laneCentersOf）：
+  // OSM 3 车道 → 中间车道 l=0；径向 4 车道 → +1.875m（与历史硬编码一致）。路径代价的中心
+  // 偏好、候选里的"车道中心"、AVOID 判据都用它 —— 换地图时车的巡航横向位置随之改变。
+  const laneOffset = (track.laneOffset ?? LEGACY_LANE_OFFSET) as Px;
   const fl = cartesianToFrenet(car.x, car.y, frenetRef);
   const tangent = frenetRef.tangents[fl.idx];
   const ta = Math.atan2(tangent.y, tangent.x);
@@ -190,6 +197,11 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
   // ─── 4. 纵向巡航目标（单值）───
   const minObsDist = Math.min(...lidarScan.distances);
   let targetV = Math.min(mps(35) as number, Math.max(mps(17.5) as number, minObsDist / 2));
+  // 地图限速（OSM maxspeed → vCap）：**语义来自地图**，与"前方障碍限速"取最小。
+  // 位置必须在 17.5m/s 下限**之后**——地图限速是硬上限，低限速图（60km/h=16.7m/s）
+  // 不应被"防呆下限"抬上去。
+  const vMapLimit = track.speedLimitMps;
+  if (vMapLimit !== undefined) targetV = Math.min(targetV, vMapLimit as number);
   if (routeActive && remainingDist < DECEL_ZONE) {
     targetV *= Math.max(0.1, remainingDist / DECEL_ZONE);
   }
@@ -352,6 +364,9 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
     bestTargetL: pathLayer.best.targetL as number,
     speedTarget: targetV,
     speedMode: speedLayer.mode,
+    mapSpeedLimitMps: (track.speedLimitMps as number | undefined) ?? null,
+    laneOffsetU: laneOffset as number,
+    laneCentersU: track.laneCenters?.map(v => v as number),
     tight: _tight.state,
     rounds,
     revised,

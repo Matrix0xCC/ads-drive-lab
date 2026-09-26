@@ -27,6 +27,15 @@ export interface TrackGeometry {
   closed?: boolean;
   /** 道路半宽（px）；缺省 m(7.5) */
   halfWidth?: Px;
+  /** 车道宽（px）；缺省 m(3.75)。渲染车道分隔线与车道中心推导共用 */
+  laneWidth?: Px;
+  /** 车道中心横向偏移（px，Frenet l，升序）——**车道语义来自地图** */
+  laneCenters?: Px[];
+  /** 名义行驶车道中心（px）：路径代价的中心偏好与 AVOID 判据都用它 */
+  laneOffset?: Px;
+  /** 该地图的限速（px/s，来自 OSM maxspeed）：规划器的巡航速度硬上限。
+   *  缺省 undefined = 该地图不限速（用规划器默认上限） */
+  speedLimitMps?: PxPerSec;
 }
 
 /** 障碍物 — 矩形，带位置、尺寸和朝向角 */

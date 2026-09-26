@@ -231,6 +231,7 @@ export class ReplayController {
       corridorViz = corridorVizForReplay(
         this._vizRef, lidarScan, stepRec.car.x, stepRec.car.y,
         world.route ? px(world.route.length) : undefined,
+        world.track.laneOffset,          // 名义车道也来自归档（地图语义）
       );
     }
 

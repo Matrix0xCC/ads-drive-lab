@@ -11,7 +11,7 @@
 // 输出：TrackGeometry { centerPoints, innerBoundary, outerBoundary }
 
 import { TrackGeometry, Point2D } from '../shared/types.js';
-import { Px, m, px } from '../shared/dimensions.js';
+import { Px, PxPerSec, m, mps, px } from '../shared/dimensions.js';
 import { Rng } from '../shared/rng.js';
 import { MapDefinition } from './mapDefinitions.js';
 
@@ -127,6 +127,25 @@ export function ribbonPolygon(center: Point2D[], halfW: number, endExtend = m(25
 }
 
 /**
+ * 车道几何：由**道路半宽与车道宽**推出车道数与各车道中心，并给出名义行驶车道。
+ *
+ * 【为什么从地图推】车道是地图语义（OSM 的 `lanes` tag）。旧版把"Lane 3 = +1.875m"
+ * 硬编码在规划器里——换地图（2/3/4 车道）时名义车道就不对了。
+ * 实际车道宽取 `2·halfW/n`（让 n 条车道恰好铺满路面），n = round(2·halfW/laneWidth)。
+ * 名义车道取**最靠近路中心**的那条（奇数车道 = 正中间；偶数并列时取正侧——
+ * 径向图 4 车道因此得到 +1.875m，与历史硬编码值逐位一致 → 行为零变化）。
+ */
+export function laneCentersOf(halfW: number, laneWidth: number): { centers: number[]; offset: number } {
+  const n = Math.max(2, Math.round(2 * halfW / (laneWidth || 1)));
+  const w = 2 * halfW / n;
+  const centers: number[] = [];
+  for (let k = 0; k < n; k++) centers.push(-halfW + (k + 0.5) * w);
+  const offset = centers.reduce((a, b) =>
+    (Math.abs(b) < Math.abs(a) || (Math.abs(b) === Math.abs(a) && b > a)) ? b : a, centers[0]);
+  return { centers, offset };
+}
+
+/**
  * 由地图定义构建赛道几何（统一入口：径向闭环 / 点列开环）。
  *
  * @param defaultW/defaultH 径向地图未声明世界尺寸时的回退（引擎的 SIM_W/SIM_H）
@@ -136,14 +155,26 @@ export function buildTrack(map: MapDefinition, defaultW: number, defaultH: numbe
     if (!map.points || map.points.length < 2) throw new Error(`地图 ${map.name} 缺 points（polyline 需要 ≥2 点）`);
     if (map.closed) throw new Error(`地图 ${map.name}：闭环点列暂未支持（当前只有开环 OSM 地图）`);
     const halfW = (map.halfWidth ?? TRACK_HALF_WIDTH) as number;
+    const laneW = m(map.laneWidthM ?? 3.75) as number;
+    const lanes = laneCentersOf(halfW, laneW);
     return {
       centerPoints: map.points,
       innerBoundary: [],                                  // 开环无内场
       outerBoundary: ribbonPolygon(map.points, halfW),
       closed: false,
       halfWidth: px(halfW),
+      laneWidth: px(laneW),
+      laneCenters: lanes.centers.map(px),
+      laneOffset: px(lanes.offset),
+      ...(map.maxspeedKph !== undefined ? { speedLimitMps: mps(map.maxspeedKph / 3.6) } : {}),
     };
   }
   const track = generateTrack(map.worldW ?? defaultW, map.worldH ?? defaultH, map.controlRadii);
-  return { ...track, closed: true, halfWidth: TRACK_HALF_WIDTH };
+  const lanes = laneCentersOf(TRACK_HALF_WIDTH as number, m(3.75) as number);
+  return {
+    ...track, closed: true, halfWidth: TRACK_HALF_WIDTH,
+    laneWidth: m(3.75),
+    laneCenters: lanes.centers.map(px),
+    laneOffset: px(lanes.offset),
+  };
 }
