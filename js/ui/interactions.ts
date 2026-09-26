@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import { UiController } from './controller.js';
 import type { UiDeps } from './index.js';
-import { findRoute, findClosestPoint } from '../algo/routePlanner.js';
+import { buildNetworkRoute, findRoute, findClosestPoint } from '../algo/routePlanner.js';
 import { createRoute } from '../shared/types.js';
 import { px } from '../shared/dimensions.js';
 
@@ -27,7 +27,13 @@ export function wireInteractions(deps: UiDeps, ctl: UiController): void {
     const target = new THREE.Vector3();
     raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), target);
     if (!target) return null;
-    return findClosestPoint(target.x, target.z, deps.engine.track.centerPoints);
+    return findClosestPoint(target.x, target.z, pickPoints());
+  }
+
+  /** 拾取空间：**路网地图吸附到节点**（路由的端点就是节点），链式地图吸附到中心线采样点 */
+  function pickPoints() {
+    const t = deps.engine.track;
+    return t.netNodes && t.netNodes.length > 0 ? t.netNodes : t.centerPoints;
   }
 
   // ── 悬停预览：模式内显示"点下去会吸附到哪个路网点"（幽灵环） ──
@@ -46,7 +52,7 @@ export function wireInteractions(deps: UiDeps, ctl: UiController): void {
     }
     const mat = preview.material as THREE.MeshBasicMaterial;
     if (mat.color.getHex() !== wantColor) mat.color.setHex(wantColor);
-    const p = deps.engine.track.centerPoints[idx];
+    const p = pickPoints()[idx];
     preview.position.set(p.x as number, 0.6, p.y as number);
     preview.visible = true;
   }
@@ -101,6 +107,22 @@ export function wireInteractions(deps: UiDeps, ctl: UiController): void {
   /** 起点已选：尝试建路线；失败保持 picking（与旧行为一致） */
   function buildRouteFromStart(idx: number): void {
     const startIdx = ctl.state.pickStartIdx!;
+    const tr = deps.engine.track;
+    // 路网地图：节点对 → 边 → 链几何装配（与 headless 走**同一个** buildNetworkRoute）
+    if (tr.chains && tr.netNodes && tr.netEdges) {
+      const r = buildNetworkRoute(deps.engine.roadGraph, tr.netEdges, tr.chains, startIdx, idx);
+      if (!r) return;                       // 不可达：保持 picking（与旧行为一致）
+      let len = 0;
+      for (let i = 1; i < r.waypoints.length; i++) {
+        len += Math.hypot(
+          (r.waypoints[i].x as number) - (r.waypoints[i - 1].x as number),
+          (r.waypoints[i].y as number) - (r.waypoints[i - 1].y as number),
+        );
+      }
+      deps.actions.setRoute(createRoute(r.waypoints, r.chainSeq, startIdx, idx, px(len)), startIdx);
+      ctl.dispatch({ type: 'ROUTE_SET' });
+      return;
+    }
     const pathIndices = findRoute(deps.engine.roadGraph, startIdx, idx);
     if (!pathIndices || pathIndices.length < 2) return;
     const waypoints = pathIndices.map(i => deps.engine.track.centerPoints[i]);

@@ -36,6 +36,14 @@ export interface TrackGeometry {
   /** 该地图的限速（px/s，来自 OSM maxspeed）：规划器的巡航速度硬上限。
    *  缺省 undefined = 该地图不限速（用规划器默认上限） */
   speedLimitMps?: PxPerSec;
+  /** 路网地图（`chains` 存在即视为路网）：全部可行驶链（世界坐标）。
+   *  与"单中心线"地图的区别：可行驶域 = 到**最近链**的距离 ≤ 半宽（路口天然由并集覆盖），
+   *  而不是"在某条闭合多边形内"。`centerPoints` 此时取最长链，作为无路线时的回退参考线。 */
+  chains?: Point2D[][];
+  /** 路网节点（世界坐标）；路由图的端点 */
+  netNodes?: Point2D[];
+  /** 路网边（节点对 → 链序号） */
+  netEdges?: { from: number; to: number; chain: number; lengthM?: number; oneway?: boolean }[];
 }
 
 /** 障碍物 — 矩形，带位置、尺寸和朝向角 */

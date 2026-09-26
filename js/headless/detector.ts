@@ -13,8 +13,9 @@
 //   checks/mission.ts    跟踪误差 / 停滞 / 停车异常 / 超时
 
 import { FrameRecord, Issue, Obstacle, TrackGeometry, FrenetReference } from '../shared/types.js';
-import { Px, PxPerSec, m, mps } from '../shared/dimensions.js';
+import { Px, PxPerSec, m, mps, px } from '../shared/dimensions.js';
 import { buildFrenetReference } from '../algo/plan/frenet.js';
+
 import { runSafetyChecks } from './checks/safety.js';
 import { runPerceptionChecks } from './checks/perception.js';
 import { runPlanningChecks } from './checks/planning.js';
@@ -54,7 +55,12 @@ export const DEFAULT_DETECTOR_CONFIG: DetectorConfig = {
   mergeGapSteps: 30,
 };
 
-export interface DetectorWorld { track: TrackGeometry; obstacles: Obstacle[]; }
+export interface DetectorWorld {
+  track: TrackGeometry;
+  obstacles: Obstacle[];
+  /** 路线（可选）：有路线时越界判定优先相对路线 */
+  route?: { waypoints: [number, number][] } | null;
+}
 
 /** 区间合并器：同 check 的离散命中 → 连续区间 issue */
 export class IssueMerger {
@@ -102,6 +108,10 @@ export class Detector {
   readonly world: DetectorWorld;
   readonly merger: IssueMerger;
   readonly trackFrenet: FrenetReference;
+  /** 有路线时的参考线（开环）：路线越界判定的基准（路网地图必需，见 safety.ts ②） */
+  readonly routeFrenet: FrenetReference | null;
+  /** 路网链（世界坐标，px）：**可行驶域是链的并集**，越界必须按"到最近链"判（见 safety.ts ②） */
+  readonly netChains: { x: Px; y: Px }[][] | null;
 
   // —— 跨帧累积状态（各检查模块共享） ——
   lastStepRec: any = null;
@@ -141,6 +151,14 @@ export class Detector {
     };
     this.merger = new IssueMerger(this.cfg);
     this.trackFrenet = buildFrenetReference(this.world.track.centerPoints, this.world.track.closed ?? true);
+    const tc = this.world.track.chains;
+    this.netChains = tc && tc.length > 0
+      ? tc.map(ch => ch.map(p => ({ x: px(p.x as number), y: px(p.y as number) })))
+      : null;
+    const rw = this.world.route?.waypoints;
+    this.routeFrenet = rw && rw.length >= 2
+      ? buildFrenetReference(rw.map(([x, y]) => ({ x: px(x), y: px(y) })), false)
+      : null;
   }
 
   feed(rec: FrameRecord): void {

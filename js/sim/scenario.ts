@@ -18,7 +18,7 @@ import { Px, rad, m, mps, px, SIM_UNITS_PER_METER } from '../shared/dimensions.j
 import { MAP_PRESETS, MapDefinition } from '../env/mapDefinitions.js';
 import { buildTrack, TRACK_HALF_WIDTH } from '../env/track.js';
 import { generateObstacles } from '../env/obstacle.js';
-import { buildRoadGraph, findRoute } from '../algo/routePlanner.js';
+import { buildGraphFromEdges, buildNetworkRoute, buildRoadGraph, findRoute } from '../algo/routePlanner.js';
 import { buildFrenetReference, frenetToCartesian } from '../algo/plan/frenet.js';
 import { Rng, createRng, deriveSeed } from '../shared/rng.js';
 import { WorldConfig } from './engine.js';
@@ -35,7 +35,8 @@ export interface Scenario {
   duration: number;
   car?: { speed?: number };
   obstacles: { mode: 'explicit'; list: ScenarioObstacle[] } | { mode: 'random'; count: number };
-  route?: { startS: number; goalS: number };
+  /** 路线：链式/径向地图用弧长 `startS/goalS`；**路网地图用节点** `fromNode/toNode` */
+  route?: { startS?: number; goalS?: number; fromNode?: number; toNode?: number };
   checks?: Record<string, number>;
 }
 
@@ -87,8 +88,13 @@ export function parseScenario(json: unknown): Scenario {
 
   if (o.route !== undefined) {
     if (typeof o.route !== 'object' || o.route === null) fail('route 必须是对象');
-    if (!isNum(o.route.startS) || o.route.startS < 0) fail('route.startS 必须是非负数（米）');
-    if (!isNum(o.route.goalS) || o.route.goalS < 0) fail('route.goalS 必须是非负数（米）');
+    const byS = isNum(o.route.startS) && isNum(o.route.goalS);
+    const byNode = Number.isInteger(o.route.fromNode) && Number.isInteger(o.route.toNode);
+    if (!byS && !byNode) fail('route 需要 (startS, goalS)（链式地图）或 (fromNode, toNode)（路网地图）');
+    if (byS && (o.route.startS < 0 || o.route.goalS < 0)) fail('route.startS/goalS 必须是非负数（米）');
+    if (o.route.fromNode !== undefined && byNode && (o.route.fromNode < 0 || o.route.toNode < 0)) {
+      fail('route.fromNode/toNode 必须是非负整数（路网节点序号）');
+    }
   }
 
   if (o.checks !== undefined) {
@@ -155,8 +161,24 @@ export function buildScenarioWorld(scenario: Scenario, width: number, height: nu
   const ref = buildFrenetReference(track.centerPoints, closed);
 
   // 路线起点索引先算（随机障碍的出生区净空需要）
-  const routeStartIdx = scenario.route
-    ? sToIndex(track.centerPoints, m(scenario.route.startS) as number, closed)
+  const isNetwork = !!(track.chains && track.netNodes && track.netEdges);
+  // ── 路网地图：路线必须先算（障碍要沿**路线**布置，而不是沿某条链）──
+  let netWaypoints: Point2D[] | null = null;
+  let netStartNode = -1;
+  let lastChainSeq: number[] = [];
+  if (isNetwork && scenario.route) {
+    if (scenario.route.fromNode === undefined || scenario.route.toNode === undefined) {
+      throw new ScenarioError('路网地图的 route 需要 fromNode/toNode');
+    }
+    const graph = buildGraphFromEdges(track.netNodes!.length, track.netEdges!, track.chains!);
+    const r = buildNetworkRoute(graph, track.netEdges!, track.chains!, scenario.route.fromNode, scenario.route.toNode);
+    if (!r) throw new ScenarioError(`路网路线不可达: node ${scenario.route.fromNode} → ${scenario.route.toNode}`);
+    netWaypoints = r.waypoints;
+    netStartNode = scenario.route.fromNode;
+    lastChainSeq = r.chainSeq;
+  }
+  const routeStartIdx = !isNetwork && scenario.route
+    ? sToIndex(track.centerPoints, m(scenario.route.startS ?? 0) as number, closed)
     : null;
 
   let obstacles: Obstacle[];
@@ -172,16 +194,41 @@ export function buildScenarioWorld(scenario: Scenario, width: number, height: nu
     });
   } else {
     const rng = createRng(deriveSeed(scenario.seed, 'obstacles'));
-    obstacles = generateObstacles(track, scenario.obstacles.count, 8, 14, rng,
-      routeStartIdx !== null ? { fromIndex: routeStartIdx, minGap: m(80) as number } : undefined);
+    // 路网：障碍沿**路线**布置（出生区净空 = 路线起点后 80m）；链式：沿赛道，按起点索引净空
+    const obsTrack = netWaypoints
+      ? { centerPoints: netWaypoints, innerBoundary: [], outerBoundary: [], closed: false, halfWidth: track.halfWidth }
+      : track;
+    obstacles = generateObstacles(obsTrack, scenario.obstacles.count, 8, 14, rng,
+      netWaypoints ? { fromIndex: 0, minGap: m(80) as number }
+        : routeStartIdx !== null ? { fromIndex: routeStartIdx, minGap: m(80) as number } : undefined);
   }
 
   let route: Route | null = null;
   let carStart: WorldConfig['carStart'] = undefined;
-  if (scenario.route && routeStartIdx !== null) {
+  if (netWaypoints) {
+    // 路网：waypoints 已由 Dijkstra 装配；waypointIndices 记途经**链序号**（归档用）
+    const nodes = netWaypoints;
+    let totalLen = 0;
+    for (let i = 1; i < nodes.length; i++) {
+      totalLen += Math.hypot(
+        (nodes[i].x as number) - (nodes[i - 1].x as number),
+        (nodes[i].y as number) - (nodes[i - 1].y as number),
+      );
+    }
+    const np = nodes[Math.min(1, nodes.length - 1)];
+    route = createRoute(nodes, lastChainSeq, netStartNode, scenario.route!.toNode ?? -1, px(totalLen));
+    carStart = {
+      x: nodes[0].x, y: nodes[0].y,
+      angle: rad(Math.atan2(
+        (np.y as number) - (nodes[0].y as number),
+        (np.x as number) - (nodes[0].x as number),
+      )),
+      speed: scenario.car?.speed !== undefined ? mps(scenario.car.speed) : mps(5),
+    };
+  } else if (scenario.route && routeStartIdx !== null) {
     const graph = buildRoadGraph(track.centerPoints, closed);
     const startIdx = routeStartIdx;
-    const goalIdx = sToIndex(track.centerPoints, m(scenario.route.goalS) as number, closed);
+    const goalIdx = sToIndex(track.centerPoints, m(scenario.route.goalS ?? 0) as number, closed);
     const pathIndices = findRoute(graph, startIdx, goalIdx);
     if (!pathIndices || pathIndices.length < 2) {
       throw new ScenarioError(`路线不可达: startS=${scenario.route.startS} goalS=${scenario.route.goalS}`);

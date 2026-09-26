@@ -69,6 +69,8 @@ export function buildWorldFile(
       // 只在有值时写（undefined 会被 JSON.stringify 丢掉，写进去会让"往返一致"断言失败）
       ...(track.halfWidth !== undefined ? { halfWidth: track.halfWidth as number } : {}),
       ...(track.laneOffset !== undefined ? { laneOffset: track.laneOffset as number } : {}),
+      // 路网：链几何只在这类地图上写（其它地图写它会让 world.json 平白膨胀）
+      ...(track.chains ? { chains: track.chains.map(ch => pts(ch)) } : {}),
     },
     obstacles: obstacles.map(o => ({
       x: o.x as number, y: o.y as number, width: o.width as number,

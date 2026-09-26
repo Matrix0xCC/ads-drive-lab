@@ -69,6 +69,11 @@
       "name": "bj-g4-dujiakan-cruise",
       "file": "bj-g4-dujiakan-cruise.json",
       "map": "bj-g4-dujiakan"
+    },
+    {
+      "name": "bj-g6-junction-route",
+      "file": "bj-g6-junction-route.json",
+      "map": "bj-g6-junction"
     }
   ]
 }

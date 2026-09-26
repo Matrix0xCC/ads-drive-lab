@@ -163,7 +163,28 @@ function isInsideTrack(px: number, py: number, inner: Point2D[], outer: Point2D[
  *
  * 复位时保持最低速度 60 px/s，防止停车在边界上再次触发越界。
  */
-function resetToTrack(car: CarState, centerPoints: Point2D[], closed = true): void {
+function resetToTrack(car: CarState, centerPoints: Point2D[], closed = true, chains?: Point2D[][]): void {
+  // 路网：先把车挪到**最近链上最近的点**，再按该链的局部切向定朝向
+  if (chains && chains.length > 0) {
+    let bestD = Infinity, bestChain = chains[0], bestSeg = 0, bestT = 0;
+    for (const ch of chains) {
+      for (let i = 0; i + 1 < ch.length; i++) {
+        const a = ch[i], b = ch[i + 1];
+        const dx = (b.x as number) - (a.x as number), dy = (b.y as number) - (a.y as number);
+        const l2 = dx * dx + dy * dy || 1;
+        let t = (((car.x as number) - (a.x as number)) * dx + ((car.y as number) - (a.y as number)) * dy) / l2;
+        t = Math.max(0, Math.min(1, t));
+        const d = Math.hypot((car.x as number) - ((a.x as number) + t * dx), (car.y as number) - ((a.y as number) + t * dy));
+        if (d < bestD) { bestD = d; bestChain = ch; bestSeg = i; bestT = t; }
+      }
+    }
+    const a = bestChain[bestSeg], b = bestChain[Math.min(bestSeg + 1, bestChain.length - 1)];
+    car.x = px((a.x as number) + bestT * ((b.x as number) - (a.x as number)));
+    car.y = px((a.y as number) + bestT * ((b.y as number) - (a.y as number)));
+    car.angle = rad(Math.atan2((b.y as number) - (a.y as number), (b.x as number) - (a.x as number)));
+    car.speed = pxps(Math.max(car.speed as number, mps(10) as number));
+    return;
+  }
   let minDist = Infinity, bestIdx = 0;
   const n = closed ? centerPoints.length - 1 : centerPoints.length;
   const cx = car.x as number, cy = car.y as number;
@@ -196,8 +217,33 @@ function distToSegment(px: number, py: number, x1: number, y1: number, x2: numbe
   return Math.hypot(px - (x1 + t * dx), py - (y1 + t * dy));
 }
 
+/**
+ * 路网地图的可行驶域：**到最近链的距离 + 碰撞半径 ≤ 半宽**。
+ *
+ * 【为什么不用多边形】路网是若干条链的**并集**（路口处重叠），无法表达成"外多边形挖内多边形"；
+ * 距离判据天然处理并集与路口。端部也自动成立：越过链末端后"到最近链的距离"会增大 → 判越界
+ * （等价于端墙）。
+ */
+function isInsideNetwork(cx: number, cy: number, r: number, track: TrackGeometry): boolean {
+  const chains = track.chains!;
+  const halfW = (track.halfWidth ?? m(7.5)) as number;
+  let best = Infinity;
+  for (const ch of chains) {
+    for (let i = 0; i + 1 < ch.length; i++) {
+      const a = ch[i], b = ch[i + 1];
+      best = Math.min(best, distToSegment(cx, cy, a.x as number, a.y as number, b.x as number, b.y as number));
+      // 【提前退出条件必须是"已经确定在内"】不能写成 `best <= halfW`：那只要**任一**链段
+      // 落在半宽内就下结论，而 24 条链里先遍历到的邻近链会把结果定成越界（实测：车精确在链上、
+      // 距离 0.0m，却连续复位 3400+ 次）。正确判据是"到**最近链**的距离 + 车半径 ≤ 半宽"。
+      if (best + r <= halfW + 1e-9) return true;
+    }
+  }
+  return false;
+}
+
 /** 检查车体（中心+碰撞半径）是否在赛道内 */
 function isCarInsideTrack(cx: number, cy: number, r: number, track: TrackGeometry): boolean {
+  if (track.chains && track.chains.length > 0) return isInsideNetwork(cx, cy, r, track);
   // 距离外边界太近 → 越界
   for (let i = 0; i < track.outerBoundary.length - 1; i++) {
     const p = track.outerBoundary[i], n = track.outerBoundary[i + 1];
@@ -222,7 +268,7 @@ export const BOUNDS_BUFFER: Px = m(0.5);
 export function checkBounds(car: CarState, track: TrackGeometry): boolean {
   const r = (car.width as number) / 2 + (BOUNDS_BUFFER as number);
   if (!isCarInsideTrack(car.x as number, car.y as number, r, track)) {
-    resetToTrack(car, track.centerPoints, track.closed ?? true);
+    resetToTrack(car, track.centerPoints, track.closed ?? true, track.chains);
     return true;
   }
   return false;

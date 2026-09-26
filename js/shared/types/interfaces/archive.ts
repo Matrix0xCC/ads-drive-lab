@@ -33,6 +33,8 @@ export interface WorldFile {
     halfWidth?: number;
     /** 名义车道中心（px）；旧归档缺省由消费方回退 */
     laneOffset?: number;
+    /** 路网地图的全部链（世界坐标）；仅 network 地图写。检测器的越界判据要用**并集** */
+    chains?: [number, number][][];
   };
   obstacles: ObstaclePlain[];
   route: { waypoints: [number, number][]; startIndex: number; goalIndex: number; length: number } | null;

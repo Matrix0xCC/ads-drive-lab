@@ -11,12 +11,13 @@
 import { Point2D } from '../shared/types.js';
 import { Px, m } from '../shared/dimensions.js';
 import { BJ_G4_DUJIAKAN } from './maps/bj-g4-dujiakan.gen.js';
+import { BJ_G6_JUNCTION } from './maps/bj-g6-junction.gen.js';
 
 /** 地图定义 */
 export interface MapDefinition {
   name: string;
-  /** 几何来源：径向控制点（历史闭环） | 点列（OSM，可开环） */
-  kind: 'radial' | 'polyline';
+  /** 几何来源：径向控制点（历史闭环） | 点列（OSM，可开环） | 路网（多链 + 节点/边图） */
+  kind: 'radial' | 'polyline' | 'network';
   /** radial：8 个径向半径（px），按角度 0°,45°,…,315° 排列 */
   controlRadii?: number[];
   /** polyline：中心线点列（世界坐标 px） */
@@ -34,6 +35,12 @@ export interface MapDefinition {
   maxspeedKph?: number;
   /** 强制停车点（收费口；M2 消费）：桩号 + 横向偏移（米） */
   tollgates?: { sM: number; lM: number; osmId: number }[];
+  /** network：路网节点（世界坐标 px） */
+  nodes?: Point2D[];
+  /** network：链几何（世界坐标 px）；`edges[].chain` 指向这里 */
+  chains?: Point2D[][];
+  /** network：边表（节点对 → 链）——路由用；`oneway` 缺省视为双向 */
+  edges?: { from: number; to: number; chain: number; lengthM?: number; oneway?: boolean }[];
 }
 
 /**
@@ -74,6 +81,9 @@ export const MAP_PRESETS: Record<string, MapDefinition> = {
 
   /** 京港澳 G4 杜家坎收费站起 2.0km（真实 OSM，开环，3 车道）——由 mapgen 生成 */
   'bj-g4-dujiakan': BJ_G4_DUJIAKAN,
+
+  /** 京藏 G6/S11 立交路网（真实 OSM，多链 + 节点/边图，8 个路口）——由 mapgen --network 生成 */
+  'bj-g6-junction': BJ_G6_JUNCTION,
 };
 
 export const DEFAULT_MAP = 'oval';

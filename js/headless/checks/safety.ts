@@ -53,6 +53,16 @@ export function obbOverlap(
   return true;
 }
 
+/** 点到线段最短距离（越界并集判据用） */
+function distToSegment(px0: number, py0: number, x1: number, y1: number, x2: number, y2: number): number {
+  const dx = x2 - x1, dy = y2 - y1;
+  const l2 = dx * dx + dy * dy;
+  if (l2 === 0) return Math.hypot(px0 - x1, py0 - y1);
+  let t = ((px0 - x1) * dx + (py0 - y1) * dy) / l2;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(px0 - (x1 + t * dx), py0 - (y1 + t * dy));
+}
+
 export function runSafetyChecks(det: Detector, rec: FrameRecord): void {
   if (rec.type === 'step') {
     det.stepCount = rec.step;
@@ -75,14 +85,38 @@ export function runSafetyChecks(det: Detector, rec: FrameRecord): void {
       }
     }
 
-    // ② 越界：|l| 超赛道半宽
-    const fl = cartesianToFrenet(px(car.x), px(car.y), det.trackFrenet);
-    if (Math.abs(fl.l as number) > (TRACK_HALF_WIDTH as number)) {
-      det.merger.add({
-        check: 'off_track', category: 'safety', severity: 'high', step: rec.step,
-        summary: `越界：|l|=${(Math.abs(fl.l as number) / 4).toFixed(1)}m 超过半宽 ${((TRACK_HALF_WIDTH as number) / 4).toFixed(1)}m`,
-        details: { l: fl.l, s: fl.s },
-      });
+    // ② 越界：|l| 超过**该地图的**半宽。
+    //    参考线优先用**路线**（有路线时"道路"就是路线——路网地图由多条链组成，
+    //    按某一条链算 |l| 会把正常行驶判成越界，实测 3609 帧误报）；无路线则用赛道中心线。
+    //    半宽也必须取地图的（旧代码用全局 TRACK_HALF_WIDTH=7.5m，OSM 图实际 5.625m）。
+    const halfW = (det.world.track.halfWidth ?? TRACK_HALF_WIDTH) as number;
+    if (det.netChains) {
+      // 路网：可行驶域是**链的并集**（路口处比任何单条链都宽）。用 |l| 相对某条链/路线判会误报
+      // （实测：车在路口走并集内的位置，相对路线 |l| = 5.6m > 半宽 → 3687 帧误报）。
+      let best = Infinity;
+      for (const ch of det.netChains) {
+        for (let i = 0; i + 1 < ch.length; i++) {
+          best = Math.min(best, distToSegment(px(car.x), px(car.y), ch[i].x as number, ch[i].y as number, ch[i + 1].x as number, ch[i + 1].y as number));
+          if (best <= halfW) break;
+        }
+      }
+      if (best > halfW) {
+        det.merger.add({
+          check: 'off_track', category: 'safety', severity: 'high', step: rec.step,
+          summary: `越界：到最近路网链 ${(best / 4).toFixed(1)}m 超过半宽 ${(halfW / 4).toFixed(1)}m`,
+          details: { dist: best },
+        });
+      }
+    } else {
+      const ref = det.routeFrenet ?? det.trackFrenet;
+      const fl = cartesianToFrenet(px(car.x), px(car.y), ref);
+      if (Math.abs(fl.l as number) > halfW) {
+        det.merger.add({
+          check: 'off_track', category: 'safety', severity: 'high', step: rec.step,
+          summary: `越界：|l|=${(Math.abs(fl.l as number) / 4).toFixed(1)}m 超过半宽 ${(halfW / 4).toFixed(1)}m`,
+          details: { l: fl.l, s: fl.s },
+        });
+      }
     }
   }
 

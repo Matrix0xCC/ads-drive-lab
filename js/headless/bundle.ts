@@ -45,6 +45,8 @@ export function assembleBundle(o: AssembleInput): RunBundle {
   const world = buildWorldFile(o.track, o.obstacles, o.scenario, o.route);
 
   const det = new Detector(o.scenario.checks as Partial<DetectorConfig> | undefined, {
+    // 路线一并交给检测器：路网地图的越界判定以路线为基准（见 detector.ts 的 routeFrenet）
+    ...(o.route ? { route: { waypoints: o.route.waypoints.map(p => [p.x as number, p.y as number] as [number, number]) } } : {}),
     track: o.track, obstacles: o.obstacles,
   });
   det.routeActive = o.route !== null;

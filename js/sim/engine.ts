@@ -31,7 +31,7 @@ import { localize, LocalizationConfig } from '../env/localization.js';
 import { sense, MAX_SENSOR_DIST, SCAN_RAY_COUNT } from '../algo/perception.js';
 import { plan, getPlannerState } from '../algo/plan/index.js';
 import { control } from '../algo/control.js';
-import { buildRoadGraph, RoadGraph } from '../algo/routePlanner.js';
+import { buildRoadGraph, buildGraphFromEdges, RoadGraph } from '../algo/routePlanner.js';
 import { Rng, createRng, deriveSeed } from '../shared/rng.js';
 
 export const SIM_W = 1800, SIM_H = 800;
@@ -104,7 +104,9 @@ export class SimEngine {
     this._cfg = cfg;
     this.mapDef = cfg.map;
     this.track = buildTrack(cfg.map, SIM_W, SIM_H);
-    this.roadGraph = buildRoadGraph(this.track.centerPoints);
+    this.roadGraph = this.track.chains && this.track.netNodes && this.track.netEdges
+      ? buildGraphFromEdges(this.track.netNodes.length, this.track.netEdges)
+      : buildRoadGraph(this.track.centerPoints, this.track.closed ?? true);
 
     const seed = cfg.seed;
     const obsRng: Rng = seed === undefined ? Math.random : createRng(deriveSeed(seed, 'obstacles'));

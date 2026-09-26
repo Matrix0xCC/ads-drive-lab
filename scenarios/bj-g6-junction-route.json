@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "name": "bj-g6-junction-route",
+  "map": "bj-g6-junction",
+  "seed": 3,
+  "duration": 300,
+  "car": { "speed": 20 },
+  "obstacles": { "mode": "random", "count": 2 },
+  "route": { "fromNode": 24, "toNode": 22 }
+}

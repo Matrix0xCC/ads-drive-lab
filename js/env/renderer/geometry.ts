@@ -9,7 +9,7 @@ import * as THREE from 'three';
 import { TrackGeometry, Obstacle } from '../../shared/types.js';
 import { Px, m, px } from '../../shared/dimensions.js';
 import { buildFrenetReference, frenetToCartesian } from '../../algo/plan/frenet.js';
-import { TRACK_HALF_WIDTH } from '../track.js';
+import { TRACK_HALF_WIDTH, ribbonPolygon } from '../track.js';
 import type { FrenetReference } from '../../shared/types.js';
 
 // ═══════════════════════════════════════════════════
@@ -23,6 +23,54 @@ import type { FrenetReference } from '../../shared/types.js';
  */
 export function buildTrackGroup(track: TrackGeometry): THREE.Group {
   const group = new THREE.Group();
+
+  // ── 路网地图（多链）：每条链画一条路面（ribbon 多边形）+ 中心虚线 + 车道分隔线 ──
+  if (track.chains && track.chains.length > 0) {
+    const halfW = (track.halfWidth ?? TRACK_HALF_WIDTH) as number;
+    const laneW = (track.laneWidth ?? m(3.75)) as number;
+    const lanes = Math.max(2, Math.round(2 * halfW / laneW));
+    const toV2 = (pts: { x: Px; y: Px }[]) =>
+      pts.map(p => new THREE.Vector2(p.x as number, -(p.y as number)));
+    const roadMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3a });
+    /** 折线按法向偏移（用于车道分隔线；比每条链建 Frenet 参考线便宜得多） */
+    const offsetLine = (ch: { x: Px; y: Px }[], lv: number): { x: Px; y: Px }[] =>
+      ch.map((p, i) => {
+        const a = ch[Math.max(0, i - 1)], b = ch[Math.min(ch.length - 1, i + 1)];
+        const dx = (b.x as number) - (a.x as number), dy = (b.y as number) - (a.y as number);
+        const len = Math.hypot(dx, dy) || 1;
+        return { x: px((p.x as number) - (dy / len) * lv), y: px((p.y as number) + (dx / len) * lv) };
+      });
+
+    for (const ch of track.chains) {
+      if (ch.length < 2) continue;
+      const poly = ribbonPolygon(ch, halfW);
+      const pts = toV2(poly);
+      const shape = new THREE.Shape(THREE.ShapeUtils.isClockWise(pts) ? pts.reverse() : pts);
+      const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape), roadMat);
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.position.y = 0.01;
+      mesh.userData = { type: 'track', label: '道路', width: (2 * halfW) / 4, height: 0, length: '路网' };
+      group.add(mesh);
+      // 中心虚线
+      const c3 = ch.map(p => new THREE.Vector3(p.x as number, 0.02, p.y as number));
+      const cm = new THREE.LineDashedMaterial({ color: 0xaaaaaa, dashSize: 8, gapSize: 12 });
+      const cl = new THREE.Line(new THREE.BufferGeometry().setFromPoints(c3), cm);
+      cl.computeLineDistances();
+      group.add(cl);
+      // 车道分隔线（跳过中线）
+      for (let k = 1; k < lanes; k++) {
+        const lv = -halfW + k * (2 * halfW / lanes);
+        if (Math.abs(lv) < 1e-6) continue;
+        const ln = offsetLine(ch, lv);
+        const l3 = ln.map(p => new THREE.Vector3(p.x as number, 0.02, p.y as number));
+        const lm = new THREE.LineDashedMaterial({ color: 0x666644, dashSize: 8, gapSize: 12 });
+        const ll = new THREE.Line(new THREE.BufferGeometry().setFromPoints(l3), lm);
+        ll.computeLineDistances();
+        group.add(ll);
+      }
+    }
+    return group;
+  }
 
   // 路面：ShapeGeometry 在 XY 平面创建，旋转 -PI/2 到 XZ 地面时 Z 轴翻转。
   // 因此 Y 取负值，保证旋转后 canvas(x,y) 正确映射到 Three.js(x,0,z)。

@@ -169,6 +169,31 @@ export function buildTrack(map: MapDefinition, defaultW: number, defaultH: numbe
       ...(map.maxspeedKph !== undefined ? { speedLimitMps: mps(map.maxspeedKph / 3.6) } : {}),
     };
   }
+  if (map.kind === 'network') {
+    if (!map.chains || map.chains.length === 0 || !map.nodes || !map.edges) {
+      throw new Error(`地图 ${map.name}：network 需要 chains/nodes/edges`);
+    }
+    const halfW = (map.halfWidth ?? TRACK_HALF_WIDTH) as number;
+    const laneW = m(map.laneWidthM ?? 3.75) as number;
+    const lanes = laneCentersOf(halfW, laneW);
+    // 无路线时的回退参考线：最长链（有路线时规划器/感知都用**路线**折线，见 planner.ts §1）
+    let longest = map.chains[0];
+    for (const ch of map.chains) if (ch.length > longest.length) longest = ch;
+    return {
+      centerPoints: longest,
+      innerBoundary: [],                       // 路网没有"内场"，边界由"到最近链的距离"判定
+      outerBoundary: [],
+      closed: false,
+      halfWidth: px(halfW),
+      laneWidth: px(laneW),
+      laneCenters: lanes.centers.map(px),
+      laneOffset: px(lanes.offset),
+      chains: map.chains,
+      netNodes: map.nodes,
+      netEdges: map.edges,
+      ...(map.maxspeedKph !== undefined ? { speedLimitMps: mps(map.maxspeedKph / 3.6) } : {}),
+    };
+  }
   const track = generateTrack(map.worldW ?? defaultW, map.worldH ?? defaultH, map.controlRadii);
   const lanes = laneCentersOf(TRACK_HALF_WIDTH as number, m(3.75) as number);
   return {

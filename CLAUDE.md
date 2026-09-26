@@ -64,7 +64,7 @@ requestAnimationFrame 主循环 (~60Hz)
 - `js/headless/` — headless CLI（run.ts）、归档（archive.ts）、检测器（detector.ts + checks/）、报告（report.ts）
 - `js/shared/` — 接口契约（types/interfaces/，含归档记录 schema）、量纲系统（dimensions.ts）、rng、debug
 - `js/ui/` — UI 层（`state.ts` 纯状态机 + `controller.ts` 副作用边界 + sidebar/toolbar/hud/inspector/interactions/replayPanel 面板模块）；`js/replay.ts` — 回放控制器；`js/env/renderer/` — Three.js 渲染
-- `js/mapgen/` — **OSM 地图管线**（构建期工具，不进浏览器包）：`osm.ts` 纯几何（way 链合并 / 投影 / 均匀重采样 / **弧长窗口平滑** / 曲率统计 / `projectOntoPath` 地图匹配原语）+ `build-map.ts` CLI（Overpass 多端点 failover、原始数据与侧车 meta 入库、`--from-raw` 离线复跑、`--start-at-toll`）
+- `js/mapgen/` — **OSM 地图管线**（构建期工具，不进浏览器包）：`osm.ts` 纯几何（way 链合并 / 投影 / 均匀重采样 / **弧长窗口平滑** / 曲率统计 / `projectOntoPath` 地图匹配原语）+ `network.ts` **路网拓扑**（共享顶点处切段 → 节点/边图；`largestComponent`）+ `build-map.ts` CLI（同端点重试抓取、原始数据与侧车 meta 入库、`--from-raw` 离线复跑、`--start-at-toll`、`--network`）
 - `maps/` — 派生地图（入库）：`<name>.json`（中心线 + world + 校验统计 + 收费站桩号）、`raw/<name>.osm.json`（原始 Overpass 响应）、`raw/<name>.meta.json`（取数过程信息；**不进地图文件**，否则"重新生成逐字节相同"不成立）；`js/env/maps/<name>.gen.ts` 为机械转换产物（勿手改）
 - `scenarios/` — 场景用例（入库）；新增场景需登记 `scenarios/index.json` 才会出现在浏览器场景下拉；`runs/` — 运行归档（gitignore）
 - `js/test/` — node:test 单元测试（`.test.ts`，编译后运行到 `dist/`）
@@ -95,6 +95,7 @@ requestAnimationFrame 主循环 (~60Hz)
   - 两者都在 `debug.planning` 暴露（`mapSpeedLimitMps` / `laneOffsetU` / `laneCentersU`）并在调试面板显示
 - **速度层**：ST 条目（tMin=0 静态）→ cruise / stop（五次多项式停车线，T 取最小单调解）/ emergency（A_MAX 兜底）
 - `polynomial.ts` 五次多项式（曲率 C² 连续）；`collision.ts` 锥形搜索（供旧耦合路径的遗留工具）
+- **路线声明**：链式/径向地图用弧长 `route: { startS, goalS }`；**路网地图用节点** `route: { fromNode, toNode }`（见"地图来源与开环/路网道路"）
 - **指标**：`summary.json` / `report.md` 含到达用时、路线进度、**收敛轮数 >1 的帧占比、单帧规划耗时 p50/p95**（`planMs` 为墙钟量，**不进逐帧归档**——否则破坏"同种子逐字节一致"）
 - 路线终点自动减速（DECEL_ZONE=25m）+ 到达检测（剩余 <10px → ARRIVED）
 
@@ -106,9 +107,11 @@ LiDAR 单线 2D：±60° FOV、2° 分辨率、61 条射线、最大 125m。核�
 
 Pure Pursuit：δ = atan2(2·L·sin α, ld)，预瞄距离 = clamp(0.4×speed, 10m, 20m)。油门目标 = 轨迹终点速度；**终点速度 ≈0（停车/紧急剖面）→ 油门 0**（0.15 怠速下限只对正值目标保留——否则"停车"变成 6.375m/s 恒速爬行，批量 A/B 回归根因）。
 
-### 地图来源与开环道路（`env/mapDefinitions.ts` + `env/track.ts`）
+### 地图来源与开环/路网道路（`env/mapDefinitions.ts` + `env/track.ts`）
 
-- `MapDefinition.kind`：`'radial'`（历史：8 个径向控制点闭环，半宽 7.5m、世界 450×200m）与 `'polyline'`（OSM：点列，可开环，半宽按车道数、世界按包围盒）。地图下拉由 `MAP_PRESETS` **动态填充**（新增地图只需登记 MAP_PRESETS，不必改 index.html）。
+- `MapDefinition.kind`：`'radial'`（历史：8 个径向控制点闭环，半宽 7.5m、世界 450×200m）、`'polyline'`（OSM：点列，可开环，半宽按车道数、世界按包围盒）、`'network'`（OSM 路网：多链 + 节点/边图）。地图下拉由 `MAP_PRESETS` **动态填充**（新增地图只需登记 MAP_PRESETS，不必改 index.html）。
+- **路网地图（多链）语义**：`track.chains`（全部可行驶链）+ `netNodes`/`netEdges`（路由图）。可行驶域 = **到最近链的距离 + 车半径 ≤ 半宽**（`car.ts` 的 `isInsideNetwork`；路口处链的并集天然覆盖，端部自动成墙）——不能用多边形表达。`centerPoints` 取最长链，仅作"无路线时的回退参考线"。渲染为每条链一条 ribbon 路面。**越界判定的提前退出条件只能写"已确定在内"**（写成 `best <= halfW` 会让先遍历到的邻近链把结果定成越界——实测车精确在链上却复位 3400+ 帧）。
+- **路网路线**：场景用 `route: { fromNode, toNode }`；`buildGraphFromEdges` + `buildNetworkRoute`（Dijkstra 出节点序列 → 逐段取链几何并按方向拼接）→ 规划器/感知照常把它当开环参考线用；`waypointIndices` 记途经链序号（归档可查"走了哪几条匝道"）。浏览器 `T`/toolbar 设路线时**吸附到节点**（`pickPoints()`），与 headless 走同一个 `buildNetworkRoute`。检测器的越界判据对路网用**链并集**（`world.track.chains` 进归档），否则路口处会误报。
 - **开环语义**：`closed: false` → `innerBoundary` 为空，`outerBoundary` 是**闭合路面多边形**（左缘→末端帽→右缘→起点帽），并且两端帽沿切线**外延 25m**（否则车出生点正好压在端帽上 → 每帧判越界复位）。`buildRoadGraph`/`sToIndex`/`resetToTrack`/`generateObstacles` 都不再绕接。
 - **世界尺寸不再是全局常量**：`engine.worldW/worldH` 取地图声明；地面/网格用 `setWorldExtent` 随地图重建。
 - **相机跟随**：toolbar「跟随」开关 / `F` 键（状态在 `ui/state.ts` 的 `followCam`）。开启时 `followCar` 每帧把相机与目标点同步平移（保留用户的旋转/缩放）；**换地图时按世界尺寸给默认值**（`SCENARIO_CHANGED.followCamDefault`：长条图默认开、径向图默认关），用户手动切过后不受影响。`R`/重置视角走 `frameSmart`（小世界整图、大世界取车周围 250m）。
