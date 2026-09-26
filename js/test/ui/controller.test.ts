@@ -7,7 +7,7 @@ function makeCtl() {
   const calls = {
     pause: [] as boolean[], mode: [] as string[],
     info: [] as boolean[], debug: [] as boolean[], picker: [] as boolean[],
-    hint: [] as string[], unit: [] as string[],
+    hint: [] as string[], unit: [] as string[], follow: [] as boolean[],
   };
   const ctl = new UiController({
     onLivePaused: (p) => calls.pause.push(p),
@@ -20,6 +20,7 @@ function makeCtl() {
     onCorridorVisible: () => {},
     onFrenetTicksVisible: () => {},
     onLidarVisible: () => {},
+    onFollowCam: (on) => calls.follow.push(on),
     onRoutePickPhase: () => {},
   }, () => 'NONE');
   return { ctl, calls };
@@ -64,7 +65,7 @@ describe('UiController.dispatch', () => {
     assert.deepStrictEqual(calls.hint, []);
     ctl.dispatch({ type: 'ROUTE_SET' });
     assert.strictEqual(ctl.state.routePick, 'idle');
-    assert.strictEqual(calls.hint[calls.hint.length - 1], 'T 设路线 · WASD 平移视角 · 左键查看物体 · Space 暂停 · R 重置视角');
+    assert.strictEqual(calls.hint[calls.hint.length - 1], 'T 设路线 · F 跟随视角 · WASD 平移 · 左键查看物体 · Space 暂停 · R 重置视角');
   });
 
   it('TOGGLE_INFO / TOGGLE_DEBUG → 各自面板副作用', () => {
@@ -98,6 +99,7 @@ describe('UiController.dispatch', () => {
     assert.deepStrictEqual(calls.debug, [true]);
     assert.deepStrictEqual(calls.picker, [false]);
     assert.deepStrictEqual(calls.unit, ['kmh']);
+    assert.deepStrictEqual(calls.follow, [false]);   // 默认关（启动地图是径向小世界）
     assert.strictEqual(calls.hint.length, 1);
   });
 });

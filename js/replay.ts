@@ -97,7 +97,7 @@ export class ReplayController {
     const pts = (arr: [number, number][]) => arr.map(([x, y]) => ({ x: px(x), y: px(y) }));
     this._vizRef = src.world.route && src.world.route.waypoints.length >= 2
       ? buildFrenetReference(pts(src.world.route.waypoints), false)
-      : buildFrenetReference(pts(src.world.track.centerPoints), true);
+      : buildFrenetReference(pts(src.world.track.centerPoints), src.world.track.closed ?? true);
     this._lastRenderedStep = -1;      // 强制重绘（开关切换后立即生效）
     this._issues = src.issues;
 

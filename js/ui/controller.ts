@@ -19,6 +19,7 @@ export interface UiEffects {
   onCorridorVisible(visible: boolean): void;
   onFrenetTicksVisible(visible: boolean): void;
   onLidarVisible(visible: boolean): void;
+  onFollowCam(on: boolean): void;
   onRoutePickPhase(phase: RoutePickPhase): void;
 }
 
@@ -49,6 +50,7 @@ export class UiController {
     if (next.corridorVisible !== prev.corridorVisible) this.effects.onCorridorVisible(next.corridorVisible);
     if (next.frenetTicksVisible !== prev.frenetTicksVisible) this.effects.onFrenetTicksVisible(next.frenetTicksVisible);
     if (next.lidarVisible !== prev.lidarVisible) this.effects.onLidarVisible(next.lidarVisible);
+    if (next.followCam !== prev.followCam) this.effects.onFollowCam(next.followCam);
     if (next.routePick !== prev.routePick) this.effects.onRoutePickPhase(next.routePick);
     this.effects.onHint(deriveHint(next, this.getRouteState()));
   }
@@ -64,6 +66,7 @@ export class UiController {
     this.effects.onCorridorVisible(this._state.corridorVisible);
     this.effects.onFrenetTicksVisible(this._state.frenetTicksVisible);
     this.effects.onLidarVisible(this._state.lidarVisible);
+    this.effects.onFollowCam(this._state.followCam);
     this.effects.onRoutePickPhase(this._state.routePick);
     this.effects.onHint(deriveHint(this._state, this.getRouteState()));
   }

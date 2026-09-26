@@ -23,7 +23,7 @@ import {
 } from '../shared/types.js';
 import { Radians, Px, PxPerSec, rad, m, mps, mps2, pxps } from '../shared/dimensions.js';
 import { debug } from '../shared/debug.js';
-import { generateTrack } from '../env/track.js';
+import { buildTrack } from '../env/track.js';
 import { generateObstacles } from '../env/obstacle.js';
 import { createCar, stepPhysics, checkBounds } from '../env/car.js';
 import { MapDefinition } from '../env/mapDefinitions.js';
@@ -72,6 +72,10 @@ export class SimEngine {
   latestLidarScan: LidarScan;
   latestTrajectory: Trajectory;
   latestGPS: GPSReading | null = null;
+  /** 世界宽（px）：按地图定义；OSM 长条图远大于默认 SIM_W */
+  get worldW(): number { return this.mapDef.worldW ?? SIM_W; }
+  /** 世界高（px） */
+  get worldH(): number { return this.mapDef.worldH ?? SIM_H; }
   /** 单帧规划耗时样本（ms；只记录，不参与决策；summary/报告用） */
   planMsSamples: number[] = [];
   simTime = 0;
@@ -99,7 +103,7 @@ export class SimEngine {
   rebuildWorld(cfg: WorldConfig): void {
     this._cfg = cfg;
     this.mapDef = cfg.map;
-    this.track = generateTrack(SIM_W, SIM_H, cfg.map.controlRadii);
+    this.track = buildTrack(cfg.map, SIM_W, SIM_H);
     this.roadGraph = buildRoadGraph(this.track.centerPoints);
 
     const seed = cfg.seed;

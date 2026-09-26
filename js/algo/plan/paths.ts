@@ -39,8 +39,9 @@ export const PATH_DEVELOP: Px = m(40);
 const PATH_DEVELOP_MIN: Px = m(12);
 /** 自适应提前量：横移应在首个阻塞点之前完成（留几何余量） */
 const DEVELOP_MARGIN: Px = m(6);
-/** 横向加速度舒适上限（与速度层 A_COMFORT 一致）：决定给定速度下最短发展段 */
-const A_LAT_MAX = mps2(3.5);
+/** 横向加速度舒适上限（与速度层 A_COMFORT 一致）：决定给定速度下最短发展段；
+ *  也是**道路曲率限速**的口径（planner.ts 的 curvatureSpeedCap） */
+export const A_LAT_MAX = mps2(3.5);
 /** 归一化五次多项式 10s³−15s⁴+6s⁵ 的峰值 |l''|（发展段内峰值横向加速度系数） */
 const QUINTIC_PEAK_ACCEL = 5.7735;
 /** 横向机动可行速度上限（收敛迭代用）：峰值横向加速度 QUINTIC_PEAK_ACCEL·|Δl|·v²/S²
@@ -126,6 +127,8 @@ export interface PathLayerResult {
 
 export function solvePathLayer(o: {
   ref: FrenetReference; l0: Px; dl0: DimLess; s0: number; v0: number;
+  /** 道路半宽（px）；缺省 TRACK_HALF_WIDTH（径向图）。OSM 图按车道数更窄 → 规划域随之收窄 */
+  trackHalfWidth?: Px;
   carX: number; carY: number; lidarScan: LidarScan;
   carWidth: Px; collisionRadius: Px; laneOffset: Px;
   prevTargetL: number | null;
@@ -140,7 +143,8 @@ export function solvePathLayer(o: {
   // 域边不再留 0.6m 跟踪过冲余量，贴边过冲可能触发复位传送——以批量（种子 6-10）"复位次数"
   // 为判据验收：A/B 实测 0 次且到达率 7/10 → 8/10（见 ISSUE_HISTORY 的域加宽记录）。
   // A/B 开关：改回 m(0.6) 即旧行为（域边比复位崖内缩 0.6m）。
-  const L_MAX = (TRACK_HALF_WIDTH as number)
+  const halfWidthU = (o.trackHalfWidth ?? TRACK_HALF_WIDTH) as number;
+  const L_MAX = halfWidthU
     - ((o.carWidth as number) / 2 + (BOUNDS_BUFFER as number)) - (DOMAIN_OVERSHOOT_RESERVE as number);
   const lo = o.laneOffset as number;
 

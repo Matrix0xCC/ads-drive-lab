@@ -16,7 +16,7 @@
 import { Obstacle, Point2D, Route, TrackGeometry, createRoute } from '../shared/types.js';
 import { Px, rad, m, mps, px, SIM_UNITS_PER_METER } from '../shared/dimensions.js';
 import { MAP_PRESETS, MapDefinition } from '../env/mapDefinitions.js';
-import { generateTrack, TRACK_HALF_WIDTH } from '../env/track.js';
+import { buildTrack, TRACK_HALF_WIDTH } from '../env/track.js';
 import { generateObstacles } from '../env/obstacle.js';
 import { buildRoadGraph, findRoute } from '../algo/routePlanner.js';
 import { buildFrenetReference, frenetToCartesian } from '../algo/plan/frenet.js';
@@ -64,7 +64,8 @@ export function parseScenario(json: unknown): Scenario {
     }
   }
 
-  const maxL = (TRACK_HALF_WIDTH as number) / SIM_UNITS_PER_METER;
+  // 校验用的横向上限要按**该地图**的半宽（parseScenario 阶段还没有 track 对象）
+  const maxL = ((MAP_PRESETS[o.map].halfWidth ?? TRACK_HALF_WIDTH) as number) / SIM_UNITS_PER_METER;
   const obs = o.obstacles;
   if (typeof obs !== 'object' || obs === null) fail('缺少 obstacles 配置');
   if (obs.mode === 'explicit') {
@@ -123,16 +124,17 @@ export function defaultScenario(map: string, rng: Rng = Math.random): Scenario {
 // 世界构建
 // ═══════════════════════════════════════════════════
 
-/** 累计弧长 → 最近中心线索引（闭环） */
-function sToIndex(centerPoints: Point2D[], s: number): number {
+/** 累计弧长 → 最近中心线索引（闭环绕接；开环不绕接） */
+function sToIndex(centerPoints: Point2D[], s: number, closed = true): number {
   let acc = 0, best = 0, bestErr = Infinity;
-  const n = centerPoints.length - 1;
+  const n = closed ? centerPoints.length - 1 : centerPoints.length;
   for (let i = 0; i < n; i++) {
     const err = Math.abs(acc - s);
     if (err < bestErr) { bestErr = err; best = i; }
+    const j = closed ? (i + 1) % n : Math.min(i + 1, n - 1);
     acc += Math.hypot(
-      (centerPoints[(i + 1) % n].x as number) - (centerPoints[i].x as number),
-      (centerPoints[(i + 1) % n].y as number) - (centerPoints[i].y as number),
+      (centerPoints[j].x as number) - (centerPoints[i].x as number),
+      (centerPoints[j].y as number) - (centerPoints[i].y as number),
     );
   }
   return best;
@@ -148,12 +150,13 @@ export function buildScenarioWorld(scenario: Scenario, width: number, height: nu
   worldCfg: WorldConfig; track: TrackGeometry; route: Route | null;
 } {
   const mapDef: MapDefinition = MAP_PRESETS[scenario.map];
-  const track = generateTrack(width, height, mapDef.controlRadii);
-  const ref = buildFrenetReference(track.centerPoints, true);
+  const track = buildTrack(mapDef, width, height);
+  const closed = track.closed ?? true;
+  const ref = buildFrenetReference(track.centerPoints, closed);
 
   // 路线起点索引先算（随机障碍的出生区净空需要）
   const routeStartIdx = scenario.route
-    ? sToIndex(track.centerPoints, m(scenario.route.startS) as number)
+    ? sToIndex(track.centerPoints, m(scenario.route.startS) as number, closed)
     : null;
 
   let obstacles: Obstacle[];
@@ -176,9 +179,9 @@ export function buildScenarioWorld(scenario: Scenario, width: number, height: nu
   let route: Route | null = null;
   let carStart: WorldConfig['carStart'] = undefined;
   if (scenario.route && routeStartIdx !== null) {
-    const graph = buildRoadGraph(track.centerPoints);
+    const graph = buildRoadGraph(track.centerPoints, closed);
     const startIdx = routeStartIdx;
-    const goalIdx = sToIndex(track.centerPoints, m(scenario.route.goalS) as number);
+    const goalIdx = sToIndex(track.centerPoints, m(scenario.route.goalS) as number, closed);
     const pathIndices = findRoute(graph, startIdx, goalIdx);
     if (!pathIndices || pathIndices.length < 2) {
       throw new ScenarioError(`路线不可达: startS=${scenario.route.startS} goalS=${scenario.route.goalS}`);

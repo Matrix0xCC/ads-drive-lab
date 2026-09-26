@@ -28,33 +28,31 @@ export interface RoadGraph {
 // ═══════════════════════════════════════════════════
 
 /**
- * 从赛道中心点构建路网
+ * 从道路中心点构建路网
  *
  * 每个中心点是一个节点，相邻节点双向连接。
- * 闭环赛道首尾相连（index 0 ↔ index N-1）。
+ * - 闭环（赛道）：首尾相连（index 0 ↔ index N-1），中心线首尾重复点算一个节点 → 节点数 N-1；
+ * - 开环（OSM 高速主线）：**不绕接**，节点数 N，只有 i↔i+1 的边（不能从终点瞬移回起点）。
  *
- * 【复杂度】O(N)，N = centerPoints.length（≈ 200）
+ * 【复杂度】O(N)；径向图 N≈200，OSM 2km 图 N≈668
  */
-export function buildRoadGraph(centerPoints: Point2D[]): RoadGraph {
+export function buildRoadGraph(centerPoints: Point2D[], closed = true): RoadGraph {
   const N = centerPoints.length;
-  // 闭环赛道中心线首尾重复（centerPoints[0] === centerPoints[N-1]），
-  // 实际有效节点数是 N-1
-  const nodeCount = N - 1;
+  const nodeCount = closed ? N - 1 : N;
   const adjacency: [number, number][][] = Array.from({ length: nodeCount }, () => []);
 
-  for (let i = 0; i < nodeCount; i++) {
-    const curr = centerPoints[i];
-    const next = centerPoints[(i + 1) % nodeCount];
+  const link = (a: number, b: number) => {
+    if (a === b || a < 0 || b < 0 || a >= nodeCount || b >= nodeCount) return;
     const dist = Math.hypot(
-      (next.x as number) - (curr.x as number),
-      (next.y as number) - (curr.y as number),
+      (centerPoints[b].x as number) - (centerPoints[a].x as number),
+      (centerPoints[b].y as number) - (centerPoints[a].y as number),
     );
-    // 整数化边权（约 10-15px）
-    const cost = Math.round(dist);
-    // 双向边
-    adjacency[i].push([(i + 1) % nodeCount, cost]);
-    adjacency[(i + 1) % nodeCount].push([i, cost]);
-  }
+    const cost = Math.round(dist);        // 整数化边权
+    adjacency[a].push([b, cost]);
+    adjacency[b].push([a, cost]);
+  };
+  for (let i = 0; i < nodeCount - 1; i++) link(i, i + 1);
+  if (closed) link(nodeCount - 1, 0);     // 闭环才接首尾
 
   return { adjacency, nodeCount };
 }
@@ -164,10 +162,10 @@ export function findRoute(graph: RoadGraph, startIndex: number, goalIndex: numbe
  * 用于将用户点击位置映射到路网节点。
  * 线性扫描 N=200，每一帧点击只调用一次，性能完全不是问题。
  */
-export function findClosestPoint(posX: number, posY: number, centerPoints: Point2D[]): number {
+export function findClosestPoint(posX: number, posY: number, centerPoints: Point2D[], closed = true): number {
   let minDist = Infinity;
   let bestIdx = 0;
-  const N = centerPoints.length - 1; // 跳过闭合重复点
+  const N = closed ? centerPoints.length - 1 : centerPoints.length; // 闭环跳过重复点
   for (let i = 0; i < N; i++) {
     const dx = posX - (centerPoints[i].x as number);
     const dy = posY - (centerPoints[i].y as number);

@@ -6,8 +6,7 @@ import { UiController } from './controller.js';
 import type { UiDeps } from './index.js';
 import { ReplayController } from '../replay.js';
 import { parseBundle } from '../headless/bundle.js';
-import { frameCamera } from '../env/renderer.js';
-import { SIM_W, SIM_H } from '../sim/engine.js';
+import { frameSmart, FOLLOW_WORLD_THRESHOLD } from '../env/renderer.js';
 import { setRunList } from './runList.js';
 
 export interface ToolbarHelpers {
@@ -21,6 +20,10 @@ export function wireToolbar(
 ): void {
   const { enterReplay, exitReplayIfActive } = helpers;
 
+  /** 新世界是否"长条大世界"（决定相机跟随的默认值）：径向图整图取景不需要跟随 */
+  const bigWorld = (): boolean =>
+    Math.max(deps.engine.worldW, deps.engine.worldH) > FOLLOW_WORLD_THRESHOLD;
+
   // ── 地图选择（保留场景配置仅换地图；回放中先退出回放）──
   // 下拉初值由 main 的 applyScenario 同步（它在 setupUI 之前执行）
   const mapSelect = document.getElementById('map-dropdown') as HTMLSelectElement | null;
@@ -28,7 +31,7 @@ export function wireToolbar(
     mapSelect.addEventListener('change', () => {
       exitReplayIfActive();
       deps.actions.switchMap(mapSelect.value);
-      ctl.dispatch({ type: 'SCENARIO_CHANGED', name: `browser-${mapSelect.value}` });
+      ctl.dispatch({ type: 'SCENARIO_CHANGED', name: `browser-${mapSelect.value}`, followCamDefault: bigWorld() });
     });
   }
 
@@ -52,14 +55,14 @@ export function wireToolbar(
       exitReplayIfActive();
       if (!file) {
         deps.actions.loadDefaultScenario(deps.engine.mapDef.name);
-        ctl.dispatch({ type: 'SCENARIO_CHANGED', name: '随机场景' });
+        ctl.dispatch({ type: 'SCENARIO_CHANGED', name: '随机场景', followCamDefault: bigWorld() });
         return;
       }
       try {
         const res = await fetch(`scenarios/${file}`, { cache: 'no-store' });   // 场景文件开发中会被编辑，不吃缓存
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const name = deps.actions.loadScenario(await res.json());
-        if (name) ctl.dispatch({ type: 'SCENARIO_CHANGED', name });
+        if (name) ctl.dispatch({ type: 'SCENARIO_CHANGED', name, followCamDefault: bigWorld() });
       } catch (e) {
         alert(`场景加载失败: ${(e as Error).message}`);
       }
@@ -102,6 +105,7 @@ export function wireToolbar(
   });
 
   document.getElementById('btn-reset-view')?.addEventListener('click', () => {
-    frameCamera(deps.camera, deps.controls, deps.canvas.clientWidth, deps.canvas.clientHeight, SIM_W, SIM_H);
+    frameSmart(deps.camera, deps.controls, deps.canvas.clientWidth, deps.canvas.clientHeight,
+      deps.engine.worldW, deps.engine.worldH, deps.engine.carX, deps.engine.carY);
   });
 }

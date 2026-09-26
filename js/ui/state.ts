@@ -32,6 +32,9 @@ export interface UiState {
   frenetTicksVisible: boolean;
   /** LiDAR 射线显示（默认开） */
   lidarVisible: boolean;
+  /** 相机跟随车辆（toolbar / F 键）。默认随地图：长条大世界（OSM 高速）默认开，
+   *  小世界（径向赛道，整图取景）默认关——见 SCENARIO_CHANGED 的 followCamDefault */
+  followCam: boolean;
 }
 
 export type UiEvent =
@@ -41,7 +44,7 @@ export type UiEvent =
   | { type: 'TOGGLE_ROUTE_SET' }
   | { type: 'PICK_POINT'; idx: number }
   | { type: 'CANCEL' }
-  | { type: 'SCENARIO_CHANGED'; name: string }
+  | { type: 'SCENARIO_CHANGED'; name: string; followCamDefault?: boolean }
   | { type: 'ROUTE_SET' }
   | { type: 'TOGGLE_INFO' }
   | { type: 'TOGGLE_DEBUG' }
@@ -50,7 +53,8 @@ export type UiEvent =
   | { type: 'TOGGLE_SPEED_UNIT' }
   | { type: 'TOGGLE_CORRIDOR' }
   | { type: 'TOGGLE_FRENET_TICKS' }
-  | { type: 'TOGGLE_LIDAR' };
+  | { type: 'TOGGLE_LIDAR' }
+  | { type: 'TOGGLE_FOLLOW_CAM' };
 
 export const INITIAL_UI_STATE: UiState = {
   mode: 'LIVE',
@@ -68,6 +72,8 @@ export const INITIAL_UI_STATE: UiState = {
   frenetTicksVisible: true,
   /** LiDAR 射线（默认开） */
   lidarVisible: true,
+  /** 相机跟随（默认关：启动地图是径向小世界，整图取景不需要跟随） */
+  followCam: false,
 };
 
 export function reduce(state: UiState, e: UiEvent): UiState {
@@ -96,7 +102,12 @@ export function reduce(state: UiState, e: UiEvent): UiState {
         ? { ...state, routePick: 'idle', pickStartIdx: null }
         : state;
     case 'SCENARIO_CHANGED':
-      return { ...state, scenarioName: e.name, routePick: 'idle', pickStartIdx: null };
+      // followCamDefault 由调用方按**新世界尺寸**给（长条大世界默认开、小世界默认关）：
+      // 不给则保持用户当前选择，避免"换场景把用户的开关改掉"。
+      return {
+        ...state, scenarioName: e.name, routePick: 'idle', pickStartIdx: null,
+        ...(e.followCamDefault !== undefined ? { followCam: e.followCamDefault } : {}),
+      };
     case 'ROUTE_SET':
       return state.routePick === 'picking-goal'
         ? { ...state, routePick: 'idle', pickStartIdx: null }
@@ -117,6 +128,8 @@ export function reduce(state: UiState, e: UiEvent): UiState {
       return { ...state, frenetTicksVisible: !state.frenetTicksVisible };
     case 'TOGGLE_LIDAR':
       return { ...state, lidarVisible: !state.lidarVisible };
+    case 'TOGGLE_FOLLOW_CAM':
+      return { ...state, followCam: !state.followCam };
   }
 }
 
@@ -131,5 +144,5 @@ export function deriveHint(ui: UiState, routeState: RouteState): string {
   if (ui.livePaused) return '已暂停（Space 继续）';
   // routeState 暂未参与分支（见 spec 开放问题）
   void routeState;
-  return 'T 设路线 · WASD 平移视角 · 左键查看物体 · Space 暂停 · R 重置视角';
+  return 'T 设路线 · F 跟随视角 · WASD 平移 · 左键查看物体 · Space 暂停 · R 重置视角';
 }

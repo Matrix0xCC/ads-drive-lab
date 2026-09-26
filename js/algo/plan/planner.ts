@@ -26,13 +26,22 @@ import { buildFrenetReference, cartesianToFrenet, frenetToCartesian } from './fr
 import { PlanState, nextState } from './states.js';
 import { debug } from '../../shared/debug.js';
 import type { PlanningViz } from '../../shared/debug.js';
-import { solvePathLayer, lateralSpeedCap, PATH_STEPS, PATH_HORIZON, TIGHT_SPEED } from './paths.js';
+import { solvePathLayer, lateralSpeedCap, PATH_STEPS, PATH_HORIZON, TIGHT_SPEED, A_LAT_MAX } from './paths.js';
 import type { PathLayerResult } from './paths.js';
 import { solveSpeedLayer, STObstacle } from './speed.js';
 import { nextTight, INITIAL_TIGHT, TightMemory } from './tight.js';
+import { refCurvatureAt } from './margin.js';
 import { corridorBandPolygons, corridorBandObserved, corridorObservedLimitS, corridorPinchSegments, corridorCrossSectionSegments, coverageFromScan, bandBoundary as unobservedBoundarySegments } from './corridor.js';
 
 // ==================== 参数 ====================
+
+/** 道路曲率限速开关（A/B；**默认关 = 旧行为**）：开 = 按 A_LAT_MAX 对**路弯**限速。
+ *  【为什么默认关】它改变**所有**地图的速度剖面（径向图弯道半径 80~100m → 限速 17~19m/s），
+ *  属语义变更：必须单独 A/B + 基线重取，不能在 M1 里顺手打开（见 spec 2026-09-26 执行记录）。
+ *  OSM 高速图（最急 R=141m）在关闭时会以 vCap 上限 35m/s 跑完含弯全程。 */
+export let CURVATURE_SPEED_LIMIT = false;
+/** 运行时开关（headless `--curvature-limit` / 浏览器调试）：见常量注释的 A/B 说明 */
+export function setCurvatureSpeedLimit(on: boolean): void { CURVATURE_SPEED_LIMIT = on; }
 
 const DECEL_ZONE = m(25) as number;        // 路线终点减速区
 const STOP_ASSUMED_LEN = m(8) as number;   // 阻塞条目假定的障碍长度（仅影响 ST 条目 sMax）
@@ -114,6 +123,29 @@ let _prevBestTargetL: number | null = null;
 /** 紧间隙迟滞状态（tight.ts；世界切换时重置） */
 let _tight: TightMemory = INITIAL_TIGHT;
 
+/**
+ * 道路曲率限速：`v ≤ √(A_LAT_MAX/κ(s))`，并叠加"前视制动可行"约束
+ * `v² ≤ v_lim(s)² + 2·a_brake·(s−s0)` → 取全程最小值（越远越松）。
+ *
+ * 【为什么需要】原有 `lateralSpeedCap` 管的是**变道机动**的横向加速度，与**路弯**无关。
+ * OSM 实测（京港澳 G4 杜家坎段，最急 R=141m）：不限速时车以 vCap 上限 35m/s 跑完含弯全程
+ * （横向加速度 8.7m/s² ≫ A_LAT_MAX=3.5），与真实限速语义脱节。
+ * 【口径】κ 用 `refCurvatureAt`（±2.5m 三点外接圆），对 3m 采样稳健。
+ * 【注意】本项目车辆是运动学模型（无侧向附着极限），该限速**只作用于规划器**。
+ */
+function curvatureSpeedCap(ref: FrenetReference, s0: number, horizon: number): number {
+  const aBrake = A_BRAKE as number;
+  const STEP = m(10) as number;
+  let cap = Infinity;
+  for (let ds = 0; ds <= horizon; ds += STEP) {
+    const k = refCurvatureAt(ref, s0 + ds);
+    if (k <= 1e-6) continue;
+    const vLim = Math.sqrt((A_LAT_MAX as number) / k);
+    cap = Math.min(cap, Math.sqrt(vLim * vLim + 2 * aBrake * ds));
+  }
+  return cap;
+}
+
 // ==================== 主入口 ====================
 
 export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Route): Trajectory {
@@ -132,7 +164,7 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
     frenetRef = _routeFrenetRef!; routeActive = true;
   } else {
     if (!_loopFrenetRef || _loopRefTrack !== track) {
-      _loopFrenetRef = buildFrenetReference(track.centerPoints, true);
+      _loopFrenetRef = buildFrenetReference(track.centerPoints, track.closed ?? true);
       _loopRefTrack = track as TrackGeometry;
       _prevBestTargetL = null;
       _tight = INITIAL_TIGHT;
@@ -162,6 +194,13 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
     targetV *= Math.max(0.1, remainingDist / DECEL_ZONE);
   }
 
+  // ─── 4b. 道路曲率限速 ───
+  // 弯道限速 v_lim(s)=√(A_LAT_MAX/κ(s))，并检查"到该点前能否制动降到 v_lim"
+  // （v² ≤ v_lim² + 2·a_brake·Δs）。否则会"进弯才发现要减速"——规划速度合理但车刹不住。
+  if (CURVATURE_SPEED_LIMIT) {
+    targetV = Math.min(targetV, curvatureSpeedCap(frenetRef, fl.s as number, PATH_HORIZON as number));
+  }
+
   // ─── 5. 路径层 × 速度上限：收敛迭代（spec 2026-09-25 §5.1，EM 风格交替）───
   // 为什么迭代：路径几何（物理走廊裕度 margin(v)、发展段 S(v)）依赖"通过时的速度"，
   // 而"能通过多快"又由路径几何决定（横向机动上限 / 紧间隙慢行档 / 停车线）——单轮
@@ -188,6 +227,7 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
       carWidth: car.width, collisionRadius: car.collisionRadius,
       laneOffset, prevTargetL: _prevBestTargetL,
       sEnd: routeActive ? (frenetRef.totalS as number) : undefined,
+      trackHalfWidth: snapshot.track.halfWidth,     // 规划域随地图半宽（OSM 3 车道比径向图窄）
     });
     rounds += 1;
     const a = pathLayer.best.targetL as number;

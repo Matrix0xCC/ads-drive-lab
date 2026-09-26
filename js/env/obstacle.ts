@@ -41,7 +41,8 @@ export function generateObstacles(
   clearance?: { fromIndex: number; minGap: number },
 ): Obstacle[] {
   const obstacles: Obstacle[] = [];
-  const n = track.centerPoints.length - 1;
+  const closed = track.closed ?? true;
+  const n = closed ? track.centerPoints.length - 1 : track.centerPoints.length;
 
   // 累计弧长表（环形），供出生区净空判定（精确沿弧距离，O(1)/次）
   let cum: number[] | null = null;
@@ -55,7 +56,9 @@ export function generateObstacles(
   const tooCloseToStart = (idx: number): boolean => {
     if (!cum || !clearance) return false;
     const d = Math.abs(cum[idx] - cum[clearance.fromIndex]);
-    return Math.min(d, cum[n] - d) < clearance.minGap;
+    // 闭环时才取"环形最短距离"；开环直接比弧长差
+    const arc = closed ? Math.min(d, cum[n] - d) : d;
+    return arc < clearance.minGap;
   };
 
   // Fisher–Yates 洗牌 → 随机不重复采样中心线位置
@@ -69,7 +72,7 @@ export function generateObstacles(
     if (obstacles.length >= count) break;
     if (tooCloseToStart(idx)) continue;   // 出生区净空：跳过起点附近的采样位
     const pt = track.centerPoints[idx];
-    const next = track.centerPoints[(idx + 1) % n];
+    const next = track.centerPoints[closed ? (idx + 1) % n : Math.min(idx + 1, n - 1)];
     const dx = (next.x as number) - (pt.x as number);
     const dy = (next.y as number) - (pt.y as number);
     const len = Math.hypot(dx, dy) || 1;

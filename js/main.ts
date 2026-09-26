@@ -6,9 +6,9 @@ import { SIM_W, SIM_H, FIXED_DT, SimEngine } from './sim/engine.js';
 import { Scenario, parseScenario, buildScenarioWorld, defaultScenario } from './sim/scenario.js';
 import { ARCHIVE_TOPICS, recordFrom } from './sim/records.js';
 import { assembleBundle } from './headless/bundle.js';
-import { initScene, updateScene, resetSceneCache } from './env/renderer.js';
+import { initScene, updateScene, resetSceneCache, frameSmart, followCar, setWorldExtent } from './env/renderer.js';
 import { MAP_PRESETS, DEFAULT_MAP } from './env/mapDefinitions.js';
-import { setupUI } from './ui/index.js';
+import { setupUI, populateMapDropdown } from './ui/index.js';
 import { ReplayController } from './replay.js';
 
 const W = SIM_W, H = SIM_H;
@@ -63,6 +63,10 @@ function applyScenario(json: unknown): string | null {
   }
   currentScenario = scenario;
   resetSceneCache(scene);
+  // 世界尺寸随地图（OSM 长条图 900×1840m ≫ 默认 450×200m）：地面/网格重建 + 智能取景
+  setWorldExtent(scene, engine.worldW, engine.worldH);
+  frameSmart(camera, controls, canvas.clientWidth || W, canvas.clientHeight || H,
+    engine.worldW, engine.worldH, engine.car.x as number, engine.car.y as number);
   frames.length = 0;   // 归档从本次场景加载起重新收集
   document.getElementById('hud-map')!.textContent = engine.mapDef.name;
   document.getElementById('hud-scenario')!.textContent = `${scenario.name}（种子 ${scenario.seed}）`;
@@ -89,7 +93,8 @@ function exportRun(): void {
   URL.revokeObjectURL(a.href);
 }
 
-// 初始世界：浏览器默认场景
+// 初始世界：浏览器默认场景（先填充地图下拉：applyScenario 会按 scenario.map 设 value）
+populateMapDropdown();
 applyScenario(defaultScenario(DEFAULT_MAP));
 
 const replay = new ReplayController(scene, lidarLines);
@@ -99,6 +104,10 @@ const ui = setupUI({
   engine: {
     get mapDef() { return engine.mapDef; },
     get track() { return engine.track; },
+    get worldW() { return engine.worldW; },
+    get worldH() { return engine.worldH; },
+    get carX() { return latestCar.x; },
+    get carY() { return latestCar.y; },
     get roadGraph() { return engine.roadGraph; },
     get route() { return engine.route; },
     get routeState() { return engine.routeState; },
@@ -118,6 +127,7 @@ const ui = setupUI({
 });
 
 engine.bus.subscribe('control:state', ({ snapshot, lidarScan, trajectory, state }: any) => {
+  latestCar = { x: snapshot.car.x as number, y: snapshot.car.y as number };
   updateScene(scene, snapshot, lidarScan, state, lidarLines, trajectory, engine.route, engine.latestGPS,
     ui.isCorridorVisible() ? (debug.planning?.viz ?? null) : null, ui.isFrenetTicksVisible(),
     ui.isLidarVisible(), ui.isPaused());
@@ -128,6 +138,9 @@ engine.bus.subscribe('control:state', ({ snapshot, lidarScan, trajectory, state 
 // 真实帧率波动 → 累积时间 → 每满 1/60s 调用一次 engine.step。
 // 与 headless 直接固定步进逐帧一致（复现性要求）。
 // 回放模式由 replay.state.active 分支接管，不步进 engine。
+/** 最新车位（相机跟随用；跟随默认开，用户仍可用 WASD/鼠标调整相对视角） */
+let latestCar = { x: 0, y: 0 };
+
 let lastTime = performance.now();
 let acc = 0;
 const MAX_CATCHUP = 5;
@@ -149,6 +162,10 @@ function gameLoop(now: number) {
     if (n === MAX_CATCHUP) acc = 0; // 防止追帧螺旋
   }
 
+  // 相机跟随：由 toolbar/F 键的开关控制（换地图时按世界尺寸给默认值，见 SCENARIO_CHANGED）
+  if (ui.isFollowCamEnabled()) {
+    followCar(camera, controls, latestCar.x, latestCar.y, realDt);
+  }
   controls.update();
   renderer.render(scene, camera);
   ui.tick(realDt);

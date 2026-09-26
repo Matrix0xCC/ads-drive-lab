@@ -15,6 +15,10 @@ npm run watch       # 监听模式
 npm test            # tsc + node --test（dist 下的 .test.js；脚本里用 shell 通配展开文件列表，
 #                     兼容 Node 18~24——Node 24 不再接受目录参数，见路线图 R2）
 
+# OSM 地图生成（构建期；联网抓取，--from-raw 可离线复跑）
+npm run mapgen -- --name bj-g4-dujiakan --ref G4 --bbox 39.80,116.16,39.89,116.26 \
+  --min-length 1500 --length 2000 --start-at-toll
+
 # headless 仿真（运行 + 归档 + 检测 + 报告）
 npm run sim -- --scenario scenarios/oval-avoid-1.json    # 场景文件
 npm run sim -- --map oval --obstacles 4 --seed 42        # 快速随机场景
@@ -60,6 +64,8 @@ requestAnimationFrame 主循环 (~60Hz)
 - `js/headless/` — headless CLI（run.ts）、归档（archive.ts）、检测器（detector.ts + checks/）、报告（report.ts）
 - `js/shared/` — 接口契约（types/interfaces/，含归档记录 schema）、量纲系统（dimensions.ts）、rng、debug
 - `js/ui/` — UI 层（`state.ts` 纯状态机 + `controller.ts` 副作用边界 + sidebar/toolbar/hud/inspector/interactions/replayPanel 面板模块）；`js/replay.ts` — 回放控制器；`js/env/renderer/` — Three.js 渲染
+- `js/mapgen/` — **OSM 地图管线**（构建期工具，不进浏览器包）：`osm.ts` 纯几何（way 链合并 / 投影 / 均匀重采样 / **弧长窗口平滑** / 曲率统计 / `projectOntoPath` 地图匹配原语）+ `build-map.ts` CLI（Overpass 多端点 failover、原始数据与侧车 meta 入库、`--from-raw` 离线复跑、`--start-at-toll`）
+- `maps/` — 派生地图（入库）：`<name>.json`（中心线 + world + 校验统计 + 收费站桩号）、`raw/<name>.osm.json`（原始 Overpass 响应）、`raw/<name>.meta.json`（取数过程信息；**不进地图文件**，否则"重新生成逐字节相同"不成立）；`js/env/maps/<name>.gen.ts` 为机械转换产物（勿手改）
 - `scenarios/` — 场景用例（入库）；新增场景需登记 `scenarios/index.json` 才会出现在浏览器场景下拉；`runs/` — 运行归档（gitignore）
 - `js/test/` — node:test 单元测试（`.test.ts`，编译后运行到 `dist/`）
 - **Node 版本**：`engines` 要求 ≥18，`.nvmrc` 推荐 24（当前开发机）。注意 `dist/` 不清理 → **删/改测试文件后要手动清 dist 里的旧产物**，否则旧测试仍会被 `npm test` 跑到
@@ -71,8 +77,8 @@ requestAnimationFrame 主循环 (~60Hz)
 3. **传感器驱动** — 规划器只信任 LiDAR 做碰撞检测，禁止直接使用障碍物列表（真实系统中规划器不知道障碍物绝对坐标）
 4. **量纲安全** — `dimensions.ts` 品牌类型（Px, Radians, PxPerSec, DimLess...）编译时防量纲错误，编译后完全擦除。工厂函数（`px()`, `m()`, `rad()`...）是唯一 unsafe cast 点，只允许在模块边界使用
 5. **单位系统** — 所有物理量配置用 `m()` / `mps()` / `mps2()` 书写（`SIM_UNITS_PER_METER = 4`，改比例尺只需改这一个常量），不要硬编码 px 值
-6. **UI 状态单一来源** — 所有 UI 行为经 `ui/state.ts` 的纯函数 reduce 驱动，DOM 只是状态的渲染投影；`ui/controller.ts` 是"状态变化 → 副作用"的唯一边界；main 只通过 `UiDeps.actions` 改世界。布局：左侧菜单栏（分区**常展开**：世界/数据）+ **画布左缘纵向 toolbar**（暂停/视角/走廊/刻度/射线/路线，图标+两字标签，开关类高亮=开）+ 画布右上「信息」面板（详细遥测）+ 右下「调试」面板（Inspect，`infoOpen`/`debugOpen` 可折叠）+ 画布左上速度/状态精简行。快捷键：Space 暂停/回放播放、Esc 取消选点/退出回放、R 视角、I 折叠「调试」面板、C 走廊可视化、G Frenet 刻度、L LiDAR 射线、T 设路线、WASD 平移视角
-  （画布左缘纵向 toolbar 另有同功能按钮；两者默认：刻度/射线开、走廊关）
+6. **UI 状态单一来源** — 所有 UI 行为经 `ui/state.ts` 的纯函数 reduce 驱动，DOM 只是状态的渲染投影；`ui/controller.ts` 是"状态变化 → 副作用"的唯一边界；main 只通过 `UiDeps.actions` 改世界。布局：左侧菜单栏（分区**常展开**：世界/数据）+ **画布左缘纵向 toolbar**（暂停/视角/**跟随**/走廊/刻度/射线/路线，图标+两字标签，开关类高亮=开）+ 画布右上「信息」面板（详细遥测）+ 右下「调试」面板（Inspect，`infoOpen`/`debugOpen` 可折叠）+ 画布左上速度/状态精简行。快捷键：Space 暂停/回放播放、Esc 取消选点/退出回放、R 视角、F 相机跟随、I 折叠「调试」面板、C 走廊可视化、G Frenet 刻度、L LiDAR 射线、T 设路线、WASD 平移视角
+  （画布左缘纵向 toolbar 另有同功能按钮；两者默认：刻度/射线开、走廊关、**相机跟随按地图**——长条大世界（OSM 高速）开、径向小世界关）
 
 ### 规划器（js/algo/plan/）——纵向-横向解耦（spec: docs/superpowers/specs/2026-09-19-decoupled-planner-design.md）
 
@@ -81,6 +87,8 @@ requestAnimationFrame 主循环 (~60Hz)
 - **路径层**：`corridor.ts` 建**走廊族**（舒适 / 物理 / 更严 / 更松，同一几何只差膨胀量），候选由**物理走廊瓶颈处的自由段**派生（间隙中心 + 边界内缩 + 车道中心，≤7 个）；两段式横向（前 40m 五次多项式横移、其后保持），**自适应缩短发展段**（越界点前完成横移，下限按 `S_min=√(5.77·|Δl|·v²/A_LAT_MAX)` 随速度缩放）+ **横向路径夹紧 [l0, target]**（防贴边棘轮复位）；120m 视程（有路线时截到路线剩余，`sEnd`）、越出走廊 = 阻塞
 - **双阈值（走廊版）**：舒适走廊 = 车半宽 + `max(1.5m, 标定 p95)`（只影响排名与慢行档）；物理走廊 = 车半宽 + `marginFor(v)`（标定速度表，决定停车线）；更严/更松 = 物理 ±0.15m（迟滞状态机 `tight.ts` 的进入/退出判据，进入用更松、退出用更严 + 3 帧防抖）。横向排名只看 COMMIT_WINDOW=60m（晚承诺）；全部候选连物理走廊都过不去 → 停车线；存在物理可过候选则限速 8m/s 慢行；**可达性闸门**：绑定点取"种子档几何阻塞点 / 末轮最优阻塞点 / 全部候选最早的舒适阻塞点"三者最早（最后一项兜住"域放宽后大角度绕行候选变舒适畅通、判据消失"），判据用**车辆自身减速能力** `car.acceleration`（不是规划侧保守的 A_BRAKE：能不能做到问能力）——到绑定点前降不到速度前提则停车线、停不住则 emergency
 - **收敛迭代（stage C）**：`vAssume` 从 `max(当前速度, 慢行档)` 起，每轮用 `margin(vAssume)`/`S(vAssume)` 求路径，再由路径几何反推速度上限 `u`（封死 0 / 紧间隙慢行档 / 横向机动 `lateralSpeedCap` / `vCap`）；几何评估速度下限 = 慢行档（破"停车 → 裕度最大 → 封死 → 永不起步"自锁）
+- **曲率限速（A/B 开关 `CURVATURE_SPEED_LIMIT`，默认关）**：开则按道路曲率限速 `v ≤ √(A_LAT_MAX/κ(s))` 并叠加前视制动可行性（`v² ≤ v_lim² + 2·a_brake·Δs`，取全程最小）。**默认关的原因**：它改变所有地图的速度剖面（径向图半径 80~100m → 限速 17~19m/s），属语义变更需单独 A/B；OSM 高速图（最急 R=141m）关闭时会以 vCap 上限 35m/s 跑完含弯全程。headless 用 `--curvature-limit` 打开
+- **道路半宽随地图**：`solvePathLayer` 收 `trackHalfWidth`（规划域 `L_MAX` 随地图半宽收窄）；感知的 |l| 分级阈值改为**半宽比例**（0.6/0.8，径向图 0.6×7.5=4.5m / 0.8×7.5=6.0m 与历史写死值一致 → 行为零变化）
 - **速度层**：ST 条目（tMin=0 静态）→ cruise / stop（五次多项式停车线，T 取最小单调解）/ emergency（A_MAX 兜底）
 - `polynomial.ts` 五次多项式（曲率 C² 连续）；`collision.ts` 锥形搜索（供旧耦合路径的遗留工具）
 - **指标**：`summary.json` / `report.md` 含到达用时、路线进度、**收敛轮数 >1 的帧占比、单帧规划耗时 p50/p95**（`planMs` 为墙钟量，**不进逐帧归档**——否则破坏"同种子逐字节一致"）
@@ -93,6 +101,13 @@ LiDAR 单线 2D：±60° FOV、2° 分辨率、61 条射线、最大 125m。核�
 ### 控制（js/algo/control.ts）
 
 Pure Pursuit：δ = atan2(2·L·sin α, ld)，预瞄距离 = clamp(0.4×speed, 10m, 20m)。油门目标 = 轨迹终点速度；**终点速度 ≈0（停车/紧急剖面）→ 油门 0**（0.15 怠速下限只对正值目标保留——否则"停车"变成 6.375m/s 恒速爬行，批量 A/B 回归根因）。
+
+### 地图来源与开环道路（`env/mapDefinitions.ts` + `env/track.ts`）
+
+- `MapDefinition.kind`：`'radial'`（历史：8 个径向控制点闭环，半宽 7.5m、世界 450×200m）与 `'polyline'`（OSM：点列，可开环，半宽按车道数、世界按包围盒）。地图下拉由 `MAP_PRESETS` **动态填充**（新增地图只需登记 MAP_PRESETS，不必改 index.html）。
+- **开环语义**：`closed: false` → `innerBoundary` 为空，`outerBoundary` 是**闭合路面多边形**（左缘→末端帽→右缘→起点帽），并且两端帽沿切线**外延 25m**（否则车出生点正好压在端帽上 → 每帧判越界复位）。`buildRoadGraph`/`sToIndex`/`resetToTrack`/`generateObstacles` 都不再绕接。
+- **世界尺寸不再是全局常量**：`engine.worldW/worldH` 取地图声明；地面/网格用 `setWorldExtent` 随地图重建。
+- **相机跟随**：toolbar「跟随」开关 / `F` 键（状态在 `ui/state.ts` 的 `followCam`）。开启时 `followCar` 每帧把相机与目标点同步平移（保留用户的旋转/缩放）；**换地图时按世界尺寸给默认值**（`SCENARIO_CHANGED.followCamDefault`：长条图默认开、径向图默认关），用户手动切过后不受影响。`R`/重置视角走 `frameSmart`（小世界整图、大世界取车周围 250m）。
 
 ### 路线设置（`ui/interactions.ts` + `js/algo/routePlanner.ts`）
 

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "name": "bj-g4-dujiakan-cruise",
+  "map": "bj-g4-dujiakan",
+  "seed": 1,
+  "duration": 120,
+  "car": { "speed": 20 },
+  "obstacles": { "mode": "random", "count": 0 },
+  "route": { "startS": 0, "goalS": 1900 }
+}

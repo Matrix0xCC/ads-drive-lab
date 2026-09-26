@@ -10,8 +10,7 @@ import { MapDefinition } from '../env/mapDefinitions.js';
 import { RoadGraph } from '../algo/routePlanner.js';
 import { ReplayController } from '../replay.js';
 import type { RouteState } from '../sim/engine.js';
-import { SIM_W, SIM_H } from '../sim/engine.js';
-import { frameCamera } from '../env/renderer.js';
+import { frameSmart } from '../env/renderer.js';
 import { panDelta } from './cameraKeys.js';
 import { UiController } from './controller.js';
 import { wireToolbar } from './toolbar.js';
@@ -21,6 +20,24 @@ import { setupReplayPanel } from './replayPanel.js';
 import { renderHint, setInfoOpen } from './hud.js';
 import { setInspectorOpen, updateInspectPanel } from './inspector.js';
 import { display } from '../shared/display.js';
+import { MAP_PRESETS } from '../env/mapDefinitions.js';
+
+/** 用 MAP_PRESETS 填充地图下拉（在首次 applyScenario **之前**调用：
+ *  applyScenario 会按 scenario.map 设 `select.value`，选项必须先存在）。
+ *  这样新增地图只需在 MAP_PRESETS 登记，不必再改 index.html。 */
+export function populateMapDropdown(): void {
+  const sel = document.getElementById('map-dropdown') as HTMLSelectElement | null;
+  if (!sel) return;
+  const keep = sel.value;
+  sel.innerHTML = '';
+  for (const [key, def] of Object.entries(MAP_PRESETS)) {
+    const opt = document.createElement('option');
+    opt.value = key;
+    opt.textContent = def.name;
+    sel.appendChild(opt);
+  }
+  if (keep && [...sel.options].some(o => o.value === keep)) sel.value = keep;
+}
 
 // ═══════════════════════════════════════════════════
 // 依赖接口（main.ts 提供）
@@ -36,6 +53,10 @@ export interface UiDeps {
   engine: {
     readonly mapDef: MapDefinition;
     readonly track: TrackGeometry;
+    readonly worldW: number;
+    readonly worldH: number;
+    readonly carX: number;
+    readonly carY: number;
     readonly roadGraph: RoadGraph;
     readonly route: Route | null;
     readonly routeState: RouteState;
@@ -60,7 +81,7 @@ export interface UiDeps {
 
 export function setupUI(deps: UiDeps): {
   tick(dt: number): void; isCorridorVisible(): boolean; isFrenetTicksVisible(): boolean;
-  isLidarVisible(): boolean; isPaused(): boolean;
+  isLidarVisible(): boolean; isPaused(): boolean; isFollowCamEnabled(): boolean;
 } {
   const { canvas, camera, controls } = deps;
 
@@ -76,6 +97,9 @@ export function setupUI(deps: UiDeps): {
   }
   function renderCorridorButton(visible: boolean) {
     renderToggleButton('btn-corridor', visible);
+  }
+  function renderFollowCamButton(on: boolean) {
+    renderToggleButton('btn-follow-cam', on);
   }
 
   /** 暂停/播放图标：LIVE 看 livePaused、REPLAY 看回放播放态（与 Space 语义一致）。
@@ -103,6 +127,7 @@ export function setupUI(deps: UiDeps): {
     onCorridorVisible: (v) => { renderCorridorButton(v); deps.replay.showCorridor = v; deps.replay.requestRedraw(); },
     onFrenetTicksVisible: (v) => { renderFrenetTicksButton(v); deps.replay.showFrenetTicks = v; deps.replay.requestRedraw(); },
     onLidarVisible: (v) => { renderLidarButton(v); deps.replay.showLidar = v; deps.replay.requestRedraw(); },
+    onFollowCam: (on) => { renderFollowCamButton(on); },
     onRoutePickPhase: (ph) => renderToggleButton('btn-route', ph !== 'idle'),
     onSpeedUnit: (unit) => { display.speedUnit = unit; },
   }, () => deps.engine.routeState);
@@ -142,6 +167,10 @@ export function setupUI(deps: UiDeps): {
   document.getElementById('btn-corridor')?.addEventListener('click', () => {
     controller.dispatch({ type: 'TOGGLE_CORRIDOR' });
   });
+  // 相机跟随开关（toolbar / F 键）：开启时视点随车移动，关闭后视野固定
+  document.getElementById('btn-follow-cam')?.addEventListener('click', () => {
+    controller.dispatch({ type: 'TOGGLE_FOLLOW_CAM' });
+  });
   document.getElementById('btn-frenet-ticks')?.addEventListener('click', () => {
     controller.dispatch({ type: 'TOGGLE_FRENET_TICKS' });
   });
@@ -159,7 +188,9 @@ export function setupUI(deps: UiDeps): {
 
   // ── 统一键盘分发器（Space 双语义 / Esc 三义）──
   function resetCamera() {
-    frameCamera(camera, controls, canvas.clientWidth, canvas.clientHeight, SIM_W, SIM_H);
+    // 智能取景：小世界整图、大世界取车周围局部（见 renderer/scene.ts 的 frameSmart）
+    frameSmart(camera, controls, canvas.clientWidth, canvas.clientHeight,
+      deps.engine.worldW, deps.engine.worldH, deps.engine.carX, deps.engine.carY);
   }
   // ── WASD 相机平移：按下集合由 window 维护，实际位移在 tick 里按 dt 应用 ──
   const heldKeys = new Set<string>();
@@ -211,6 +242,9 @@ export function setupUI(deps: UiDeps): {
       case 'l': case 'L':
         controller.dispatch({ type: 'TOGGLE_LIDAR' });
         break;
+      case 'f': case 'F':
+        controller.dispatch({ type: 'TOGGLE_FOLLOW_CAM' });
+        break;
       case 't': case 'T':
         controller.dispatch({ type: 'TOGGLE_ROUTE_SET' });
         break;
@@ -243,6 +277,10 @@ export function setupUI(deps: UiDeps): {
     /** LiDAR 射线显隐（回放模式同样生效） */
     isLidarVisible(): boolean {
       return controller.state.lidarVisible;
+    },
+    /** 相机跟随是否开启（main 的主循环据此调用 followCar） */
+    isFollowCamEnabled(): boolean {
+      return controller.state.followCam;
     },
     /** 世界是否处于暂停（实时=暂停中；回放=未播放）——候选线编号只在暂停时画 */
     isPaused(): boolean {

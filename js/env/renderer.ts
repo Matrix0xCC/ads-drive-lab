@@ -13,7 +13,7 @@
 
 import * as THREE from 'three';
 import { WorldSnapshot, LidarScan, Trajectory, Route, GPSReading } from '../shared/types.js';
-import { initScene, frameCamera } from './renderer/scene.js';
+import { initScene, frameCamera, frameSmart, followCar, setWorldExtent, FOLLOW_WORLD_THRESHOLD } from './renderer/scene.js';
 import { buildTrackGroup, buildObstacleGroup, buildCarGroup, buildFrenetTicksGroup } from './renderer/geometry.js';
 import { updateLidar, updateTrajectoryLine, updateRouteLine, updateGPSRing, updateObstacleMarkers, updateCorridorViz, resetOverlayCache } from './renderer/overlays.js';
 import type { PlanningViz } from '../shared/debug.js';
@@ -37,8 +37,9 @@ let _frenetTicks: THREE.Group | null = null;
 let _frenetTicksKey: unknown = null;
 
 /** 规划域半宽（与 paths.ts 的 L_MAX 同式；用于刻度里那条与走廊同色的域边线） */
-const DOMAIN_HALF = (TRACK_HALF_WIDTH as number)
-  - ((m(2.0) as number) / 2 + (BOUNDS_BUFFER as number)) - (DOMAIN_OVERSHOOT_RESERVE as number);
+/** 规划域半宽（与 paths.ts 的 L_MAX 同式；随地图半宽变化） */
+const domainHalfOf = (halfWidthU: number): number =>
+  halfWidthU - ((m(2.0) as number) / 2 + (BOUNDS_BUFFER as number)) - (DOMAIN_OVERSHOOT_RESERVE as number);
 
 /** 清空所有缓存（地图切换时调用，触发懒重建） */
 export function resetSceneCache(scene: THREE.Scene) {
@@ -93,9 +94,11 @@ export function updateScene(
       if (_frenetTicks) scene.remove(_frenetTicks);
       const ref = route
         ? buildFrenetReference(route.waypoints, false)
-        : buildFrenetReference(track.centerPoints, true);
+        : buildFrenetReference(track.centerPoints, track.closed ?? true);
       _frenetTicks = buildFrenetTicksGroup(ref, {
-        maxS: ref.totalS as number, roadHalf: TRACK_HALF_WIDTH as number, domainHalf: DOMAIN_HALF,
+        maxS: ref.totalS as number,
+        roadHalf: (track.halfWidth ?? TRACK_HALF_WIDTH) as number,
+        domainHalf: domainHalfOf((track.halfWidth ?? TRACK_HALF_WIDTH) as number),
       });
       _frenetTicksKey = ticksKey;
       scene.add(_frenetTicks);
@@ -107,4 +110,4 @@ export function updateScene(
   updateHUD(lidarScan, car, plannerState, obstacles, trajectory, route ?? null, gps ?? null);
 }
 
-export { initScene, frameCamera };
+export { initScene, frameCamera, frameSmart, followCar, setWorldExtent, FOLLOW_WORLD_THRESHOLD };

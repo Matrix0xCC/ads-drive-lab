@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import { TrackGeometry, Obstacle } from '../../shared/types.js';
 import { Px, m, px } from '../../shared/dimensions.js';
 import { buildFrenetReference, frenetToCartesian } from '../../algo/plan/frenet.js';
+import { TRACK_HALF_WIDTH } from '../track.js';
 import type { FrenetReference } from '../../shared/types.js';
 
 // ═══════════════════════════════════════════════════
@@ -35,10 +36,13 @@ export function buildTrackGroup(track: TrackGeometry): THREE.Group {
   const shape = new THREE.Shape(
     THREE.ShapeUtils.isClockWise(outerPts) ? outerPts.reverse() : outerPts
   );
-  const hole = new THREE.Path(
-    THREE.ShapeUtils.isClockWise(innerPts) ? innerPts : innerPts.reverse()
-  );
-  shape.holes.push(hole);
+  // 开环道路（OSM）：outerBoundary 已是闭合的路面带多边形、innerBoundary 为空 → 不挖孔
+  if (innerPts.length >= 3) {
+    const hole = new THREE.Path(
+      THREE.ShapeUtils.isClockWise(innerPts) ? innerPts : innerPts.reverse()
+    );
+    shape.holes.push(hole);
+  }
 
   const roadGeom = new THREE.ShapeGeometry(shape);
   const roadMesh = new THREE.Mesh(roadGeom, new THREE.MeshStandardMaterial({ color: 0x3a3a3a }));
@@ -58,19 +62,21 @@ export function buildTrackGroup(track: TrackGeometry): THREE.Group {
     group.add(line);
   }
   addLoopLine(track.outerBoundary, 0x888888, false);
-  addLoopLine(track.innerBoundary, 0x888888, false);
+  if (track.innerBoundary.length >= 2) addLoopLine(track.innerBoundary, 0x888888, false);
   addLoopLine(track.centerPoints, 0xaaaaaa, true);
 
-  // 4 车道分隔线（15m ÷ 4 = 3.75m/车道）
-  // 分隔线位于 Frenet l = ±3.75m（半宽的 50%）
-  const laneRef = buildFrenetReference(track.centerPoints, true);
-  const halfLaneWidth = (m(3.75) as number);  // 3.75m → 15 sim-units
-  for (const lSign of [-1, 1]) {
-    const lv = px(lSign * halfLaneWidth);
+  // 车道分隔线：按地图半宽与车道宽反推车道数（径向图 15m/3.75m = 4 车道 → 分隔线 ±3.75m；
+  // OSM 图 11.25m/3.75m = 3 车道 → 分隔线 ±1.875m）。l=0 的中线由中心虚线承载，不重复画。
+  const laneRef = buildFrenetReference(track.centerPoints, track.closed ?? true);
+  const halfW = (track.halfWidth ?? TRACK_HALF_WIDTH) as number;
+  const laneW = m(3.75) as number;
+  const laneCount = Math.max(2, Math.round(2 * halfW / laneW));
+  for (let k = 1; k < laneCount; k++) {
+    const lv = px((-halfW + k * (2 * halfW / laneCount)));
+    if (Math.abs(lv as number) < 1e-6) continue;                 // 中线不画（已有中心虚线）
     const pts: { x: Px; y: Px }[] = [];
     for (let i = 0; i < track.centerPoints.length; i++) {
-      const s = laneRef.s[i];
-      const cart = frenetToCartesian(s, lv, laneRef);
+      const cart = frenetToCartesian(laneRef.s[i], lv, laneRef);
       pts.push({ x: px(cart.x as number), y: px(cart.y as number) });
     }
     addLoopLine(pts, 0x666644, true);  // 浅黄虚线

@@ -128,10 +128,34 @@ describe('reduce: 速度显示单位', () => {
   });
 });
 
+describe('reduce: 相机跟随开关', () => {
+  it('默认关；TOGGLE_FOLLOW_CAM 翻转；重复两次回到原值', () => {
+    assert.strictEqual(live().followCam, false);
+    const on = reduce(live(), { type: 'TOGGLE_FOLLOW_CAM' });
+    assert.strictEqual(on.followCam, true);
+    assert.strictEqual(reduce(on, { type: 'TOGGLE_FOLLOW_CAM' }).followCam, false);
+  });
+
+  it('SCENARIO_CHANGED 带 followCamDefault → 按新世界尺寸设默认（长条图开/小世界关）', () => {
+    const big = reduce(live(), { type: 'SCENARIO_CHANGED', name: 'osm', followCamDefault: true });
+    assert.strictEqual(big.followCam, true);
+    const small = reduce(big, { type: 'SCENARIO_CHANGED', name: 'oval', followCamDefault: false });
+    assert.strictEqual(small.followCam, false);
+  });
+
+  it('SCENARIO_CHANGED 不带 followCamDefault → 保留用户当前选择', () => {
+    const on = reduce(live(), { type: 'TOGGLE_FOLLOW_CAM' });
+    const after = reduce(on, { type: 'SCENARIO_CHANGED', name: 'x' });
+    assert.strictEqual(after.followCam, true, '未给默认值不应改掉用户的开关');
+    assert.strictEqual(after.scenarioName, 'x');
+    assert.strictEqual(after.routePick, 'idle');
+  });
+});
+
 describe('deriveHint', () => {
   it('各分支文案（含路线模式两段）', () => {
     assert.strictEqual(deriveHint(live(), 'NONE'),
-      'T 设路线 · WASD 平移视角 · 左键查看物体 · Space 暂停 · R 重置视角');
+      'T 设路线 · F 跟随视角 · WASD 平移 · 左键查看物体 · Space 暂停 · R 重置视角');
     assert.strictEqual(deriveHint(reduce(live(), { type: 'TOGGLE_ROUTE_SET' }), 'NONE'),
       '设起点：左键点击赛道（Esc 取消）');
     assert.strictEqual(deriveHint(reduce(reduce(live(), { type: 'TOGGLE_ROUTE_SET' }), { type: 'PICK_POINT', idx: 1 }), 'NONE'),

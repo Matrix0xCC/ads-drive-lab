@@ -25,6 +25,7 @@ import { parseScenario, buildScenarioWorld, Scenario } from '../sim/scenario.js'
 import { ARCHIVE_TOPICS, recordFrom, buildWorldFile } from '../sim/records.js';
 import { ArchiveWriter, updateRunsIndex } from './archive.js';
 import { assembleBundle } from './bundle.js';
+import { setCurvatureSpeedLimit } from '../algo/plan/planner.js';
 import { FrameRecord } from '../shared/types.js';
 
 interface CliArgs {
@@ -37,10 +38,12 @@ interface CliArgs {
   duration?: number;
   out?: string;
   failOnIssue: boolean;
+  /** 道路曲率限速（A/B 开关；默认关） */
+  curvatureLimit: boolean;
 }
 
 export function parseArgs(argv: string[]): CliArgs {
-  const a: CliArgs = { failOnIssue: false };
+  const a: CliArgs = { failOnIssue: false, curvatureLimit: false };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     if (k === '--scenario') a.scenario = argv[++i];
@@ -50,6 +53,7 @@ export function parseArgs(argv: string[]): CliArgs {
     else if (k === '--duration') a.duration = Number(argv[++i]);
     else if (k === '--out') a.out = argv[++i];
     else if (k === '--fail-on-issue') a.failOnIssue = true;
+    else if (k === '--curvature-limit') a.curvatureLimit = true;
     else throw new Error(`未知参数: ${k}`);
   }
   return a;
@@ -62,6 +66,7 @@ function gitCommitOf(): string | null {
 
 function main(): void {
   const args = parseArgs(process.argv.slice(2));
+  setCurvatureSpeedLimit(args.curvatureLimit);
 
   // 场景：文件模式或 CLI 随机模式；显式 CLI 参数覆盖场景字段
   let scenario: Scenario;

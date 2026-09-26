@@ -55,6 +55,7 @@
 import { WorldSnapshot, LidarScan, TrackGeometry, createLidarScan, obstacleToSegments, FrenetReference } from '../shared/types.js';
 import { Radians, Px, m, rad, px, normalizeAngle } from '../shared/dimensions.js';
 import { buildFrenetReference, cartesianToFrenet } from './plan/frenet.js';
+import { TRACK_HALF_WIDTH } from '../env/track.js';
 import { debug } from '../shared/debug.js';
 
 // ═══════════════════════════════════════════════════
@@ -77,15 +78,16 @@ export const SCAN_RAY_COUNT = Math.floor(SCAN_FOV / SCAN_RESOLUTION) + 1;
 // 背景减除阈值
 // ═══════════════════════════════════════════════════
 //
-// 赛道半宽 7.5m（TRACK_HALF_WIDTH）。围墙位置在 |l| ≈ 7.5m。
-// 考虑 Frenet 投影误差（最近邻搜索 ±0.5m）和赛道曲率影响，
-// LOW 阈值设在半宽 80% 处（6.0m），留出 1.5m 缓冲吸收误差。
+// 边界（墙/护栏）在 |l| ≈ 道路半宽处。阈值按**半宽的比例**取，而不是写死的米数——
+// OSM 高速图半宽 5.625m（3 车道）、径向图 7.5m，同一个绝对阈值在两者上的含义完全不同。
+// 取 0.6 / 0.8：给 Frenet 投影误差（最近邻搜索 ±0.5m）与曲率影响留缓冲。
+// 注：径向图 0.6×7.5=4.5m、0.8×7.5=6.0m —— 与历史写死值完全一致，行为零变化。
 
-/** |l| < 4.5m：明确在赛道内部（半宽的 60%）→ 高置信障碍物 */
-const CONFIDENCE_HIGH = (m(4.5) as number);
+/** |l| < 0.6×半宽：明确在道路内部 → 高置信障碍物 */
+const CONF_HIGH_RATIO = 0.6;
 
-/** |l| > 6.0m：明确在围墙附近（半宽的 80%，给 Frenet 误差留 1.5m 缓冲）→ 确认是边界 */
-const CONFIDENCE_LOW = (m(6.0) as number);
+/** |l| > 0.8×半宽：明确在边界附近（缓冲吸收投影误差）→ 确认是边界 */
+const CONF_LOW_RATIO = 0.8;
 
 // ═══════════════════════════════════════════════════
 // 线段类型
@@ -149,7 +151,7 @@ let _bgRefTrack: TrackGeometry | null = null;
 
 function getBackgroundFrenetRef(track: TrackGeometry): FrenetReference {
   if (!_bgFrenetRef || _bgRefTrack !== track) {
-    _bgFrenetRef = buildFrenetReference(track.centerPoints, true);
+    _bgFrenetRef = buildFrenetReference(track.centerPoints, track.closed ?? true);
     _bgRefTrack = track;
   }
   return _bgFrenetRef;
@@ -172,14 +174,14 @@ function hitFrenetAbsL(
   carX: number, carY: number,
   rayAngle: number, dist: number,
   ref: FrenetReference,
-): number | null {
+): { absL: number; s: number } | null {
   const maxDist = MAX_SENSOR_DIST as number;
   if (dist >= maxDist - 1) return null;  // 未命中 → 无投影
 
   const hitX = carX + Math.cos(rayAngle) * dist;
   const hitY = carY + Math.sin(rayAngle) * dist;
   const fl = cartesianToFrenet(px(hitX), px(hitY), ref);
-  return Math.abs(fl.l as number);
+  return { absL: Math.abs(fl.l as number), s: fl.s as number };
 }
 
 // ═══════════════════════════════════════════════════
@@ -221,6 +223,10 @@ export function sense(snapshot: WorldSnapshot): LidarScan {
 
   // ── 2. HD Map 参考线（懒缓存）──
   const bgRef = getBackgroundFrenetRef(track);
+  // 本帧的分级阈值（按道路半宽比例；见文件头 CONF_*_RATIO 的说明）
+  const halfWidthU = (track.halfWidth ?? TRACK_HALF_WIDTH) as number;
+  const confHigh = halfWidthU * CONF_HIGH_RATIO;
+  const confLow = halfWidthU * CONF_LOW_RATIO;
 
   // ── 3. 扫描主循环 ──
   const carX = car.x as number, carY = car.y as number;
@@ -248,17 +254,26 @@ export function sense(snapshot: WorldSnapshot): LidarScan {
 
     if (minDist < maxDist) {
       // 有命中 → Frenet 投影判断
-      const absL = hitFrenetAbsL(carX, carY, worldAngle, minDist, bgRef);
-      if (absL !== null) {
-        if (absL > CONFIDENCE_LOW) {
-          // |l| > 50：命中点落在已知围墙上 → 背景
+      const hit = hitFrenetAbsL(carX, carY, worldAngle, minDist, bgRef);
+      if (hit !== null) {
+        const absL = hit.absL;
+        // 【开环地图的端帽】端帽是"地图尽头"的已知结构（track 生成时补的），它横跨路面 →
+        // |l| 很小，会被当成高置信障碍物（检测器报 phantom_hit）。判据：命中点落在
+        // 参考线终点附近 ⇒ 已知边界（与侧墙同等对待）。
+        const atMapEnd = !(track.closed ?? true)
+          && hit.s >= (bgRef.totalS as number) - (m(2) as number);
+        if (atMapEnd) {
           filteredDist = maxDist;
           confidence = 0;
-        } else if (absL > CONFIDENCE_HIGH) {
-          // 35 < |l| < 50：边缘模糊区 → 低置信（可能是障碍物靠近路缘）
+        } else if (absL > confLow) {
+          // 超出 0.8×半宽：命中点落在已知边界上 → 背景
+          filteredDist = maxDist;
+          confidence = 0;
+        } else if (absL > confHigh) {
+          // 0.6~0.8×半宽：边缘模糊区 → 低置信（可能是障碍物靠近路缘）
           confidence = 0.5;
         }
-        // |l| < 35：明确在赛道内 → 高置信障碍物（confidence=1 不变）
+        // < 0.6×半宽：明确在道路内 → 高置信障碍物（confidence=1 不变）
       }
     }
 

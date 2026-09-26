@@ -140,7 +140,7 @@ export class Detector {
       obstacles: world?.obstacles ?? [],
     };
     this.merger = new IssueMerger(this.cfg);
-    this.trackFrenet = buildFrenetReference(this.world.track.centerPoints, true);
+    this.trackFrenet = buildFrenetReference(this.world.track.centerPoints, this.world.track.closed ?? true);
   }
 
   feed(rec: FrameRecord): void {

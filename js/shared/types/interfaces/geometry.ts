@@ -10,11 +10,23 @@ export interface Point2D {
   y: Px;
 }
 
-/** 赛道几何 — 中心线 + 内外边界 */
+/** 赛道几何 — 中心线 + 内外边界
+ *
+ * 【开环（OSM 高速）语义】`closed === false` 时：
+ *   - `centerPoints` 是**开环点列**（世界坐标，已含边距，见 mapgen）；
+ *   - `innerBoundary` 为**空**（开环道路没有"内场"）；
+ *   - `outerBoundary` 是**闭合的路面带多边形**（左缘 → 末端帽 → 右缘 → 起点帽），
+ *     因此 `car.ts` 的 `pointInPolygon(outer) && !pointInPolygon(inner)` 判定继续成立，
+ *     且两端帽自然成为"不能冲出地图"的端墙。
+ * 【缺省】`closed` 缺省视为 `true`、`halfWidth` 缺省 `m(7.5)`——保持历史径向地图不变。 */
 export interface TrackGeometry {
   centerPoints: Point2D[];
   innerBoundary: Point2D[];
   outerBoundary: Point2D[];
+  /** 是否闭环；缺省 true */
+  closed?: boolean;
+  /** 道路半宽（px）；缺省 m(7.5) */
+  halfWidth?: Px;
 }
 
 /** 障碍物 — 矩形，带位置、尺寸和朝向角 */

@@ -27,6 +27,10 @@ export interface WorldFile {
     centerPoints: [number, number][];
     innerBoundary: [number, number][];
     outerBoundary: [number, number][];
+    /** 是否闭环（开环 OSM 地图为 false）；旧归档缺省 true */
+    closed?: boolean;
+    /** 道路半宽（px）；旧归档缺省由消费方回退 */
+    halfWidth?: number;
   };
   obstacles: ObstaclePlain[];
   route: { waypoints: [number, number][]; startIndex: number; goalIndex: number; length: number } | null;

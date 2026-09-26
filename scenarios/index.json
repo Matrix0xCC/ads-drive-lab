@@ -64,6 +64,11 @@
       "name": "batch-hairpin-s10",
       "file": "batch/hairpin-s10.json",
       "map": "hairpin"
+    },
+    {
+      "name": "bj-g4-dujiakan-cruise",
+      "file": "bj-g4-dujiakan-cruise.json",
+      "map": "bj-g4-dujiakan"
     }
   ]
 }

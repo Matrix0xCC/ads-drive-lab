@@ -163,16 +163,20 @@ function isInsideTrack(px: number, py: number, inner: Point2D[], outer: Point2D[
  *
  * 复位时保持最低速度 60 px/s，防止停车在边界上再次触发越界。
  */
-function resetToTrack(car: CarState, centerPoints: Point2D[]): void {
+function resetToTrack(car: CarState, centerPoints: Point2D[], closed = true): void {
   let minDist = Infinity, bestIdx = 0;
-  const n = centerPoints.length - 1;
+  const n = closed ? centerPoints.length - 1 : centerPoints.length;
   const cx = car.x as number, cy = car.y as number;
   for (let i = 0; i < n; i++) {
     const d = Math.hypot(cx - (centerPoints[i].x as number), cy - (centerPoints[i].y as number));
     if (d < minDist) { minDist = d; bestIdx = i; }
   }
   const pt = centerPoints[bestIdx];
-  const nextPt = centerPoints[(bestIdx + 1) % n];
+  // 开环：末端没有"下一个点"，用前一个点定朝向（否则会绕回起点，方向反了）
+  const nextPt = closed ? centerPoints[(bestIdx + 1) % n]
+    : centerPoints[Math.min(bestIdx + 1, n - 1)] === pt
+      ? centerPoints[Math.max(0, bestIdx - 1)]
+      : centerPoints[Math.min(bestIdx + 1, n - 1)];
   car.x = pt.x;
   car.y = pt.y;
   car.angle = rad(Math.atan2(
@@ -218,7 +222,7 @@ export const BOUNDS_BUFFER: Px = m(0.5);
 export function checkBounds(car: CarState, track: TrackGeometry): boolean {
   const r = (car.width as number) / 2 + (BOUNDS_BUFFER as number);
   if (!isCarInsideTrack(car.x as number, car.y as number, r, track)) {
-    resetToTrack(car, track.centerPoints);
+    resetToTrack(car, track.centerPoints, track.closed ?? true);
     return true;
   }
   return false;
