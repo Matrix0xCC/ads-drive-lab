@@ -244,16 +244,26 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
     stopLineS = (fl.s as number) + Math.max(v0u * v0u / (2 * (A_BRAKE as number)), m(5) as number);
   }
   {
-    // 可达性闸门：取"种子档（当前速度）几何"与"末轮几何"中更早的阻塞点为界——迭代把速度
-    // 当变量后，末轮可以在低速假设下找到"舒适畅通的候选"，但"车能不能在到达该点前降到目标
-    // 速度"与假设无关；只用末轮会出现"规划低速绕障、车却以 30m/s 撞上去"（实测：20m 障碍
-    // @30m/s → 假 avoid），只用种子档则漏掉"末轮（更低假设速度 ⇒ 更长发展段）才暴露的阻塞"。
-    const bindS = Math.min(
+    // 可达性闸门：迭代把速度当变量后，"车能不能在到达绑定几何点之前降到速度前提"必须单独查
+    // （规划出的低速绕行方案，车可能根本没时间减速过去）。
+    // 判据用**车辆自身减速能力**（car.acceleration；物理层加速/减速共用同一上限，另有利阻力
+    // 加成），不用规划侧保守的 A_BRAKE=6——A_BRAKE 是"舒适制动剖面"的设计值，而"能不能做到"
+    // 问的是能力。定格实测（30m/s 前方 50m 障碍、绕行需降到 16m/s）：需 (30²−16²)/(2×50) =
+    // 6.3m/s² ≤ 8 ✓ 可做到 → 正常绕行；同一几何 45m/s 需 17.6m/s² ✗ → 绕行/制动都做不到
+    // → 必须急刹兜底。
+    // 绑定点 = 三者最早：种子档（当前速度档）几何的阻塞点、末轮最优的阻塞点、
+    // **全部候选里最早的舒适阻塞点**——最后一项兜住"域放宽后大角度绕行候选变舒适畅通、
+    // 判据消失"的情形（45m/s 同几何绕行需峰值横向 5.77×4.6×45²/40² ≈ 33m/s² ≫ A_LAT_MAX）。
+    // targetV ≥ 当前速度时 dReq ≤ 0 → 闸门自动不触发。
+    let bindS = Math.min(
       seedBlocked ? seedBlockS : Infinity,
       pathLayer.best.blocked ? (pathLayer.best.sBlock as number) : Infinity,
     );
+    for (const c of pathLayer.ranked) {
+      if (c.blocked) bindS = Math.min(bindS, c.sBlock as number);
+    }
     if (!stopEngaged && Number.isFinite(bindS)) {
-      const dReq = (v0u * v0u - targetV * targetV) / (2 * (A_BRAKE as number));
+      const dReq = (v0u * v0u - targetV * targetV) / (2 * (car.acceleration as number));
       if (bindS - (fl.s as number) < dReq) {
         stopEngaged = true; stopLineS = bindS;
       }

@@ -147,9 +147,21 @@ describe('边界', () => {
     assert.ok(traj.type !== undefined, '有输出');
   });
 
-  it('障碍物在轨迹末端 200px → 不触发紧急', () => {
-    const traj = plan(makeSnapshot(makeCar(500, 0, 0, 180)), lidarWithObstacle(0, 200, 10));
+  it('障碍物在轨迹末端 200px（25m/s，速度足够）→ 不触发紧急，规划绕行', () => {
+    const traj = plan(makeSnapshot(makeCar(500, 0, 0, 100)), lidarWithObstacle(0, 200, 10));
     assert.notStrictEqual(traj.type, 'emergency', '200px 不应紧急');
+    assert.notStrictEqual(debug.planning!.speedMode, 'emergency');
+  });
+
+  it('45m/s 前方 50m 障碍（绕行/制动均不可达）→ emergency（可达性闸门回归）', () => {
+    // 同一几何在高速度下物理不可行：绕旁边 4.6m 的横移需在 40m 发展段内完成，
+    // 峰值横向加速度 5.7735·4.6·45²/40² ≈ 33m/s² ≫ A_LAT_MAX=3.5 → 规划速度被压到
+    // 15m/s 档；而降速到 15m/s 需制动距离 (45²−15²)/(2×6) ≈ 150m ≫ 50m。
+    // 旧行为按"15m/s 绕行"下发（车根本降不到 → 直接撞）；可达性闸门须识别为不可达并急刹。
+    const traj = plan(makeSnapshot(makeCar(500, 0, 0, 180)), lidarWithObstacle(0, 200, 10));
+    assert.strictEqual(traj.type, 'emergency');
+    assert.strictEqual(debug.planning!.speedMode, 'emergency');
+    assert.ok((traj.points[traj.points.length - 1].v as number) < (traj.points[0].v as number), '应减速');
   });
 });
 

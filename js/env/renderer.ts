@@ -21,6 +21,7 @@ import { updateHUD } from './renderer/hud.js';
 import { buildFrenetReference } from '../algo/plan/frenet.js';
 import { TRACK_HALF_WIDTH } from '../env/track.js';
 import { BOUNDS_BUFFER } from '../env/car.js';
+import { DOMAIN_OVERSHOOT_RESERVE } from '../algo/plan/paths.js';
 import { m } from '../shared/dimensions.js';
 
 // ═══════════════════════════════════════════════════
@@ -37,7 +38,7 @@ let _frenetTicksKey: unknown = null;
 
 /** 规划域半宽（与 paths.ts 的 L_MAX 同式；用于刻度里那条与走廊同色的域边线） */
 const DOMAIN_HALF = (TRACK_HALF_WIDTH as number)
-  - ((m(2.0) as number) / 2 + (BOUNDS_BUFFER as number)) - (m(0.6) as number);
+  - ((m(2.0) as number) / 2 + (BOUNDS_BUFFER as number)) - (DOMAIN_OVERSHOOT_RESERVE as number);
 
 /** 清空所有缓存（地图切换时调用，触发懒重建） */
 export function resetSceneCache(scene: THREE.Scene) {

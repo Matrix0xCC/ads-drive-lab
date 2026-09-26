@@ -66,6 +66,8 @@ const W_SWITCH_PATH = 100;    // 路径跨档切换惩罚（沿用旧 W_SWITCH�
 const LATERAL_SWITCH_BAND = m(12);
 const W_EDGE = 0.5;           // 贴边惩罚权重（与 W_PATH_CENTER 同量级起手）
 const EDGE_BAND = m(0.5);     // 贴边惩罚生效带：距走廊边界 0.5m 以内
+/** 规划域相对复位崖的额外内缩（跟踪过冲预留）。0 = 域边即复位崖（当前值） */
+export const DOMAIN_OVERSHOOT_RESERVE: Px = m(0);
 /** 迟滞粘滞带（tight.ts 施密特触发）：物理阈值上下各 0.15m */
 const HYST_BAND: Px = m(0.15);
 /** 未观测区（遮挡阴影/视锥外）的口径——A/B 实验开关（离线量指标用；可视化走廊始终不裁，
@@ -131,10 +133,15 @@ export function solvePathLayer(o: {
    *  不参与规划（"路线终点之外"不是车要去的地方）。闭环（巡游）不传。 */
   sEnd?: number;
 }): PathLayerResult {
-  // 可行驶域 = checkBounds 复位阈值（车半宽 + 复位缓冲）− 0.6m 跟踪过冲预留。
-  // 用同一个 BOUNDS_BUFFER 派生，避免"规划域放宽了、复位崖没动"（会撞复位传送）。
+  // 可行驶域 = checkBounds 复位阈值（车半宽 + 复位缓冲）− 过冲预留；用同一个 BOUNDS_BUFFER
+  // 派生，避免"规划域放宽了、复位崖没动"（会撞复位传送）。
+  // 过冲预留置 0（2026-09-26，用户决策"走廊上限加到 6m、留 0.5m 富裕"）：域边 = 复位崖 →
+  // 车中心可达 ±6.0m（= 边界 7.5m − 车半宽 1.0m − 复位缓冲 0.5m），车身离墙 0.5m。代价：
+  // 域边不再留 0.6m 跟踪过冲余量，贴边过冲可能触发复位传送——以批量（种子 6-10）"复位次数"
+  // 为判据验收：A/B 实测 0 次且到达率 7/10 → 8/10（见 ISSUE_HISTORY 的域加宽记录）。
+  // A/B 开关：改回 m(0.6) 即旧行为（域边比复位崖内缩 0.6m）。
   const L_MAX = (TRACK_HALF_WIDTH as number)
-    - ((o.carWidth as number) / 2 + (BOUNDS_BUFFER as number)) - (m(0.6) as number);
+    - ((o.carWidth as number) / 2 + (BOUNDS_BUFFER as number)) - (DOMAIN_OVERSHOOT_RESERVE as number);
   const lo = o.laneOffset as number;
 
   // ── 障碍命中点采集（笛卡尔 → 走廊膨胀）──

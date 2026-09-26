@@ -1,7 +1,7 @@
 // ==================== 测试：路径层（SL 空间） ====================
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { solvePathLayer, PATH_HORIZON, PATH_DEVELOP, TIGHT_SPEED, lateralSpeedCap } from '../../algo/plan/paths.js';
+import { solvePathLayer, PATH_HORIZON, PATH_DEVELOP, TIGHT_SPEED, lateralSpeedCap, DOMAIN_OVERSHOOT_RESERVE } from '../../algo/plan/paths.js';
 import { marginFor } from '../../algo/plan/margin.js';
 import { buildFrenetReference } from '../../algo/plan/frenet.js';
 import { CarState, LidarScan } from '../../shared/types.js';
@@ -54,7 +54,7 @@ describe('路径层：候选生成与域约束', () => {
     const r = solve(clearScan());
     assert.ok(r.ranked.length >= 3);
     // 规划域 = TRACK_HALF_WIDTH − (车半宽 + 复位缓冲 BOUNDS_BUFFER) − 0.6m 过冲预留
-    const lMaxU = (TRACK_HALF_WIDTH as number) - ((m(1.0) as number) + (BOUNDS_BUFFER as number)) - (m(0.6) as number);
+    const lMaxU = (TRACK_HALF_WIDTH as number) - ((m(1.0) as number) + (BOUNDS_BUFFER as number)) - (DOMAIN_OVERSHOOT_RESERVE as number);
     for (const p of r.ranked) {
       assert.ok(Math.abs(p.targetL as number) <= lMaxU + 1e-6, `越界 targetL=${p.targetL}（域 ±${lMaxU}）`);
       assert.strictEqual(p.points.length, 41);   // PATH_STEPS + 1
@@ -75,7 +75,16 @@ describe('路径层：碰撞判定与选路', () => {
     const r = solve(blockedScan(100, 0.025));
     assert.strictEqual(r.allBlocked, false);
     assert.strictEqual(r.best.blocked, false);
-    assert.ok(Math.abs((r.best.targetL as number) - LO) > 2 * 4, '应选侧向路径'); // >2m
+    // 障碍在 l=0（道路中心）把瓶颈处切成左右两段自由区，候选 = 段中心（±3.66m）。
+    // 旧的"侧移 >2m"档位断言随候选口径（固定档位 → 间隙中心）失效：段中心距车道中心
+    // 仅 1.78m，但已在障碍膨胀边（l=0 ± 1.65m）之外。要判的是"最优落在自由段内部
+    // （两侧留内缩余量），既非车道中心、也非贴边档"。
+    const bestL = r.best.targetL as number;
+    const seg = r.corridor.pinch!.free.find(sg => bestL >= sg.lmin && bestL <= sg.lmax);
+    assert.ok(seg, `最优应落在瓶颈自由段内，实际 ${bestL / 4}m`);
+    assert.ok(bestL - seg.lmin > (m(0.3) as number) && seg.lmax - bestL > (m(0.3) as number),
+      `最优应为间隙中心（两侧 ≥0.3m 内缩余量），实际 ${bestL / 4}m（自由段 [${seg.lmin / 4}, ${seg.lmax / 4}]m）`);
+    assert.ok(bestL > (LO as number), `应选在障碍右侧的自由段，实际 ${bestL / 4}m`);
     const inLane = r.ranked.find(p => Math.abs((p.targetL as number) - LO) < 1);
     assert.ok(inLane && inLane.blocked, '本车道应被判阻塞');
     // 判阻塞发生在"路径进入命中点 CLEAR(2.5m) 范围内"处：sBlock ≈ 60-130
@@ -203,8 +212,16 @@ describe('路径层：候选覆盖间隙', () => {
     const scan: LidarScan = { angles, distances, rawDistances: [...distances], confidences: new Array(61).fill(1), timestamp: 0 };
     const r = solve(scan);
     assert.strictEqual(r.best.blocked, false);
-    assert.ok(Math.abs((r.best.targetL as number) - (LO - 20)) < 2,
-      `最优应在间隙内（车道中心−5m），实际 ${(r.best.targetL as number) / 4}m`);
+    // 候选口径已改为"瓶颈自由段中心"：左侧自由段 = [走廊左边界 −6.0m, 障碍膨胀边 −1.31m]，
+    // 段中心 ≈ −3.66m（不再是固定档位"车道中心−5m"）。贴边档（lmin+0.3m = −5.7m）距
+    // 复位崖 |l|=6.0 只剩 0.3m 跟踪余量，故断言最优是段中心、而非贴边。
+    const seg = r.corridor.pinch!.free.reduce((a, b) =>
+      Math.abs((a.lmin + a.lmax) / 2 - (LO as number)) <= Math.abs((b.lmin + b.lmax) / 2 - (LO as number)) ? a : b);
+    const mid = (seg.lmin + seg.lmax) / 2;
+    assert.ok(Math.abs((r.best.targetL as number) - mid) < (m(0.05) as number),
+      `最优应为间隙中心 ${mid / 4}m，实际 ${(r.best.targetL as number) / 4}m`);
+    assert.ok(Math.abs((r.best.targetL as number) - (seg.lmin + (m(0.3) as number))) > (m(0.5) as number),
+      '最优不应是贴边档（距复位崖仅 0.3m）');
   });
 });
 

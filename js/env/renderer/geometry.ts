@@ -258,7 +258,7 @@ export function buildFrenetTicksGroup(
   }
 
   // 横向参考线：车道中心 ±1.875m（细）与规划域边 ±domainHalf（与走廊同色系）；
-  // 每条线贴标签（l=+1.9m / l=±5.4m，颜色与线一致）：从 25m 起步每 100m 一处 →
+  // 每条线贴标签（l=+1.9m / l=±6.0m，颜色与线一致）：从 25m 起步每 100m 一处 →
   // 与 s 刻度（每 50m）错开半个站，不会挤在一起；标签 y 略低于 s 标签
   const laneL = [m(1.875) as number, -(m(1.875) as number)];
   for (const ln of frenetLLines(ref, laneL, 0, o.maxS)) {
