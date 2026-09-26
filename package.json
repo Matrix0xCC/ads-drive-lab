@@ -8,9 +8,12 @@
     "build": "tsc",
     "typecheck": "tsc --noEmit",
     "watch": "tsc --watch",
-    "test": "tsc && node --test dist/js/test/",
+    "test": "tsc && node --test dist/js/test/**/*.test.js",
     "sim": "tsc && node dist/js/headless/run.js",
     "serve": "tsc && node dist/js/dev-server.js"
+  },
+  "engines": {
+    "node": ">=18"
   },
   "keywords": [],
   "author": "",

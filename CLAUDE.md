@@ -12,7 +12,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 npm run typecheck   # 仅类型检查
 npm run build       # tsc 编译到 dist/
 npm run watch       # 监听模式
-npm test            # tsc + node --test dist/js/test/
+npm test            # tsc + node --test（dist 下的 .test.js；脚本里用 shell 通配展开文件列表，
+#                     兼容 Node 18~24——Node 24 不再接受目录参数，见路线图 R2）
 
 # headless 仿真（运行 + 归档 + 检测 + 报告）
 npm run sim -- --scenario scenarios/oval-avoid-1.json    # 场景文件
@@ -60,7 +61,8 @@ requestAnimationFrame 主循环 (~60Hz)
 - `js/shared/` — 接口契约（types/interfaces/，含归档记录 schema）、量纲系统（dimensions.ts）、rng、debug
 - `js/ui/` — UI 层（`state.ts` 纯状态机 + `controller.ts` 副作用边界 + sidebar/toolbar/hud/inspector/interactions/replayPanel 面板模块）；`js/replay.ts` — 回放控制器；`js/env/renderer/` — Three.js 渲染
 - `scenarios/` — 场景用例（入库）；新增场景需登记 `scenarios/index.json` 才会出现在浏览器场景下拉；`runs/` — 运行归档（gitignore）
-- `js/test/` — node:test 单元测试（`.test.ts`，编译后运行）
+- `js/test/` — node:test 单元测试（`.test.ts`，编译后运行到 `dist/`）
+- **Node 版本**：`engines` 要求 ≥18，`.nvmrc` 推荐 24（当前开发机）。注意 `dist/` 不清理 → **删/改测试文件后要手动清 dist 里的旧产物**，否则旧测试仍会被 `npm test` 跑到
 
 ### 核心设计约定
 

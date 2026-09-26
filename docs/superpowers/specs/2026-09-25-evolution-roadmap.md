@@ -73,9 +73,13 @@
 - **交付**：一份 A/B 对比表；要么通过门禁，要么按 spec §6 纪律回滚接线并把负结果入库。
 - **风险**：A 单独接线已两次失败（候选丢失 / 执行跟不上）；B 的裕度表偏保守（低速 1.15m）可能把"慢行可过"判成封死 → 到达率下降正是启动 A1（阶段 C）的判据。
 
-#### R2 测试脚本与工具链锁定（S）
+#### R2 测试脚本与工具链锁定（S）—— ✅ 已完成（2026-09-25）
 - **范围**：`npm test` 改为在当前 Node 可用的形式（glob 或 `--test` 无参 + 默认匹配）；`package.json` 加 `engines`（或 `.nvmrc`）；在 `CLAUDE.md` 记录 Node 版本要求。
 - **验收**：全新克隆下 `npm test` 一次通过（除已知红）。
+- **实现**：`npm test` = `tsc && node --test dist/js/test/**/*.test.js`——通配由 shell 展开成显式文件列表，
+  Node 18（只收文件路径）与 24（不再收目录参数）都能跑；`engines.node >= 18` + `.nvmrc`（24）。
+  踩坑记录：Node 24 下 `node --test <目录>` 报 `Cannot find module`；无参 `node --test` 会去跑
+  `js/` 下的 `.ts` 源码（自带类型剥离）并失败。
 
 #### R3 CI 门禁（M）
 - **范围**：CI 跑 `tsc --noEmit` + 单测 + 种子批量，(a) 输出聚合报告，(b) 按门禁阈值退出非零。把当前手工 `for` 循环 + `node -e` 聚合脚本化为一个 headless 子命令（如 `js/headless/batch.ts`）。
