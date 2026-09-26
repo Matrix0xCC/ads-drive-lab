@@ -1,0 +1,13 @@
+{
+  "name": "bj-g4-dujiakan",
+  "via": "https://overpass-api.de/api/interpreter",
+  "fetchedAt": "2026-09-26T05:33:29.154Z",
+  "bbox": [
+    39.8,
+    116.16,
+    39.89,
+    116.26
+  ],
+  "query": "[out:json][timeout:60];(\nway[\"highway\"=\"motorway\"](39.8,116.16,39.89,116.26);\nnode[\"barrier\"=\"toll_booth\"](39.8,116.16,39.89,116.26);\nway[\"barrier\"=\"toll_booth\"](39.8,116.16,39.89,116.26);\n);out tags geom;",
+  "rawSha256": "b34715bd9d354fb1326f442be56dc1d0078656713d76be3a2d07ea76b0aefb09"
+}

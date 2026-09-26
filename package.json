@@ -10,7 +10,8 @@
     "watch": "tsc --watch",
     "test": "tsc && node --test dist/js/test/**/*.test.js",
     "sim": "tsc && node dist/js/headless/run.js",
-    "serve": "tsc && node dist/js/dev-server.js"
+    "serve": "tsc && node dist/js/dev-server.js",
+    "mapgen": "tsc && node dist/js/mapgen/build-map.js"
   },
   "engines": {
     "node": ">=18"
