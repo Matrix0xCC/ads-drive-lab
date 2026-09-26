@@ -1,0 +1,10 @@
+{
+  "name": "bj-g6-junction",
+  "mode": "network",
+  "via": "file:maps/raw/bj-g6-junction.osm.json",
+  "fetchedAt": null,
+  "bbox": null,
+  "query": "(离线复跑)",
+  "rawSource": "maps/raw/bj-g6-junction.osm.json",
+  "rawSha256": "77a4c5a52635f961a24bed7d92af2c1c06cc376f67779694fdc50bb66789ad39"
+}

@@ -1,0 +1,774 @@
+{
+  "version": 0.6,
+  "generator": "Overpass API 0.7.62.11 87bfad18",
+  "osm3s": {
+    "timestamp_osm_base": "2026-09-26T14:21:01Z",
+    "copyright": "The data included in this document is from www.openstreetmap.org. The data is made available under ODbL."
+  },
+  "elements": [
+
+{
+  "type": "way",
+  "id": 26812165,
+  "bounds": {
+    "minlat": 39.9665305,
+    "minlon": 116.3742937,
+    "maxlat": 39.9670289,
+    "maxlon": 116.3743410
+  },
+  "geometry": [
+    { "lat": 39.9665305, "lon": 116.3742937 },
+    { "lat": 39.9670289, "lon": 116.3743410 }
+  ],
+  "tags": {
+    "bridge": "yes",
+    "highway": "motorway",
+    "lanes": "3",
+    "layer": "1",
+    "name": "马甸桥",
+    "oneway": "yes",
+    "ref": "G6;G110"
+  }
+},
+{
+  "type": "way",
+  "id": 26812166,
+  "bounds": {
+    "minlat": 39.9665271,
+    "minlon": 116.3741109,
+    "maxlat": 39.9670270,
+    "maxlon": 116.3741695
+  },
+  "geometry": [
+    { "lat": 39.9670270, "lon": 116.3741695 },
+    { "lat": 39.9665271, "lon": 116.3741109 }
+  ],
+  "tags": {
+    "bridge": "yes",
+    "highway": "motorway",
+    "lanes": "3",
+    "layer": "1",
+    "name": "马甸桥",
+    "oneway": "yes",
+    "ref": "G6;G110"
+  }
+},
+{
+  "type": "way",
+  "id": 26812167,
+  "bounds": {
+    "minlat": 39.9679356,
+    "minlon": 116.3744539,
+    "maxlat": 39.9727209,
+    "maxlon": 116.3749924
+  },
+  "geometry": [
+    { "lat": 39.9679356, "lon": 116.3744539 },
+    { "lat": 39.9681204, "lon": 116.3744747 },
+    { "lat": 39.9727209, "lon": 116.3749924 }
+  ],
+  "tags": {
+    "alt_name": "八达岭高速",
+    "alt_name:en": "Badaling Expressway",
+    "highway": "motorway",
+    "lanes": "3",
+    "name": "京藏高速",
+    "name:en": "Beijing-Lasa Expwy",
+    "oneway": "yes",
+    "ref": "G6;G110",
+    "short_name": "京藏高速"
+  }
+},
+{
+  "type": "way",
+  "id": 27262137,
+  "bounds": {
+    "minlat": 39.9664406,
+    "minlon": 116.3668779,
+    "maxlat": 39.9687076,
+    "maxlon": 116.3747208
+  },
+  "geometry": [
+    { "lat": 39.9664406, "lon": 116.3668779 },
+    { "lat": 39.9665452, "lon": 116.3706299 },
+    { "lat": 39.9665371, "lon": 116.3714704 },
+    { "lat": 39.9665547, "lon": 116.3722527 },
+    { "lat": 39.9665832, "lon": 116.3726550 },
+    { "lat": 39.9666162, "lon": 116.3729245 },
+    { "lat": 39.9666609, "lon": 116.3731405 },
+    { "lat": 39.9667017, "lon": 116.3732919 },
+    { "lat": 39.9667563, "lon": 116.3734609 },
+    { "lat": 39.9667954, "lon": 116.3735494 },
+    { "lat": 39.9668604, "lon": 116.3736881 },
+    { "lat": 39.9670521, "lon": 116.3739458 },
+    { "lat": 39.9672138, "lon": 116.3741317 },
+    { "lat": 39.9674002, "lon": 116.3743080 },
+    { "lat": 39.9676147, "lon": 116.3744416 },
+    { "lat": 39.9677961, "lon": 116.3745225 },
+    { "lat": 39.9680002, "lon": 116.3745879 },
+    { "lat": 39.9681816, "lon": 116.3746424 },
+    { "lat": 39.9687076, "lon": 116.3747208 }
+  ],
+  "tags": {
+    "bridge": "yes",
+    "highway": "motorway_link",
+    "layer": "2",
+    "oneway": "yes"
+  }
+},
+{
+  "type": "way",
+  "id": 121399149,
+  "bounds": {
+    "minlat": 39.9762190,
+    "minlon": 116.3742542,
+    "maxlat": 39.9795686,
+    "maxlon": 116.3751440
+  },
+  "geometry": [
+    { "lat": 39.9762190, "lon": 116.3751440 },
+    { "lat": 39.9765571, "lon": 116.3750813 },
+    { "lat": 39.9768077, "lon": 116.3750273 },
+    { "lat": 39.9795686, "lon": 116.3742542 }
+  ],
+  "tags": {
+    "alt_name": "八达岭高速",
+    "alt_name:en": "Badaling Expressway",
+    "highway": "motorway",
+    "lanes": "3",
+    "name": "京藏高速",
+    "name:en": "Beijing-Lasa Expwy",
+    "oneway": "yes",
+    "ref": "G6;G110",
+    "short_name": "京藏高速"
+  }
+},
+{
+  "type": "way",
+  "id": 121399154,
+  "bounds": {
+    "minlat": 39.9747530,
+    "minlon": 116.3751440,
+    "maxlat": 39.9762190,
+    "maxlon": 116.3752345
+  },
+  "geometry": [
+    { "lat": 39.9747530, "lon": 116.3752189 },
+    { "lat": 39.9749756, "lon": 116.3752288 },
+    { "lat": 39.9752199, "lon": 116.3752345 },
+    { "lat": 39.9755460, "lon": 116.3752285 },
+    { "lat": 39.9759607, "lon": 116.3751761 },
+    { "lat": 39.9762190, "lon": 116.3751440 }
+  ],
+  "tags": {
+    "bridge": "yes",
+    "highway": "motorway",
+    "lanes": "3",
+    "layer": "1",
+    "name": "健德桥",
+    "oneway": "yes",
+    "ref": "G6;G110"
+  }
+},
+{
+  "type": "way",
+  "id": 121399156,
+  "bounds": {
+    "minlat": 39.9747501,
+    "minlon": 116.3749729,
+    "maxlat": 39.9762056,
+    "maxlon": 116.3750712
+  },
+  "geometry": [
+    { "lat": 39.9762056, "lon": 116.3749729 },
+    { "lat": 39.9759464, "lon": 116.3750126 },
+    { "lat": 39.9755923, "lon": 116.3750504 },
+    { "lat": 39.9752205, "lon": 116.3750620 },
+    { "lat": 39.9749873, "lon": 116.3750712 },
+    { "lat": 39.9747501, "lon": 116.3750600 }
+  ],
+  "tags": {
+    "bridge": "yes",
+    "highway": "motorway",
+    "lanes": "3",
+    "layer": "1",
+    "name": "健德桥",
+    "oneway": "yes",
+    "ref": "G6;G110"
+  }
+},
+{
+  "type": "way",
+  "id": 121399158,
+  "bounds": {
+    "minlat": 39.9712855,
+    "minlon": 116.3746480,
+    "maxlat": 39.9747501,
+    "maxlon": 116.3750600
+  },
+  "geometry": [
+    { "lat": 39.9747501, "lon": 116.3750600 },
+    { "lat": 39.9742418, "lon": 116.3750297 },
+    { "lat": 39.9727383, "lon": 116.3748318 },
+    { "lat": 39.9712855, "lon": 116.3746480 }
+  ],
+  "tags": {
+    "alt_name": "八达岭高速",
+    "alt_name:en": "Badaling Expressway",
+    "highway": "motorway",
+    "lanes": "3",
+    "name": "京藏高速",
+    "name:en": "Beijing-Lasa Expwy",
+    "oneway": "yes",
+    "ref": "G6;G110",
+    "short_name": "京藏高速"
+  }
+},
+{
+  "type": "way",
+  "id": 121399253,
+  "bounds": {
+    "minlat": 39.9844485,
+    "minlon": 116.3730763,
+    "maxlat": 39.9860700,
+    "maxlon": 116.3751607
+  },
+  "geometry": [
+    { "lat": 39.9844485, "lon": 116.3730763 },
+    { "lat": 39.9847015, "lon": 116.3730916 },
+    { "lat": 39.9849175, "lon": 116.3731482 },
+    { "lat": 39.9850948, "lon": 116.3732264 },
+    { "lat": 39.9852655, "lon": 116.3733241 },
+    { "lat": 39.9854343, "lon": 116.3734834 },
+    { "lat": 39.9855919, "lon": 116.3736519 },
+    { "lat": 39.9857065, "lon": 116.3738196 },
+    { "lat": 39.9858083, "lon": 116.3740180 },
+    { "lat": 39.9859173, "lon": 116.3743343 },
+    { "lat": 39.9859790, "lon": 116.3746113 },
+    { "lat": 39.9860700, "lon": 116.3751607 }
+  ],
+  "tags": {
+    "bridge": "yes",
+    "highway": "motorway_link",
+    "layer": "1",
+    "oneway": "yes"
+  }
+},
+{
+  "type": "way",
+  "id": 121399266,
+  "bounds": {
+    "minlat": 39.9714944,
+    "minlon": 116.3750033,
+    "maxlat": 39.9724783,
+    "maxlon": 116.3752297
+  },
+  "geometry": [
+    { "lat": 39.9714944, "lon": 116.3750033 },
+    { "lat": 39.9724783, "lon": 116.3752297 }
+  ],
+  "tags": {
+    "highway": "motorway_link",
+    "oneway": "yes"
+  }
+},
+{
+  "type": "way",
+  "id": 121399269,
+  "bounds": {
+    "minlat": 39.9827269,
+    "minlon": 116.3729047,
+    "maxlat": 39.9836227,
+    "maxlon": 116.3729840
+  },
+  "geometry": [
+    { "lat": 39.9836227, "lon": 116.3729047 },
+    { "lat": 39.9827269, "lon": 116.3729840 }
+  ],
+  "tags": {
+    "highway": "motorway_link",
+    "oneway": "yes"
+  }
+},
+{
+  "type": "way",
+  "id": 121399272,
+  "bounds": {
+    "minlat": 39.9843084,
+    "minlon": 116.3724565,
+    "maxlat": 39.9845893,
+    "maxlon": 116.3726884
+  },
+  "geometry": [
+    { "lat": 39.9845893, "lon": 116.3724565 },
+    { "lat": 39.9843084, "lon": 116.3726884 }
+  ],
+  "tags": {
+    "highway": "motorway_link",
+    "oneway": "yes"
+  }
+},
+{
+  "type": "way",
+  "id": 121399288,
+  "bounds": {
+    "minlat": 39.9686594,
+    "minlon": 116.3742194,
+    "maxlat": 39.9693309,
+    "maxlon": 116.3744388
+  },
+  "geometry": [
+    { "lat": 39.9693309, "lon": 116.3744388 },
+    { "lat": 39.9686594, "lon": 116.3742194 }
+  ],
+  "tags": {
+    "highway": "motorway_link",
+    "oneway": "yes"
+  }
+},
+{
+  "type": "way",
+  "id": 121399304,
+  "bounds": {
+    "minlat": 39.9839116,
+    "minlon": 116.3727721,
+    "maxlat": 39.9854311,
+    "maxlon": 116.3730037
+  },
+  "geometry": [
+    { "lat": 39.9839116, "lon": 116.3730037 },
+    { "lat": 39.9854311, "lon": 116.3727721 }
+  ],
+  "tags": {
+    "highway": "motorway_link",
+    "oneway": "yes"
+  }
+},
+{
+  "type": "way",
+  "id": 121399305,
+  "bounds": {
+    "minlat": 39.9810874,
+    "minlon": 116.3737394,
+    "maxlat": 39.9814440,
+    "maxlon": 116.3739763
+  },
+  "geometry": [
+    { "lat": 39.9810874, "lon": 116.3739763 },
+    { "lat": 39.9814440, "lon": 116.3737394 }
+  ],
+  "tags": {
+    "highway": "motorway_link",
+    "oneway": "yes"
+  }
+},
+{
+  "type": "way",
+  "id": 121399315,
+  "bounds": {
+    "minlat": 39.9712855,
+    "minlon": 116.3745382,
+    "maxlat": 39.9717475,
+    "maxlon": 116.3746480
+  },
+  "geometry": [
+    { "lat": 39.9717475, "lon": 116.3745382 },
+    { "lat": 39.9712855, "lon": 116.3746480 }
+  ],
+  "tags": {
+    "highway": "motorway_link",
+    "oneway": "yes"
+  }
+},
+{
+  "type": "way",
+  "id": 121399333,
+  "bounds": {
+    "minlat": 39.9795686,
+    "minlon": 116.3742542,
+    "maxlat": 39.9800392,
+    "maxlon": 116.3743096
+  },
+  "geometry": [
+    { "lat": 39.9795686, "lon": 116.3742542 },
+    { "lat": 39.9800392, "lon": 116.3743096 }
+  ],
+  "tags": {
+    "highway": "motorway_link",
+    "oneway": "yes"
+  }
+},
+{
+  "type": "way",
+  "id": 121399396,
+  "bounds": {
+    "minlat": 39.9714944,
+    "minlon": 116.3749924,
+    "maxlat": 39.9727209,
+    "maxlon": 116.3750033
+  },
+  "geometry": [
+    { "lat": 39.9714944, "lon": 116.3750033 },
+    { "lat": 39.9719033, "lon": 116.3750007 },
+    { "lat": 39.9727209, "lon": 116.3749924 }
+  ],
+  "tags": {
+    "highway": "motorway_link",
+    "oneway": "yes"
+  }
+},
+{
+  "type": "way",
+  "id": 121399432,
+  "bounds": {
+    "minlat": 39.9822150,
+    "minlon": 116.3730763,
+    "maxlat": 39.9844485,
+    "maxlon": 116.3735349
+  },
+  "geometry": [
+    { "lat": 39.9822150, "lon": 116.3735349 },
+    { "lat": 39.9828574, "lon": 116.3734397 },
+    { "lat": 39.9831051, "lon": 116.3733751 },
+    { "lat": 39.9838810, "lon": 116.3731571 },
+    { "lat": 39.9840717, "lon": 116.3731103 },
+    { "lat": 39.9842695, "lon": 116.3730784 },
+    { "lat": 39.9844485, "lon": 116.3730763 }
+  ],
+  "tags": {
+    "highway": "motorway_link",
+    "oneway": "yes"
+  }
+},
+{
+  "type": "way",
+  "id": 139378007,
+  "bounds": {
+    "minlat": 39.9671027,
+    "minlon": 116.3744532,
+    "maxlat": 39.9679356,
+    "maxlon": 116.3744539
+  },
+  "geometry": [
+    { "lat": 39.9671027, "lon": 116.3744532 },
+    { "lat": 39.9679356, "lon": 116.3744539 }
+  ],
+  "tags": {
+    "highway": "motorway_link",
+    "oneway": "yes"
+  }
+},
+{
+  "type": "way",
+  "id": 219661650,
+  "bounds": {
+    "minlat": 39.9681204,
+    "minlon": 116.3744747,
+    "maxlat": 39.9687268,
+    "maxlon": 116.3748338
+  },
+  "geometry": [
+    { "lat": 39.9681204, "lon": 116.3744747 },
+    { "lat": 39.9687268, "lon": 116.3748338 }
+  ],
+  "tags": {
+    "highway": "motorway_link",
+    "oneway": "yes"
+  }
+},
+{
+  "type": "way",
+  "id": 242787709,
+  "bounds": {
+    "minlat": 39.9762056,
+    "minlon": 116.3729047,
+    "maxlat": 39.9836227,
+    "maxlon": 116.3749729
+  },
+  "geometry": [
+    { "lat": 39.9836227, "lon": 116.3729047 },
+    { "lat": 39.9794845, "lon": 116.3741198 },
+    { "lat": 39.9767809, "lon": 116.3748606 },
+    { "lat": 39.9765364, "lon": 116.3749102 },
+    { "lat": 39.9762056, "lon": 116.3749729 }
+  ],
+  "tags": {
+    "alt_name": "八达岭高速",
+    "alt_name:en": "Badaling Expressway",
+    "highway": "motorway",
+    "lanes": "3",
+    "name": "京藏高速",
+    "name:en": "Beijing-Lasa Expwy",
+    "oneway": "yes",
+    "ref": "G6;G110",
+    "short_name": "京藏高速"
+  }
+},
+{
+  "type": "way",
+  "id": 739539780,
+  "bounds": {
+    "minlat": 39.9836227,
+    "minlon": 116.3710477,
+    "maxlat": 39.9899503,
+    "maxlon": 116.3729047
+  },
+  "geometry": [
+    { "lat": 39.9899503, "lon": 116.3710477 },
+    { "lat": 39.9894690, "lon": 116.3711969 },
+    { "lat": 39.9865590, "lon": 116.3720527 },
+    { "lat": 39.9843084, "lon": 116.3726884 },
+    { "lat": 39.9836227, "lon": 116.3729047 }
+  ],
+  "tags": {
+    "alt_name": "八达岭高速",
+    "alt_name:en": "Badaling Expressway",
+    "highway": "motorway",
+    "lanes": "3",
+    "name": "京藏高速",
+    "name:en": "Beijing-Lasa Expwy",
+    "oneway": "yes",
+    "ref": "G6;G110",
+    "short_name": "京藏高速"
+  }
+},
+{
+  "type": "way",
+  "id": 836784980,
+  "bounds": {
+    "minlat": 39.9670270,
+    "minlon": 116.3741695,
+    "maxlat": 39.9693309,
+    "maxlon": 116.3744388
+  },
+  "geometry": [
+    { "lat": 39.9693309, "lon": 116.3744388 },
+    { "lat": 39.9670270, "lon": 116.3741695 }
+  ],
+  "tags": {
+    "alt_name": "八达岭高速",
+    "alt_name:en": "Badaling Expressway",
+    "highway": "motorway",
+    "lanes": "3",
+    "name": "京藏高速",
+    "name:en": "Beijing-Lasa Expwy",
+    "oneway": "yes",
+    "ref": "G6;G110",
+    "short_name": "京藏高速"
+  }
+},
+{
+  "type": "way",
+  "id": 1066708132,
+  "bounds": {
+    "minlat": 39.9693309,
+    "minlon": 116.3744388,
+    "maxlat": 39.9712855,
+    "maxlon": 116.3746480
+  },
+  "geometry": [
+    { "lat": 39.9712855, "lon": 116.3746480 },
+    { "lat": 39.9693309, "lon": 116.3744388 }
+  ],
+  "tags": {
+    "alt_name": "八达岭高速",
+    "alt_name:en": "Badaling Expressway",
+    "highway": "motorway",
+    "lanes": "3",
+    "name": "京藏高速",
+    "name:en": "Beijing-Lasa Expwy",
+    "oneway": "yes",
+    "ref": "G6;G110",
+    "short_name": "京藏高速"
+  }
+},
+{
+  "type": "way",
+  "id": 1094958680,
+  "bounds": {
+    "minlat": 39.9795686,
+    "minlon": 116.3737394,
+    "maxlat": 39.9814440,
+    "maxlon": 116.3742542
+  },
+  "geometry": [
+    { "lat": 39.9795686, "lon": 116.3742542 },
+    { "lat": 39.9814440, "lon": 116.3737394 }
+  ],
+  "tags": {
+    "alt_name": "八达岭高速",
+    "alt_name:en": "Badaling Expressway",
+    "highway": "motorway",
+    "lanes": "3",
+    "name": "京藏高速",
+    "name:en": "Beijing-Lasa Expwy",
+    "oneway": "yes",
+    "ref": "G6;G110",
+    "short_name": "京藏高速"
+  }
+},
+{
+  "type": "way",
+  "id": 1107893547,
+  "bounds": {
+    "minlat": 39.9814440,
+    "minlon": 116.3730037,
+    "maxlat": 39.9839116,
+    "maxlon": 116.3737394
+  },
+  "geometry": [
+    { "lat": 39.9814440, "lon": 116.3737394 },
+    { "lat": 39.9822150, "lon": 116.3735349 },
+    { "lat": 39.9839116, "lon": 116.3730037 }
+  ],
+  "tags": {
+    "alt_name": "八达岭高速",
+    "alt_name:en": "Badaling Expressway",
+    "highway": "motorway",
+    "lanes": "3",
+    "name": "京藏高速",
+    "name:en": "Beijing-Lasa Expwy",
+    "oneway": "yes",
+    "ref": "G6;G110",
+    "short_name": "京藏高速"
+  }
+},
+{
+  "type": "way",
+  "id": 1233785034,
+  "bounds": {
+    "minlat": 39.9839116,
+    "minlon": 116.3717854,
+    "maxlat": 39.9880917,
+    "maxlon": 116.3730037
+  },
+  "geometry": [
+    { "lat": 39.9839116, "lon": 116.3730037 },
+    { "lat": 39.9880917, "lon": 116.3717854 }
+  ],
+  "tags": {
+    "alt_name": "八达岭高速",
+    "alt_name:en": "Badaling Expressway",
+    "highway": "motorway",
+    "lanes": "3",
+    "name": "京藏高速",
+    "name:en": "Beijing-Lasa Expwy",
+    "oneway": "yes",
+    "ref": "G6;G110",
+    "short_name": "京藏高速"
+  }
+},
+{
+  "type": "way",
+  "id": 1233785036,
+  "bounds": {
+    "minlat": 39.9696068,
+    "minlon": 116.3748296,
+    "maxlat": 39.9714944,
+    "maxlon": 116.3750033
+  },
+  "geometry": [
+    { "lat": 39.9696068, "lon": 116.3748296 },
+    { "lat": 39.9714944, "lon": 116.3750033 }
+  ],
+  "tags": {
+    "highway": "motorway_link",
+    "oneway": "yes"
+  }
+},
+{
+  "type": "way",
+  "id": 1233785039,
+  "bounds": {
+    "minlat": 39.9727209,
+    "minlon": 116.3749924,
+    "maxlat": 39.9747530,
+    "maxlon": 116.3752189
+  },
+  "geometry": [
+    { "lat": 39.9727209, "lon": 116.3749924 },
+    { "lat": 39.9742339, "lon": 116.3751774 },
+    { "lat": 39.9747530, "lon": 116.3752189 }
+  ],
+  "tags": {
+    "alt_name": "八达岭高速",
+    "alt_name:en": "Badaling Expressway",
+    "highway": "motorway",
+    "lanes": "3",
+    "name": "京藏高速",
+    "name:en": "Beijing-Lasa Expwy",
+    "oneway": "yes",
+    "ref": "G6;G110",
+    "short_name": "京藏高速"
+  }
+},
+{
+  "type": "way",
+  "id": 1245831396,
+  "bounds": {
+    "minlat": 39.9670289,
+    "minlon": 116.3743410,
+    "maxlat": 39.9679356,
+    "maxlon": 116.3744539
+  },
+  "geometry": [
+    { "lat": 39.9670289, "lon": 116.3743410 },
+    { "lat": 39.9679356, "lon": 116.3744539 }
+  ],
+  "tags": {
+    "alt_name": "八达岭高速",
+    "alt_name:en": "Badaling Expressway",
+    "highway": "motorway",
+    "lanes": "3",
+    "name": "京藏高速",
+    "name:en": "Beijing-Lasa Expwy",
+    "oneway": "yes",
+    "ref": "G6;G110",
+    "short_name": "京藏高速"
+  }
+},
+{
+  "type": "way",
+  "id": 1289021219,
+  "bounds": {
+    "minlat": 39.9662953,
+    "minlon": 116.3611327,
+    "maxlat": 39.9664406,
+    "maxlon": 116.3668779
+  },
+  "geometry": [
+    { "lat": 39.9663493, "lon": 116.3611327 },
+    { "lat": 39.9662953, "lon": 116.3616657 },
+    { "lat": 39.9663639, "lon": 116.3641262 },
+    { "lat": 39.9664406, "lon": 116.3668779 }
+  ],
+  "tags": {
+    "bridge": "yes",
+    "highway": "motorway_link",
+    "layer": "1",
+    "oneway": "yes"
+  }
+},
+{
+  "type": "way",
+  "id": 1346992346,
+  "bounds": {
+    "minlat": 39.9687076,
+    "minlon": 116.3747208,
+    "maxlat": 39.9696068,
+    "maxlon": 116.3748296
+  },
+  "geometry": [
+    { "lat": 39.9687076, "lon": 116.3747208 },
+    { "lat": 39.9696068, "lon": 116.3748296 }
+  ],
+  "tags": {
+    "bridge": "yes",
+    "highway": "motorway_link",
+    "layer": "2",
+    "oneway": "yes"
+  }
+}
+
+  ]
+}

@@ -57,6 +57,74 @@ export function buildRoadGraph(centerPoints: Point2D[], closed = true): RoadGrap
   return { adjacency, nodeCount };
 }
 
+/**
+ * 由**显式边表**建路网（OSM 路网地图用）：与 `buildRoadGraph` 的"链式"不同，
+ * 这里每条边独立给出 `from/to/lengthM`，支持路口、匝道、单向。
+ *
+ * @param edges oneway=true 只连 from→to；否则双向各一条边（edge 权 = 边长取整）
+ */
+export function buildGraphFromEdges(
+  nodeCount: number,
+  edges: { from: number; to: number; chain?: number; lengthM?: number; oneway?: boolean }[],
+  chains?: Point2D[][],
+): RoadGraph {
+  /** 边长缺省时从链几何现算（地图文件通常带 lengthM；这里是兜底） */
+  const lengthOf = (e: { chain?: number; lengthM?: number }): number => {
+    if (typeof e.lengthM === 'number') return e.lengthM;
+    const ch = e.chain !== undefined ? chains?.[e.chain] : undefined;
+    if (!ch) return 1;
+    let acc = 0;
+    for (let i = 1; i < ch.length; i++) {
+      acc += Math.hypot((ch[i].x as number) - (ch[i - 1].x as number), (ch[i].y as number) - (ch[i - 1].y as number));
+    }
+    return acc;
+  };
+  const adjacency: [number, number][][] = Array.from({ length: nodeCount }, () => []);
+  for (const e of edges) {
+    if (e.from === e.to || e.from < 0 || e.to < 0 || e.from >= nodeCount || e.to >= nodeCount) continue;
+    const cost = Math.max(1, Math.round(lengthOf(e)));
+    adjacency[e.from].push([e.to, cost]);
+    if (!e.oneway) adjacency[e.to].push([e.from, cost]);
+  }
+  return { adjacency, nodeCount };
+}
+
+/**
+ * 路网路线装配：Dijkstra 出**节点序列** → 逐段找边 → 取该边对应的链几何（必要时反向）拼接。
+ *
+ * 【为什么路线要落在链上】规划器/感知用的是"路线折线"（开环 Frenet 参考线）。
+ * 路网地图里"链"= 一段可行驶几何，边 = (节点对 → 链) 的映射；把节点序列翻译成折线即可。
+ * 平行边（同一节点对有多条链）取第一条（确定性：按 edges 数组顺序）。
+ *
+ * @returns waypoints + 途经链序号（供检测器/调试看"有没有真的经过匝道"）；不可达返回 null
+ */
+export function buildNetworkRoute(
+  graph: RoadGraph,
+  edges: { from: number; to: number; chain: number }[],
+  chains: Point2D[][],
+  fromNode: number, toNode: number,
+): { waypoints: Point2D[]; chainSeq: number[] } | null {
+  const nodePath = findRoute(graph, fromNode, toNode);
+  if (!nodePath || nodePath.length < 2) return null;
+  const waypoints: Point2D[] = [];
+  const chainSeq: number[] = [];
+  for (let i = 0; i + 1 < nodePath.length; i++) {
+    const a = nodePath[i], b = nodePath[i + 1];
+    const edge = edges.find(e => (e.from === a && e.to === b) || (e.from === b && e.to === a));
+    if (!edge) return null;
+    const geom = chains[edge.chain];
+    if (!geom || geom.length < 2) return null;
+    const pts = edge.from === a ? geom : [...geom].reverse();   // 从 a 走向 b
+    for (const p of pts) {
+      const last = waypoints[waypoints.length - 1];
+      if (last && last.x === p.x && last.y === p.y) continue;   // 接缝去重
+      waypoints.push({ x: p.x, y: p.y });
+    }
+    chainSeq.push(edge.chain);
+  }
+  return waypoints.length >= 2 ? { waypoints, chainSeq } : null;
+}
+
 // ═══════════════════════════════════════════════════
 // Dijkstra 最短路径
 // ═══════════════════════════════════════════════════
