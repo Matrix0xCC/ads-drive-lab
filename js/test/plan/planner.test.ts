@@ -248,9 +248,9 @@ describe('规划器：收敛迭代（path-speed iteration）', () => {
   it('静止车（v=0）→ 几何评估速度不低于慢行档（破"v=0 裕度最大"自锁）', () => {
     const car = makeCar(100, 0, 0, 0);
     plan(makeSnapshot(car), makeBlockedLidar([0], 100, 0.025));
-    assert.ok((debug.planning!.vAssume as number) >= (TIGHT_SPEED as number),
+    assert.ok((debug.planning!.vAssume ?? -1) >= (TIGHT_SPEED as number),
       `几何评估速度应 ≥ 慢行档，实际 ${(debug.planning!.vAssume as number) / 4}m/s`);
-    assert.ok(debug.planning!.rounds >= 1, '应记录迭代轮数');
+    assert.ok((debug.planning!.rounds ?? 0) >= 1, '应记录迭代轮数');
   });
 
   it('高速 + 大横移需求 → 速度目标被横向机动上限压低（路径几何反馈成速度）', () => {
@@ -278,14 +278,14 @@ describe('规划器：收敛迭代（path-speed iteration）', () => {
     plan(makeSnapshot(makeCar(100, 0, 0, 120)), scan);
     const b = { r: debug.planning!.rounds, t: debug.planning!.bestTargetL, u: debug.planning!.speedTarget };
     assert.deepStrictEqual(a, b);
-    assert.ok(a.r >= 1 && a.r <= 3, `轮数应 ∈ [1,3]，实际 ${a.r}`);
+    assert.ok((a.r ?? 0) >= 1 && (a.r ?? 0) <= 3, `轮数应 ∈ [1,3]，实际 ${a.r}`);
   });
 
   it('迭代计数与修正标记：求值次数 ≥2；横向上限改变假设 → revised=true', () => {
     const snap = makeSnapshot(makeCar(100, 0, 0, 140));            // 35 m/s + 大横移需求
     const scan = makeBlockedLidar([0], 200, 0.025);
     plan(snap, scan);
-    assert.ok(debug.planning!.rounds >= 2, `求值次数应 ≥2（确认轮），实际 ${debug.planning!.rounds}`);
+    assert.ok((debug.planning!.rounds ?? 0) >= 2, `求值次数应 ≥2（确认轮），实际 ${debug.planning!.rounds}`);
     assert.strictEqual(debug.planning!.revised, true, '横向上限压低了速度假设 → 应标"需修正"');
     const snap2 = makeSnapshot(makeCar(100, m(1.875) as number, 0, 120));   // 畅通、已在车道中心
     plan(snap2, makeClearLidar());

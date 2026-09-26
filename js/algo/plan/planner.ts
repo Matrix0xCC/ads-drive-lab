@@ -20,11 +20,12 @@ import {
   Trajectory, TrajectoryPoint, createTrajectory,
 } from '../../shared/types.js';
 import {
-  Px, m, mps, mps2, pxps, secs, dimless, perpx,
+  Px, m, mps, mps2, px, pxps, secs, dimless, perpx,
 } from '../../shared/dimensions.js';
 import { buildFrenetReference, cartesianToFrenet, frenetToCartesian } from './frenet.js';
 import { PlanState, nextState } from './states.js';
 import { debug } from '../../shared/debug.js';
+import type { PlanningViz } from '../../shared/debug.js';
 import { solvePathLayer, lateralSpeedCap, PATH_STEPS, PATH_HORIZON, TIGHT_SPEED } from './paths.js';
 import type { PathLayerResult } from './paths.js';
 import { solveSpeedLayer, STObstacle } from './speed.js';
@@ -42,6 +43,23 @@ const MAX_ROUNDS = 3;
 const CONV_TARGET_L = m(0.2) as number;
 /** 速度上限收敛阈（0.5m/s） */
 const CONV_SPEED = mps(0.5) as number;
+
+/** 回放可视化：用归档的扫描 + 车位姿重建走廊载荷（不跑规划/速度层，仅供渲染）。
+ *  回放不跑规划器，debug.planning.viz 是实时残留 → 回放模式下走廊可视化走这里。
+ *  参考线由调用方缓存传入（ref 按路线/赛道建一次即可）。 */
+export function corridorVizForReplay(
+  ref: FrenetReference, lidarScan: LidarScan, carX: number, carY: number, sEnd?: number,
+): PlanningViz {
+  const fl = cartesianToFrenet(px(carX), px(carY), ref);
+  const pathLayer = solvePathLayer({
+    ref, l0: fl.l, dl0: dimless(0), s0: fl.s, v0: 0,
+    carX, carY, lidarScan,
+    carWidth: m(2.0), collisionRadius: px(Math.hypot(m(2.0) as number, m(4.5) as number) / 2),
+    laneOffset: laneOffset, prevTargetL: null,
+    sEnd,
+  });
+  return buildVizPayload(pathLayer, ref, lidarScan, carX, carY);
+}
 
 /** 走廊可视化载荷：带子（2× 采样，边界更贴曲率）+ 观测覆盖 + 瓶颈线 + 候选（引用路径层对象）。
  *  观测覆盖用 **rawDistances**（真实命中含边界）：边界命中被 HD Map 背景减除从规划输入里剔除了，

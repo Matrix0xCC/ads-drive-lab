@@ -12,6 +12,10 @@
 
 import * as THREE from 'three';
 import { updateScene, resetSceneCache } from './env/renderer.js';
+import { corridorVizForReplay } from './algo/plan/planner.js';
+import { buildFrenetReference } from './algo/plan/frenet.js';
+import type { PlanningViz } from './shared/debug.js';
+import { debug } from './shared/debug.js';
 import { FrameRecord, RunMeta, WorldFile, Issue } from './shared/types.js';
 import { RunBundle } from './headless/bundle.js';
 import { px, rad } from './shared/dimensions.js';
@@ -36,6 +40,11 @@ export class ReplayController {
 
   private _meta: RunMeta | null = null;
   private _world: WorldFile | null = null;
+  /** 视觉开关（由 UI 状态投影写入；回放也支持走廊/刻度，走廊用归档扫描重算） */
+  showCorridor = false;
+  showFrenetTicks = true;
+  showLidar = true;
+  private _vizRef: ReturnType<typeof buildFrenetReference> | null = null;
   private _issues: Issue[] = [];
   private _stepIndex: Map<number, FrameRecord[]> = new Map();
   private _lastRenderedStep = -1;
@@ -85,6 +94,11 @@ export class ReplayController {
   private applyBundle(src: { meta: RunMeta; world: WorldFile; issues: Issue[]; frames: FrameRecord[] }): void {
     this._meta = src.meta;
     this._world = src.world;
+    const pts = (arr: [number, number][]) => arr.map(([x, y]) => ({ x: px(x), y: px(y) }));
+    this._vizRef = src.world.route && src.world.route.waypoints.length >= 2
+      ? buildFrenetReference(pts(src.world.route.waypoints), false)
+      : buildFrenetReference(pts(src.world.track.centerPoints), true);
+    this._lastRenderedStep = -1;      // 强制重绘（开关切换后立即生效）
     this._issues = src.issues;
 
     this._stepIndex = new Map();
@@ -150,6 +164,9 @@ export class ReplayController {
     return null;
   }
 
+  /** 请求重绘当前帧（暂停中切换开关时也要立即生效） */
+  requestRedraw(): void { this._lastRenderedStep = -1; }
+
   private _render(): void {
     const world = this._world;
     if (!world || !this._meta) return;
@@ -208,9 +225,58 @@ export class ReplayController {
       ? { x: px(gpsRec.x), y: px(gpsRec.y), uncertainty: px(5), timestamp: 0 }
       : null;
 
+    // 走廊可视化在回放里没有现成数据（回放不跑规划器）→ 用该帧归档的扫描 + 车位姿重算
+    let corridorViz: PlanningViz | null = null;
+    if (this.showCorridor && lidarScan && this._vizRef) {
+      corridorViz = corridorVizForReplay(
+        this._vizRef, lidarScan, stepRec.car.x, stepRec.car.y,
+        world.route ? px(world.route.length) : undefined,
+      );
+    }
+
+    // 面板对齐：回放没有实时规划数据，调试面板原来显示的是"实时残留"。**每渲染帧**都写回
+    // debug.planning（不能只在开走廊时写——那样面板就跟着走廊开关才刷新）。
+    debug.planning = replayPlanningDebug(planRec, corridorViz, world.route?.length ?? null);
+
     updateScene(
-      this.scene, snapshot as any, lidarScan,
+      this.scene, snapshot as any, this.showLidar ? lidarScan : null,
       planRec?.state ?? 'NONE', this.lidarLines, trajectory, route as any, gps as any,
+      corridorViz, this.showFrenetTicks,
     );
   }
+}
+
+
+/**
+ * 回放帧 → 调试面板数据（纯函数，便于单测）。
+ *   - 基础字段取归档 plan 记录（状态/frenet/速度目标/轨迹类型）；
+ *   - 候选列表：**开了走廊重算**时用重算结果（编号与画布 L1..Ln 同序）；
+ *     否则退回归档记录的候选（collision 标记即 blocked）；
+ *   - 实时专有字段（迭代轮数/耗时/v假设/紧间隙）不填 → 面板自动隐藏该行。
+ */
+export function replayPlanningDebug(
+  planRec: any, corridorViz: PlanningViz | null, routeLenU: number | null,
+): NonNullable<typeof debug.planning> {
+  const archCands: any[] = planRec?.candidates ?? [];
+  const archBest = planRec?.best;
+  const vizCands = corridorViz?.candidates ?? null;
+  const paths = vizCands
+    ? vizCands.map(c => ({ targetL: c.targetL, blocked: c.blocked, cost: c.cost }))
+    : archCands.map(c => ({ targetL: c.targetL, blocked: !!c.collision, cost: c.cost }));
+  const s = (planRec?.frenet?.s ?? 0) as number;
+  return {
+    source: 'replay',
+    state: planRec?.state ?? 'NONE',
+    frenetS: s, frenetL: planRec?.frenet?.l ?? 0,
+    dl_ds: planRec?.frenet?.dl_ds ?? 0, headingDiff: planRec?.frenet?.headingDiff ?? 0,
+    paths,
+    bestCost: vizCands
+      ? (vizCands.find(c => c.targetL === corridorViz!.bestTargetL)?.cost ?? 0)
+      : (archBest?.cost ?? 0),
+    bestTargetL: vizCands ? corridorViz!.bestTargetL : (archBest?.targetL ?? 0),
+    speedTarget: archBest?.targetV ?? 0,
+    speedMode: planRec?.trajectory?.type ?? '—',
+    remainingDist: routeLenU === null ? 0 : Math.max(0, routeLenU - s),
+    viz: corridorViz,
+  };
 }

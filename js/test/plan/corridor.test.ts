@@ -6,7 +6,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { buildCorridor, deriveTargets, firstExit, corridorBandPolygons, corridorPinchSegments, corridorBandObserved, corridorCrossSectionSegments, bandBoundary, type Coverage } from '../../algo/plan/corridor.js';
+import { buildCorridor, deriveTargets, firstExit, corridorBandPolygons, corridorPinchSegments, corridorBandObserved, corridorCrossSectionSegments, bandBoundary, candidateLabels, type Coverage } from '../../algo/plan/corridor.js';
 import { buildFrenetReference } from '../../algo/plan/frenet.js';
 import { px, m } from '../../shared/dimensions.js';
 
@@ -352,5 +352,18 @@ describe('corridor: 带子集合的外边界（未观测区描边用）', () => 
       assert.strictEqual(seg.length, 2);
       assert.ok(!(Math.abs(seg[0].x - 3) < 1e-6 && Math.abs(seg[1].x - 3) < 1e-6), '共享边不应出现');
     }
+  });
+});
+
+describe('corridor: 候选编号标签（暂停时画在候选线上）', () => {
+  it('编号 L1..Ln 与候选同序；位置取发展段末端点', () => {
+    const cands = [
+      { targetL: 7.5, develop: 48, points: [{ s: 0, x: 0, y: 0 }, { s: 40, x: 10, y: 1 }, { s: 80, x: 20, y: 2 }] },
+      { targetL: -21, develop: 12, points: [{ s: 0, x: 0, y: 0 }, { s: 8, x: 2, y: -1 }, { s: 16, x: 4, y: -2 }] },
+    ];
+    const labels = candidateLabels({ candidates: cands });
+    assert.deepStrictEqual(labels.map(l => l.text), ['L1', 'L2']);
+    assert.deepStrictEqual([labels[0].x, labels[0].y], [10, 1], 'L1 取 s≤48 的最后一点');
+    assert.deepStrictEqual([labels[1].x, labels[1].y], [2, -1], 'L2 取 s≤12 的最后一点');
   });
 });

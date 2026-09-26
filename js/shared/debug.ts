@@ -35,7 +35,7 @@ export interface PlanningViz {
   /** 候选路径（targetL/develop/阻塞标记/首次越界弧长/路径点——路径点带 s 供画发展段与截断） */
   candidates: {
     targetL: number; develop: number; blocked: boolean; blockedHard: boolean;
-    sBlock: number; sBlockHard: number;
+    sBlock: number; sBlockHard: number; cost: number;
     points: { s: number; x: number; y: number }[];
   }[];
   /** 最优候选目标横向偏移（渲染层高亮用） */
@@ -60,16 +60,18 @@ export interface PlanningDebug {
   speedTarget: number;
   /** 速度层模式：cruise | stop | emergency */
   speedMode: string;
-  /** 紧间隙迟滞状态（tight.ts）：NONE | CREEPING | SEALED */
-  tight: string;
-  /** 路径-速度收敛迭代的路径层求值次数（2..3；spec 2026-09-25 §5） */
-  rounds: number;
-  /** 种子假设不自洽（速度上限 ≠ 假设）→ 本帧确实需要迭代修正 */
-  revised: boolean;
-  /** 本帧 plan() 总耗时（ms；只记录，不参与决策） */
-  planMs: number;
-  /** 迭代末轮的速度假设（仿真单位/s；几何评估速度，供 inspect 面板与不动点断言） */
-  vAssume: number;
+  /** 紧间隙迟滞状态（tight.ts）：NONE | CREEPING | SEALED（回放无此数据） */
+  tight?: string;
+  /** 数据来源：'replay' = 回放（用归档扫描重算走廊，迭代/耗时等实时字段缺省） */
+  source?: 'live' | 'replay';
+  /** 路径-速度收敛迭代的路径层求值次数（2..3；spec 2026-09-25 §5；回放无此数据） */
+  rounds?: number;
+  /** 种子假设不自洽（速度上限 ≠ 假设）→ 本帧确实需要迭代修正（回放无此数据） */
+  revised?: boolean;
+  /** 本帧 plan() 总耗时（ms；只记录，不参与决策；回放无此数据） */
+  planMs?: number;
+  /** 迭代末轮的速度假设（仿真单位/s；几何评估速度；回放无此数据） */
+  vAssume?: number;
   /** 走廊可视化载荷（渲染层用；未接线时为 null） */
   viz: PlanningViz | null;
   remainingDist: number;

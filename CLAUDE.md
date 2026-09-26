@@ -69,7 +69,8 @@ requestAnimationFrame 主循环 (~60Hz)
 3. **传感器驱动** — 规划器只信任 LiDAR 做碰撞检测，禁止直接使用障碍物列表（真实系统中规划器不知道障碍物绝对坐标）
 4. **量纲安全** — `dimensions.ts` 品牌类型（Px, Radians, PxPerSec, DimLess...）编译时防量纲错误，编译后完全擦除。工厂函数（`px()`, `m()`, `rad()`...）是唯一 unsafe cast 点，只允许在模块边界使用
 5. **单位系统** — 所有物理量配置用 `m()` / `mps()` / `mps2()` 书写（`SIM_UNITS_PER_METER = 4`，改比例尺只需改这一个常量），不要硬编码 px 值
-6. **UI 状态单一来源** — 所有 UI 行为经 `ui/state.ts` 的纯函数 reduce 驱动，DOM 只是状态的渲染投影；`ui/controller.ts` 是"状态变化 → 副作用"的唯一边界；main 只通过 `UiDeps.actions` 改世界。布局：左侧菜单栏（手风琴单开：世界/仿真/数据，`sidebarSection`）+ 画布右上「信息」面板（详细遥测）+ 右下「调试」面板（Inspect，`infoOpen`/`debugOpen` 可折叠）+ 画布左上速度/状态精简行。快捷键：Space 暂停/回放播放、Esc 取消选点/退出回放、R 视角、I 折叠「调试」面板、C 走廊可视化、G Frenet 刻度
+6. **UI 状态单一来源** — 所有 UI 行为经 `ui/state.ts` 的纯函数 reduce 驱动，DOM 只是状态的渲染投影；`ui/controller.ts` 是"状态变化 → 副作用"的唯一边界；main 只通过 `UiDeps.actions` 改世界。布局：左侧菜单栏（分区**常展开**：世界/数据）+ **画布左缘纵向 toolbar**（暂停/视角/走廊/刻度/射线/路线，图标+两字标签，开关类高亮=开）+ 画布右上「信息」面板（详细遥测）+ 右下「调试」面板（Inspect，`infoOpen`/`debugOpen` 可折叠）+ 画布左上速度/状态精简行。快捷键：Space 暂停/回放播放、Esc 取消选点/退出回放、R 视角、I 折叠「调试」面板、C 走廊可视化、G Frenet 刻度、L LiDAR 射线、T 设路线、WASD 平移视角
+  （画布左缘纵向 toolbar 另有同功能按钮；两者默认：刻度/射线开、走廊关）
 
 ### 规划器（js/algo/plan/）——纵向-横向解耦（spec: docs/superpowers/specs/2026-09-19-decoupled-planner-design.md）
 
@@ -91,20 +92,25 @@ LiDAR 单线 2D：±60° FOV、2° 分辨率、61 条射线、最大 125m。核�
 
 Pure Pursuit：δ = atan2(2·L·sin α, ld)，预瞄距离 = clamp(0.4×speed, 10m, 20m)。油门目标 = 轨迹终点速度；**终点速度 ≈0（停车/紧急剖面）→ 油门 0**（0.15 怠速下限只对正值目标保留——否则"停车"变成 6.375m/s 恒速爬行，批量 A/B 回归根因）。
 
-### 路线设置（js/ui.ts + js/algo/routePlanner.ts）
+### 路线设置（`ui/interactions.ts` + `js/algo/routePlanner.ts`）
 
-右键赛道：第一次点击设起点，第二次设终点 → 中心线路网上的 Dijkstra → Route → 规划器切换为路线模式。左键点击物体显示尺寸；Space 暂停；R 重置视角。
+**显式模式**（toolbar「路线」按钮或 `T`）：进入后**左键**依次点赛道设起点、终点（悬停显示吸附预览环），设完自动退出，`Esc` 取消 → 中心线路网 Dijkstra → Route → 规划器切到路线模式。
+（早期用右键 `contextmenu` 触发：Chrome 在右键**按下**即触发，而右键拖拽是平移视角 → 一动相机就误设起点/终点；右键现在只抑制浏览器菜单。）
+左键点击物体显示尺寸；Space 暂停；R 重置视角；**WASD 平移相机**（速度 ∝ 相机距离，俯视也有效；失焦自动清键防漂移）。
 
 ### 调试与记录
 
 - `shared/debug.ts` — 跨模块共享调试对象，各模块写入内部状态，ui.ts 的 inspect 面板读取展示；
   `debug.planning.viz` 是**走廊可视化载荷**（自由带四边形 / 瓶颈横断线 / 候选路径与发展段，引用路径层对象零拷贝），
-  由渲染层 `env/renderer/overlays.ts` 的 `updateCorridorViz` 绘制（左侧栏「仿真」开关或 C 键；回放模式不画——回放不跑规划器）。
+  由渲染层 `env/renderer/overlays.ts` 的 `updateCorridorViz` 绘制（画布左缘 toolbar 或 C 键）。
+  候选线在**暂停时**带 `Ln` 编号（与调试面板候选列表 `#n` 一一对应）；回放模式用归档扫描重算
+  （`planner.corridorVizForReplay`，见 `js/replay.ts`）并把候选写回 `debug.planning`（`source:'replay'`）。
   带子按**本帧是否被雷达真正扫到**分色：绿 = 观测到（自由）、灰蓝 = 未观测（遮挡阴影/视锥外，属"未知"），
   并在覆盖极限画横断线——见 `docs/domain.md` P13（HD Map 背景减除的固有盲区）
 - **Frenet 刻度**（`env/renderer/geometry.ts` 的 `buildFrenetTicksGroup`，独立开关 + G 键，默认开）：
   沿弧长每 10m 一条横线、每 50m 一条亮线 + `s=50m` 数字标签（canvas Sprite）；
-  横向参考线 l=0（赛道中心虚线，已有）/±1.875m（车道中心）/±3.75m（车道分隔，已有）/**±L_MAX（规划域边，与走廊同色）**。
+  横向参考线 l=0（赛道中心虚线，已有）/±1.875m（车道中心）/±3.75m（车道分隔，已有）/**±L_MAX（规划域边，与走廊同色）**；
+  **每条横向线沿路每 100m 打一个数值标签**（`l=+1.9m` / `l=±5.4m`，颜色与线一致，同文本共享贴图）。
   **参考线口径与规划器一致**（有路线用路线开环参考线、s 从路线起点算）→ debug 面板的 S/L 值能直接在地上读；
   路线或地图变化时按对象身份重建该组。
 - 运行归档的导出/导入统一走 headless 格式：浏览器 💾 导出 `.run.json` 归档包（`sim/records.ts` 收集 + `headless/bundle.ts` 组装检测/报告），📂 导入后直接在回放器打开；`.run.json` 包与磁盘 `runs/<id>/` 归档内容同构
@@ -120,7 +126,7 @@ Pure Pursuit：δ = atan2(2·L·sin α, ld)，预瞄距离 = clamp(0.4×speed, 1
 - `docs/superpowers/specs/` — 设计规格（写码前）；`docs/superpowers/plans/` — 实施计划
 - `docs/reports/` — 会话/里程碑复盘（冻结快照，按日期一份：`YYYY-MM-DD-<topic>-session.md`）
 - `docs/incidents/` — 缺陷档案（一事一档，规则与模板见该目录 README；架构决策暂用 `[决策]` 前缀并入）
-- `docs/domain.md` — 领域知识活文档（问题图鉴 P1～P12 + 术语表 + 参数表），持续增补、认知更新直接改
+- `docs/domain.md` — 领域知识活文档（问题图鉴 P1～P13 + 术语表 + 参数表），持续增补、认知更新直接改
 - `ISSUE_HISTORY.md`（根目录）— 总台账：新记录一行一条 + 链接到上述文档；老记录保留原位不搬迁
 
 ## 开发规范

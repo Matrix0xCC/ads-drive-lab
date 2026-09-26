@@ -404,3 +404,16 @@ export function bandBoundary(quads: { x: number; y: number }[][]): { x: number; 
   for (const seg of seen.values()) if (seg.n === 1) out.push([seg.a, seg.b]);
   return out;
 }
+
+/** 候选编号标签（渲染层"暂停时"画在候选线上）：编号与路径层 ranked 顺序一致，
+ *  即与调试面板的候选列表一一对应。位置取**发展段末端**（横移完成处，各候选已分开）。 */
+export function candidateLabels(viz: {
+  candidates: { targetL: number; develop: number; points: { s: number; x: number; y: number }[] }[];
+}): { text: string; x: number; y: number }[] {
+  return viz.candidates.map((c, i) => {
+    const s0 = c.points[0]?.s ?? 0;
+    let p = c.points[0] ?? { x: 0, y: 0 };
+    for (const q of c.points) if (q.s - s0 <= c.develop + 1e-6) p = q;
+    return { text: `L${i + 1}`, x: p.x, y: p.y };
+  });
+}
