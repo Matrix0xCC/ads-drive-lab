@@ -119,7 +119,8 @@ const ui = setupUI({
 
 engine.bus.subscribe('control:state', ({ snapshot, lidarScan, trajectory, state }: any) => {
   updateScene(scene, snapshot, lidarScan, state, lidarLines, trajectory, engine.route, engine.latestGPS,
-    ui.isCorridorVisible() ? (debug.planning?.viz ?? null) : null, ui.isFrenetTicksVisible());
+    ui.isCorridorVisible() ? (debug.planning?.viz ?? null) : null, ui.isFrenetTicksVisible(),
+    ui.isLidarVisible(), ui.isPaused());
 });
 
 // ==================== 主循环（固定步长累积器） ====================

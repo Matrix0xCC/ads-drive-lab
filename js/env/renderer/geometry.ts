@@ -297,21 +297,53 @@ export function frenetLLines(
   });
 }
 
+/** 横向参考线的数值标签（纯函数，供渲染层画 Sprite）：**贴在 l 线上**（inset=0），
+ *  沿参考线每 labelEvery 一处、从 sOffset 起算——默认与 s 刻度**错开半个站**
+ *  （s 标签每 50m，本标签 25m 起步每 100m）→ 不会和 `s=…` 挤在一起。文本如 `l=+1.9m`。 */
+export function frenetLLabels(
+  ref: FrenetReference, lValues: number[], s0: number, maxS: number,
+  labelEvery = 400, inset = 0, sOffset = 100,
+): { l: number; s: number; text: string; x: number; y: number }[] {
+  const out: { l: number; s: number; text: string; x: number; y: number }[] = [];
+  for (const l of lValues) {
+    const sgn = l >= 0 ? 1 : -1;
+    for (let s = s0 + sOffset; s <= maxS + 1e-6; s += labelEvery) {
+      const p = frenetToCartesian(s, px(l - sgn * inset), ref);
+      out.push({
+        l, s,
+        text: `l=${l >= 0 ? '+' : ''}${(l / 4).toFixed(1)}m`,
+        x: p.x as number, y: p.y as number,
+      });
+    }
+  }
+  return out;
+}
+
 /** 数字标签：canvas 贴图 Sprite（始终面向相机）。headless（node:test）无 DOM → 返回 null 跳过 */
-function makeTextSprite(text: string, color = '#cfd8e3'): THREE.Sprite | null {
+const _spriteMatCache = new Map<string, THREE.SpriteMaterial>();
+
+export function makeTextSprite(
+  text: string, color = '#cfd8e3', scaleM = { w: 6, h: 2.25 },
+): THREE.Sprite | null {
   if (typeof document === 'undefined') return null;
-  const canvas = document.createElement('canvas');
-  canvas.width = 256; canvas.height = 96;
-  const ctx = canvas.getContext('2d')!;
-  ctx.font = 'bold 56px sans-serif';
-  ctx.fillStyle = color;
-  ctx.textAlign = 'center';
-  ctx.textBaseline = 'middle';
-  ctx.fillText(text, canvas.width / 2, canvas.height / 2);
-  const tex = new THREE.CanvasTexture(canvas);
-  tex.needsUpdate = true;
-  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
-  sprite.scale.set(m(6) as number, m(2.25) as number, 1);
+  const key = `${text}|${color}`;
+  let mat = _spriteMatCache.get(key);
+  if (!mat) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256; canvas.height = 96;
+    const ctx = canvas.getContext('2d')!;
+    ctx.font = 'bold 56px sans-serif';
+    ctx.fillStyle = color;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, canvas.width / 2, canvas.height / 2);
+    const tex = new THREE.CanvasTexture(canvas);
+    tex.needsUpdate = true;
+    mat = new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false });
+    _spriteMatCache.set(key, mat);
+  }
+  const sprite = new THREE.Sprite(mat);
+  sprite.scale.set(m(scaleM.w) as number, m(scaleM.h) as number, 1);
   return sprite;
 }
 
@@ -338,12 +370,27 @@ export function buildFrenetTicksGroup(
     }
   }
 
-  // 横向参考线：车道中心 ±1.875m（细）与规划域边 ±domainHalf（与走廊同色系）
-  for (const ln of frenetLLines(ref, [m(1.875) as number, -(m(1.875) as number)], 0, o.maxS)) {
+  // 横向参考线：车道中心 ±1.875m（细）与规划域边 ±domainHalf（与走廊同色系）；
+  // 每条线贴标签（l=+1.9m / l=±5.4m，颜色与线一致）：从 25m 起步每 100m 一处 →
+  // 与 s 刻度（每 50m）错开半个站，不会挤在一起；标签 y 略低于 s 标签
+  const laneL = [m(1.875) as number, -(m(1.875) as number)];
+  for (const ln of frenetLLines(ref, laneL, 0, o.maxS)) {
     addLine(ln.points, 0x7d8894, 0.35);
   }
   for (const ln of frenetLLines(ref, [o.domainHalf, -o.domainHalf], 0, o.maxS)) {
     addLine(ln.points, 0x22dd77, 0.5, 0.05);
+  }
+  const lLabelGroups: { lValues: number[]; color: string }[] = [
+    { lValues: laneL, color: '#9aa7b5' },
+    { lValues: [o.domainHalf, -o.domainHalf], color: '#7ef0ab' },
+  ];
+  for (const grp of lLabelGroups) {
+    for (const lb of frenetLLabels(ref, grp.lValues, 0, o.maxS)) {
+      const sp = makeTextSprite(lb.text, grp.color, { w: 4.6, h: 1.35 });
+      if (!sp) break;                       // headless 无 DOM：不画标签
+      sp.position.set(lb.x, m(0.9) as number, lb.y);   // y 略低于 s 标签（s 标签在 1.2m）
+      g.add(sp);
+    }
   }
 
   return g;

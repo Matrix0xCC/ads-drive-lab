@@ -10,11 +10,15 @@
     body { margin: 0; background: #111; overflow: hidden; }
     #app { display: flex; height: 100vh; }
 
-    /* ── 左侧菜单栏（手风琴单开：世界/仿真/数据） ── */
+    /* ── 左侧菜单栏（分区常展开） ── */
     #sidebar {
       width: 230px; flex: none; background: #181818; border-right: 1px solid #333;
-      color: #ccc; font-family: monospace; font-size: 13px; overflow-y: auto;
+      color: #ccc; font-family: monospace; font-size: 13px;
+      overflow-y: auto; overflow-x: hidden;   /* 内容超高时纵向滚动；横向不滚（见下 box-sizing） */
     }
+    /* 侧栏内控件多为 width:100% 且带 padding/border：默认 content-box 下实际宽度会超过
+       230px 容器 → 溢出成横向滚动条（分区常展开后暴露）。统一 border-box 让 100% 含内边距。 */
+    #sidebar, #sidebar * { box-sizing: border-box; }
     .sb-title {
       padding: 12px 14px; color: #0f0; font-weight: bold;
       border-bottom: 1px solid #333; letter-spacing: 1px;
@@ -26,7 +30,7 @@
     }
     .sb-head:hover { background: #242424; }
     .sb-arrow { display: inline-block; width: 16px; color: #888; }
-    .sb-body { display: none; padding: 10px 12px 12px; border-bottom: 1px solid #262626; line-height: 1.7; }
+    .sb-body { display: block; padding: 10px 12px 12px; border-bottom: 1px solid #262626; line-height: 1.7; }
     .sb-body button {
       display: block; width: 100%; text-align: left; background: #333; color: #fff;
       border: 1px solid #555; padding: 6px 10px; margin-bottom: 6px;
@@ -48,8 +52,26 @@
     }
     canvas { display: block; width: 100%; height: 100%; }
 
+    /* 画布左缘纵向 toolbar（原左侧栏「仿真」区迁入）：图标 + 两字标签；开关类用
+       .active 高亮表示"开"（不再改文案，宽度稳定） */
+    #canvas-toolbar {
+      position: absolute; left: 12px; top: 50%; transform: translateY(-50%);
+      z-index: 15; display: flex; flex-direction: column; gap: 6px;
+    }
+    .tool-btn {
+      width: 54px; padding: 6px 0 5px; background: #202020dd; color: #ddd;
+      border: 1px solid #3a3a3a; border-radius: 6px; cursor: pointer; font-family: monospace;
+      display: flex; flex-direction: column; align-items: center; gap: 1px; line-height: 1.15;
+    }
+    .tool-btn:hover { background: #2c2c2cee; }
+    .tool-btn .tool-icon { font-size: 16px; }
+    .tool-btn .tool-label { font-size: 10px; color: #aaa; }
+    .tool-btn.active { border-color: #22dd77; background: #17351fff; }
+    .tool-btn.active .tool-label { color: #7ef0ab; }
+
     /* 精简遥测：速度 + 状态（详细数据在右侧「信息」面板） */
     #hud-mini {
+
       position: absolute; top: 10px; left: 15px;
       color: #fff; font-family: monospace; font-size: 15px;
       pointer-events: none; z-index: 10; line-height: 1.7;
@@ -152,7 +174,7 @@
       <div class="sb-title">ADS DriveLab</div>
 
       <!-- 世界 -->
-      <button class="sb-head" id="menu-world"><span class="sb-arrow" id="arrow-world">▸</span>世界</button>
+      <div class="sb-head">世界</div>
       <div class="sb-body" id="section-world">
         <label class="sb-label">地图</label>
         <select id="map-dropdown">
@@ -167,17 +189,8 @@
         </select>
       </div>
 
-      <!-- 仿真 -->
-      <button class="sb-head" id="menu-sim"><span class="sb-arrow" id="arrow-sim">▸</span>仿真</button>
-      <div class="sb-body" id="section-sim">
-        <button id="btn-pause" title="暂停/继续 (Space)"><span id="pause-icon">&#9208;</span> 暂停 / 继续</button>
-        <button id="btn-reset-view" title="重置视角 (R)">&#8634; 重置视角</button>
-        <button id="btn-corridor" title="走廊可视化：自由带 / 瓶颈 / 候选路径与发展段 (C)">走廊可视化：关</button>
-        <button id="btn-frenet-ticks" title="Frenet 刻度：s 横线（10m/50m+数字）/ l 参考线 (G)">Frenet 刻度：开</button>
-      </div>
-
       <!-- 数据 -->
-      <button class="sb-head" id="menu-data"><span class="sb-arrow" id="arrow-data">▸</span>数据</button>
+      <div class="sb-head">数据</div>
       <div class="sb-body" id="section-data">
         <button id="btn-replay-mode" title="回放已归档运行">&#9194; 回放运行…</button>
         <button id="btn-export" title="导出运行归档 (.run.json)">&#128190; 导出归档</button>
@@ -188,6 +201,28 @@
     <!-- ══ 画布区 ══ -->
     <main id="canvas-container">
       <canvas id="canvas"></canvas>
+
+      <!-- 画布左缘纵向 toolbar（原「仿真」区）：图标 + 两字标签 -->
+      <div id="canvas-toolbar">
+        <button class="tool-btn" id="btn-pause" title="暂停 / 继续 (Space)">
+          <span class="tool-icon" id="pause-icon">&#9208;</span><span class="tool-label">暂停</span>
+        </button>
+        <button class="tool-btn" id="btn-reset-view" title="重置视角 (R)">
+          <span class="tool-icon">&#8634;</span><span class="tool-label">视角</span>
+        </button>
+        <button class="tool-btn" id="btn-corridor" title="走廊可视化：自由带 / 瓶颈 / 候选路径与发展段 (C)">
+          <span class="tool-icon">&#9638;</span><span class="tool-label">走廊</span>
+        </button>
+        <button class="tool-btn" id="btn-frenet-ticks" title="Frenet 刻度：s 横线（10m/50m+数字）/ l 参考线 (G)">
+          <span class="tool-icon">&#8862;</span><span class="tool-label">刻度</span>
+        </button>
+        <button class="tool-btn" id="btn-lidar" title="LiDAR 射线显示 (L)">
+          <span class="tool-icon">&#9788;</span><span class="tool-label">射线</span>
+        </button>
+        <button class="tool-btn" id="btn-route" title="设路线：左键点起点→终点（T；Esc 取消）">
+          <span class="tool-icon">&#10010;</span><span class="tool-label">路线</span>
+        </button>
+      </div>
 
       <!-- 精简遥测：速度（点击切 km/h ↔ m/s）+ 状态 -->
       <div id="hud-mini">

@@ -5,14 +5,13 @@ import { UiController } from '../../ui/controller.js';
 
 function makeCtl() {
   const calls = {
-    pause: [] as boolean[], mode: [] as string[], sect: [] as (string | null)[],
+    pause: [] as boolean[], mode: [] as string[],
     info: [] as boolean[], debug: [] as boolean[], picker: [] as boolean[],
     hint: [] as string[], unit: [] as string[],
   };
   const ctl = new UiController({
     onLivePaused: (p) => calls.pause.push(p),
     onMode: (m) => calls.mode.push(m),
-    onSidebarSection: (s) => calls.sect.push(s),
     onInfoPanel: (o) => calls.info.push(o),
     onDebugPanel: (o) => calls.debug.push(o),
     onRunPicker: (o) => calls.picker.push(o),
@@ -20,6 +19,8 @@ function makeCtl() {
     onSpeedUnit: (u) => calls.unit.push(u),
     onCorridorVisible: () => {},
     onFrenetTicksVisible: () => {},
+    onLidarVisible: () => {},
+    onRoutePickPhase: () => {},
   }, () => 'NONE');
   return { ctl, calls };
 }
@@ -53,24 +54,17 @@ describe('UiController.dispatch', () => {
     assert.strictEqual(ctl.state.livePaused, true);
   });
 
-  it('RIGHT_CLICK 两步流程：第二步状态不变 → 无副作用；ROUTE_SET 收尾', () => {
+  it('路线模式两步流程：进模式 → 选起点 → 第二步状态不变（建路线由 controller 处理）', () => {
     const { ctl, calls } = makeCtl();
-    ctl.dispatch({ type: 'RIGHT_CLICK', idx: 3 });
+    ctl.dispatch({ type: 'TOGGLE_ROUTE_SET' });
+    ctl.dispatch({ type: 'PICK_POINT', idx: 3 });
     assert.strictEqual(ctl.state.routePick, 'picking-goal');
     calls.hint.length = 0;
-    ctl.dispatch({ type: 'RIGHT_CLICK', idx: 9 });   // 无变化
+    ctl.dispatch({ type: 'PICK_POINT', idx: 9 });   // 起点已选：交给 controller 建路线（此处无 roadGraph → 无变化）
     assert.deepStrictEqual(calls.hint, []);
     ctl.dispatch({ type: 'ROUTE_SET' });
     assert.strictEqual(ctl.state.routePick, 'idle');
-    assert.strictEqual(calls.hint[calls.hint.length - 1], '右键设置路线起点 · 左键查看物体 · Space 暂停 · R 重置视角');
-  });
-
-  it('TOGGLE_SECTION → onSidebarSection(分区) 按手风琴语义', () => {
-    const { ctl, calls } = makeCtl();
-    ctl.dispatch({ type: 'TOGGLE_SECTION', section: 'data' });
-    assert.deepStrictEqual(calls.sect, ['data']);
-    ctl.dispatch({ type: 'TOGGLE_SECTION', section: 'data' });
-    assert.deepStrictEqual(calls.sect, ['data', null]);
+    assert.strictEqual(calls.hint[calls.hint.length - 1], 'T 设路线 · WASD 平移视角 · 左键查看物体 · Space 暂停 · R 重置视角');
   });
 
   it('TOGGLE_INFO / TOGGLE_DEBUG → 各自面板副作用', () => {
@@ -100,7 +94,6 @@ describe('UiController.dispatch', () => {
     ctl.refresh();
     assert.deepStrictEqual(calls.pause, [false]);
     assert.deepStrictEqual(calls.mode, ['LIVE']);
-    assert.deepStrictEqual(calls.sect, [null]);
     assert.deepStrictEqual(calls.info, [true]);
     assert.deepStrictEqual(calls.debug, [true]);
     assert.deepStrictEqual(calls.picker, [false]);

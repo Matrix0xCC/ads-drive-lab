@@ -61,6 +61,7 @@ export function updateScene(
   plannerState: string, lidarLines: THREE.Line[], trajectory: Trajectory | null,
   route: Route | null = null, gps: GPSReading | null = null,
   corridorViz: PlanningViz | null = null, showFrenetTicks = true,
+  showLidar = true, showCandidateLabels = false,
 ) {
   const { car, track, obstacles } = snapshot;
 
@@ -74,12 +75,12 @@ export function updateScene(
   _carGroup.rotation.y = -(car.angle as number);
 
   // 动态覆盖层
-  updateLidar(scene, lidarScan, lidarLines, car.x as number, car.y as number);
+  updateLidar(scene, showLidar ? lidarScan : null, lidarLines, car.x as number, car.y as number);
   updateObstacleMarkers(scene, lidarScan, car.x as number, car.y as number, plannerState === 'AVOID');
   updateRouteLine(scene, route ?? null);
   updateGPSRing(scene, gps ?? null);
   updateTrajectoryLine(scene, trajectory);
-  updateCorridorViz(scene, corridorViz);
+  updateCorridorViz(scene, corridorViz, showCandidateLabels);
 
   // Frenet 刻度：参考线口径与规划器一致——有路线用路线开环参考线（s 从路线起点算，
   // 这样 debug 面板的 S 值能在地上直接读出来），否则用赛道闭环。

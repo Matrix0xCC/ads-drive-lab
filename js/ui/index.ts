@@ -12,9 +12,9 @@ import { ReplayController } from '../replay.js';
 import type { RouteState } from '../sim/engine.js';
 import { SIM_W, SIM_H } from '../sim/engine.js';
 import { frameCamera } from '../env/renderer.js';
+import { panDelta } from './cameraKeys.js';
 import { UiController } from './controller.js';
 import { wireToolbar } from './toolbar.js';
-import { wireSidebar, setSidebarSection } from './sidebar.js';
 import { wireRunPicker, setRunPickerOpen } from './runList.js';
 import { wireInteractions } from './interactions.js';
 import { setupReplayPanel } from './replayPanel.js';
@@ -60,38 +60,50 @@ export interface UiDeps {
 
 export function setupUI(deps: UiDeps): {
   tick(dt: number): void; isCorridorVisible(): boolean; isFrenetTicksVisible(): boolean;
+  isLidarVisible(): boolean; isPaused(): boolean;
 } {
   const { canvas, camera, controls } = deps;
 
-  /** Frenet 刻度按钮文案随状态同步 */
+  /** 画布左缘 toolbar：开关类按钮用 active 类表示"开"（不再改文案，保持两字标签） */
+  function renderToggleButton(id: string, on: boolean) {
+    document.getElementById(id)?.classList.toggle('active', on);
+  }
   function renderFrenetTicksButton(visible: boolean) {
-    const btn = document.getElementById('btn-frenet-ticks');
-    if (btn) btn.textContent = visible ? 'Frenet 刻度：开' : 'Frenet 刻度：关';
+    renderToggleButton('btn-frenet-ticks', visible);
   }
-
-  /** 走廊可视化按钮文案随状态同步 */
+  function renderLidarButton(visible: boolean) {
+    renderToggleButton('btn-lidar', visible);
+  }
   function renderCorridorButton(visible: boolean) {
-    const btn = document.getElementById('btn-corridor');
-    if (btn) btn.textContent = visible ? '走廊可视化：开' : '走廊可视化：关';
+    renderToggleButton('btn-corridor', visible);
   }
 
-  /** 暂停按钮图标随状态同步（只改图标 span，保留按钮文案） */
-  function renderPauseButton(paused: boolean) {
+  /** 暂停/播放图标：LIVE 看 livePaused、REPLAY 看回放播放态（与 Space 语义一致）。
+   *  只改图标 span，保留按钮文案（toolbar 里是"暂停"两字标签）。 */
+  let _pauseIcon: string | null = null;
+  function renderPauseButton(): void {
+    const paused = controller.state.mode === 'REPLAY'
+      ? !deps.replay.state.playing
+      : controller.state.livePaused;
+    const want = paused ? '▶' : '⏸';
+    if (want === _pauseIcon) return;
+    _pauseIcon = want;
     const icon = document.getElementById('pause-icon');
-    if (icon) icon.textContent = paused ? '▶' : '⏸';
+    if (icon) icon.textContent = want;
   }
 
   // ── 状态机 + 副作用 ──（replayPanel 在下方定义，副作用仅在运行期触发，无 TDZ 问题）
   const controller = new UiController({
-    onLivePaused: (p) => { deps.actions.setLivePaused(p); renderPauseButton(p); },
+    onLivePaused: (p) => { deps.actions.setLivePaused(p); renderPauseButton(); },
     onMode: (mode) => (mode === 'REPLAY' ? replayPanel.show() : replayPanel.hide()),
-    onSidebarSection: (section) => setSidebarSection(section),
     onInfoPanel: (open) => setInfoOpen(open),
     onDebugPanel: (open) => setInspectorOpen(open),
     onRunPicker: (open) => setRunPickerOpen(open),
     onHint: (hint) => renderHint(hint),
-    onCorridorVisible: (v) => renderCorridorButton(v),
-    onFrenetTicksVisible: (v) => renderFrenetTicksButton(v),
+    onCorridorVisible: (v) => { renderCorridorButton(v); deps.replay.showCorridor = v; deps.replay.requestRedraw(); },
+    onFrenetTicksVisible: (v) => { renderFrenetTicksButton(v); deps.replay.showFrenetTicks = v; deps.replay.requestRedraw(); },
+    onLidarVisible: (v) => { renderLidarButton(v); deps.replay.showLidar = v; deps.replay.requestRedraw(); },
+    onRoutePickPhase: (ph) => renderToggleButton('btn-route', ph !== 'idle'),
     onSpeedUnit: (unit) => { display.speedUnit = unit; },
   }, () => deps.engine.routeState);
 
@@ -115,7 +127,6 @@ export function setupUI(deps: UiDeps): {
 
   const replayPanel = setupReplayPanel(deps, enterReplay, exitReplay);
   wireToolbar(deps, controller, { enterReplay, exitReplayIfActive });
-  wireSidebar(controller);
   wireRunPicker(controller, (id) => { void enterReplay(() => deps.replay.load(id)); });
   wireInteractions(deps, controller);
 
@@ -134,6 +145,12 @@ export function setupUI(deps: UiDeps): {
   document.getElementById('btn-frenet-ticks')?.addEventListener('click', () => {
     controller.dispatch({ type: 'TOGGLE_FRENET_TICKS' });
   });
+  document.getElementById('btn-lidar')?.addEventListener('click', () => {
+    controller.dispatch({ type: 'TOGGLE_LIDAR' });
+  });
+  document.getElementById('btn-route')?.addEventListener('click', () => {
+    controller.dispatch({ type: 'TOGGLE_ROUTE_SET' });
+  });
 
   // 点击 HUD 速度 → 切换 km/h ↔ m/s（渲染层下一帧自动按新单位显示）
   document.getElementById('hud-speed')?.addEventListener('click', () => {
@@ -144,6 +161,27 @@ export function setupUI(deps: UiDeps): {
   function resetCamera() {
     frameCamera(camera, controls, canvas.clientWidth, canvas.clientHeight, SIM_W, SIM_H);
   }
+  // ── WASD 相机平移：按下集合由 window 维护，实际位移在 tick 里按 dt 应用 ──
+  const heldKeys = new Set<string>();
+  window.addEventListener('keydown', (e) => {
+    if (e.target instanceof HTMLInputElement) return;
+    heldKeys.add(e.key.toLowerCase());
+  });
+  window.addEventListener('keyup', (e) => heldKeys.delete(e.key.toLowerCase()));
+  window.addEventListener('blur', () => heldKeys.clear());   // 失焦清空，防"卡键"一直漂移
+  function moveCameraByKeys(dt: number): void {
+    const f = (heldKeys.has('w') ? 1 : 0) - (heldKeys.has('s') ? 1 : 0);
+    const r = (heldKeys.has('d') ? 1 : 0) - (heldKeys.has('a') ? 1 : 0);
+    const d = panDelta(
+      { cam: [camera.position.x, camera.position.y, camera.position.z],
+        target: [controls.target.x, controls.target.y, controls.target.z] },
+      f, r, dt,
+    );
+    if (d[0] === 0 && d[2] === 0) return;
+    camera.position.x += d[0]; camera.position.z += d[2];
+    controls.target.x += d[0]; controls.target.z += d[2];
+  }
+
   window.addEventListener('keydown', (e) => {
     if (e.target instanceof HTMLInputElement) return;
     const st = controller.state;
@@ -170,6 +208,12 @@ export function setupUI(deps: UiDeps): {
       case 'g': case 'G':
         controller.dispatch({ type: 'TOGGLE_FRENET_TICKS' });
         break;
+      case 'l': case 'L':
+        controller.dispatch({ type: 'TOGGLE_LIDAR' });
+        break;
+      case 't': case 'T':
+        controller.dispatch({ type: 'TOGGLE_ROUTE_SET' });
+        break;
       case 'ArrowLeft':
         if (st.mode === 'REPLAY') deps.replay.seekStep(deps.replay.state.currentStep - 1);
         break;
@@ -184,6 +228,8 @@ export function setupUI(deps: UiDeps): {
   return {
     tick(dt: number) {
       if (controller.state.debugOpen) updateInspectPanel(dt);
+      renderPauseButton();   // 回放播放态可能由 Space/回放栏改变 → 每帧对齐图标（变化才写 DOM）
+      moveCameraByKeys(dt);  // WASD 平移相机（主循环每帧调用；controls.update 在其后应用）
     },
     /** 走廊可视化是否生效（main 的渲染订阅用）：开关打开且处于实时模式——
      *  回放不跑规划器，debug.planning.viz 是上一帧实时数据，画出来会是陈旧走廊。 */
@@ -193,6 +239,16 @@ export function setupUI(deps: UiDeps): {
     /** Frenet 刻度显隐（回放模式也显示——刻度只依赖路线/赛道，不依赖规划器） */
     isFrenetTicksVisible(): boolean {
       return controller.state.frenetTicksVisible;
+    },
+    /** LiDAR 射线显隐（回放模式同样生效） */
+    isLidarVisible(): boolean {
+      return controller.state.lidarVisible;
+    },
+    /** 世界是否处于暂停（实时=暂停中；回放=未播放）——候选线编号只在暂停时画 */
+    isPaused(): boolean {
+      return controller.state.mode === 'REPLAY'
+        ? !deps.replay.state.playing
+        : controller.state.livePaused;
     },
   };
 }

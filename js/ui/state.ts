@@ -8,10 +8,8 @@ import type { RouteState } from '../sim/engine.js';
 import type { SpeedUnit } from '../shared/display.js';
 
 export type UiMode = 'LIVE' | 'REPLAY';
-export type RoutePickPhase = 'idle' | 'picking-goal';
-/** 左侧菜单栏分区（手风琴单开） */
-export type SidebarSection = 'world' | 'sim' | 'data';
-
+/** 路线设置模式相位：idle → picking-start（已进入模式）→ picking-goal（起点已选）→ idle */
+export type RoutePickPhase = 'idle' | 'picking-start' | 'picking-goal';
 export interface UiState {
   mode: UiMode;
   /** 实时仿真暂停（回放期间保持不变，退出回放即恢复） */
@@ -20,8 +18,6 @@ export interface UiState {
   routePick: RoutePickPhase;
   pickStartIdx: number | null;
   scenarioName: string | null;
-  /** 左侧菜单当前展开的分区（null = 全收起） */
-  sidebarSection: SidebarSection | null;
   /** 右侧信息面板（详细遥测）展开状态 */
   infoOpen: boolean;
   /** 右侧调试面板（Inspect）展开状态 */
@@ -34,24 +30,27 @@ export interface UiState {
   corridorVisible: boolean;
   /** Frenet 刻度（s 横线/l 参考线/数字标签；默认开。与走廊各自独立开关） */
   frenetTicksVisible: boolean;
+  /** LiDAR 射线显示（默认开） */
+  lidarVisible: boolean;
 }
 
 export type UiEvent =
   | { type: 'TOGGLE_PAUSE' }
   | { type: 'ENTER_REPLAY' }
   | { type: 'EXIT_REPLAY' }
-  | { type: 'RIGHT_CLICK'; idx: number }
+  | { type: 'TOGGLE_ROUTE_SET' }
+  | { type: 'PICK_POINT'; idx: number }
   | { type: 'CANCEL' }
   | { type: 'SCENARIO_CHANGED'; name: string }
   | { type: 'ROUTE_SET' }
-  | { type: 'TOGGLE_SECTION'; section: SidebarSection }
   | { type: 'TOGGLE_INFO' }
   | { type: 'TOGGLE_DEBUG' }
   | { type: 'OPEN_RUN_PICKER' }
   | { type: 'CLOSE_RUN_PICKER' }
   | { type: 'TOGGLE_SPEED_UNIT' }
   | { type: 'TOGGLE_CORRIDOR' }
-  | { type: 'TOGGLE_FRENET_TICKS' };
+  | { type: 'TOGGLE_FRENET_TICKS' }
+  | { type: 'TOGGLE_LIDAR' };
 
 export const INITIAL_UI_STATE: UiState = {
   mode: 'LIVE',
@@ -59,7 +58,6 @@ export const INITIAL_UI_STATE: UiState = {
   routePick: 'idle',
   pickStartIdx: null,
   scenarioName: null,
-  sidebarSection: null,
   infoOpen: true,
   debugOpen: true,
   runPickerOpen: false,
@@ -68,6 +66,8 @@ export const INITIAL_UI_STATE: UiState = {
   corridorVisible: false,
   /** Frenet 刻度（默认开） */
   frenetTicksVisible: true,
+  /** LiDAR 射线（默认开） */
+  lidarVisible: true,
 };
 
 export function reduce(state: UiState, e: UiEvent): UiState {
@@ -79,14 +79,20 @@ export function reduce(state: UiState, e: UiEvent): UiState {
       return state.mode === 'REPLAY' ? state : { ...state, mode: 'REPLAY' };
     case 'EXIT_REPLAY':
       return state.mode === 'LIVE' ? state : { ...state, mode: 'LIVE' };
-    case 'RIGHT_CLICK':
+    case 'TOGGLE_ROUTE_SET':
+      // 显式路线模式（T / toolbar）：进入 → 等起点；再按一次或 Esc → 退出
       if (state.mode !== 'LIVE') return state;   // 回放中不给实时世界设路线
-      if (state.routePick === 'idle') {
+      return state.routePick === 'idle'
+        ? { ...state, routePick: 'picking-start', pickStartIdx: null }
+        : { ...state, routePick: 'idle', pickStartIdx: null };
+    case 'PICK_POINT':
+      if (state.mode !== 'LIVE') return state;
+      if (state.routePick === 'picking-start') {
         return { ...state, routePick: 'picking-goal', pickStartIdx: e.idx };
       }
-      return state;   // 已选起点：建路线（失败保持/成功 ROUTE_SET）由 controller 处理
+      return state;   // picking-goal：建路线（失败保持/成功 ROUTE_SET）由 controller 处理
     case 'CANCEL':
-      return state.routePick === 'picking-goal'
+      return state.routePick !== 'idle'
         ? { ...state, routePick: 'idle', pickStartIdx: null }
         : state;
     case 'SCENARIO_CHANGED':
@@ -95,9 +101,6 @@ export function reduce(state: UiState, e: UiEvent): UiState {
       return state.routePick === 'picking-goal'
         ? { ...state, routePick: 'idle', pickStartIdx: null }
         : state;
-    case 'TOGGLE_SECTION':
-      // 手风琴单开：点已展开的分区 → 收起；点其它分区 → 切换（前一个自动收起）
-      return { ...state, sidebarSection: state.sidebarSection === e.section ? null : e.section };
     case 'TOGGLE_INFO':
       return { ...state, infoOpen: !state.infoOpen };
     case 'TOGGLE_DEBUG':
@@ -112,6 +115,8 @@ export function reduce(state: UiState, e: UiEvent): UiState {
       return { ...state, corridorVisible: !state.corridorVisible };
     case 'TOGGLE_FRENET_TICKS':
       return { ...state, frenetTicksVisible: !state.frenetTicksVisible };
+    case 'TOGGLE_LIDAR':
+      return { ...state, lidarVisible: !state.lidarVisible };
   }
 }
 
@@ -121,9 +126,10 @@ export function reduce(state: UiState, e: UiEvent): UiState {
  */
 export function deriveHint(ui: UiState, routeState: RouteState): string {
   if (ui.mode === 'REPLAY') return '回放中：Space 播放/暂停 · ←/→ 单帧 · 拖动时间轴 · Esc 退出回放';
-  if (ui.routePick === 'picking-goal') return '再次右键设置终点（Esc 取消）';
+  if (ui.routePick === 'picking-start') return '设起点：左键点击赛道（Esc 取消）';
+  if (ui.routePick === 'picking-goal') return '设终点：左键点击赛道（Esc 取消）';
   if (ui.livePaused) return '已暂停（Space 继续）';
   // routeState 暂未参与分支（见 spec 开放问题）
   void routeState;
-  return '右键设置路线起点 · 左键查看物体 · Space 暂停 · R 重置视角';
+  return 'T 设路线 · WASD 平移视角 · 左键查看物体 · Space 暂停 · R 重置视角';
 }

@@ -10,8 +10,11 @@
 // 【资源管理】每个覆盖层维护自己的懒缓存，resetCache() 统一销毁。
 
 import * as THREE from 'three';
+import { m } from '../../shared/dimensions.js';
 import { LidarScan, Trajectory, Route, GPSReading } from '../../shared/types.js';
 import type { PlanningViz } from '../../shared/debug.js';
+import { candidateLabels } from '../../algo/plan/corridor.js';
+import { makeTextSprite } from './geometry.js';
 import { Px } from '../../shared/dimensions.js';
 import { MAX_SENSOR_DIST } from '../../algo/perception.js';
 
@@ -49,9 +52,14 @@ export function resetOverlayCache(scene: THREE.Scene) {
 // LiDAR 射线
 // ═══════════════════════════════════════════════════
 
-/** 更新 LiDAR 射线池（复用 61 条 Line，只更新顶点坐标和颜色） */
+/** 更新 LiDAR 射线池（复用 61 条 Line，只更新顶点坐标和颜色）。
+ *  scan=null（开关关闭 / 无数据）→ **隐藏全部射线**：早期直接 return 会把上一帧的
+ *  射线留在原地（"关了但没消失"），射线池是复用的、必须显式清。 */
 export function updateLidar(scene: THREE.Scene, lidarScan: LidarScan | null, lidarLines: THREE.Line[], carX: number, carZ: number) {
-  if (!lidarScan || !lidarScan.angles) return;
+  if (!lidarScan || !lidarScan.angles) {
+    for (const l of lidarLines) l.visible = false;
+    return;
+  }
 
   for (let i = 0; i < lidarLines.length; i++) {
     if (i < lidarScan.angles.length) {
@@ -212,7 +220,7 @@ function disposeGroup(g: THREE.Object3D) {
  *  瓶颈横断线 = 橙（有缝）/ 红（全封死）；
  *  候选路径 = 按分级上色（畅通蓝 / 慢行橙 / 硬阻塞红），最优亮绿；
  *  每条候选的前 develop 米（横移发展段）用不透明同色叠画——看"横移何时完成、到障碍前是否展开"。 */
-export function updateCorridorViz(scene: THREE.Scene, viz: PlanningViz | null) {
+export function updateCorridorViz(scene: THREE.Scene, viz: PlanningViz | null, showLabels = false) {
   if (_corridorGroup) {
     scene.remove(_corridorGroup);
     disposeGroup(_corridorGroup);
@@ -308,6 +316,16 @@ export function updateCorridorViz(scene: THREE.Scene, viz: PlanningViz | null) {
           new THREE.BufferGeometry().setFromPoints(devPts.map(p => new THREE.Vector3(p.x, y + 0.02, p.y))),
           lineMat(0x22ff88, 1.0)));
       }
+    }
+  }
+
+  // 候选编号（暂停时显示）：L1..Ln 与调试面板候选列表同序 → 画布与列表对得上
+  if (showLabels) {
+    for (const lb of candidateLabels(viz)) {
+      const sp = makeTextSprite(lb.text, '#ffe066', { w: 2.6, h: 1.3 });
+      if (!sp) break;                       // headless 无 DOM：不画标签
+      sp.position.set(lb.x, m(1.0) as number, lb.y);
+      g.add(sp);
     }
   }
 

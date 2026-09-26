@@ -2,7 +2,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import * as THREE from 'three';
-import { frenetSTicks, frenetLLines, buildFrenetTicksGroup } from '../../env/renderer/geometry.js';
+import { frenetSTicks, frenetLLines, frenetLLabels, buildFrenetTicksGroup } from '../../env/renderer/geometry.js';
 import { buildFrenetReference } from '../../algo/plan/frenet.js';
 import { px, m } from '../../shared/dimensions.js';
 
@@ -39,6 +39,23 @@ describe('frenetLLines（横向参考线）', () => {
         assert.ok(Math.abs(p.y - ln.l) < 1e-6, `直线参考下 l 应为常数（期望 ${ln.l}，实际 ${p.y}）`);
       }
       assert.ok(ln.points[0].x >= 0 && ln.points[ln.points.length - 1].x <= ((m(200) as number) + 1e-6));
+    }
+  });
+});
+
+describe('frenetLLabels（横向参考线的数值标签）', () => {
+  it('每条线每 100m 一个标签、从 25m 起步（错开 s 刻度）；文本带正负号；标签贴在 l 线上', () => {
+    const lValues = [m(1.875) as number, -(m(1.875) as number), m(5.4) as number, -(m(5.4) as number)];
+    const labels = frenetLLabels(straightRef, lValues, 0, m(200) as number);
+    assert.strictEqual(labels.length, 8, `4 条线 × (25/125m 两处) = 8，实际 ${labels.length}`);
+    assert.deepStrictEqual(labels.slice(0, 2).map(x => x.text), ['l=+1.9m', 'l=+1.9m']);
+    assert.deepStrictEqual(labels.slice(0, 2).map(x => x.s), [100, 500], '应从 25m 起、每 100m 一处');
+    const neg = labels.find(x => x.l < 0 && x.text.startsWith('l=-5.4'));
+    assert.ok(neg, '应有 l=-5.4m 标签');
+    // 直线参考：标签就贴在 l 线上（y = l，不偏移）；且不与 s 刻度（50m 的倍数）重合
+    assert.ok(Math.abs(labels[0].y - (m(1.875) as number)) < 1e-6, `实际 y=${labels[0].y}`);
+    for (const lb of labels) {
+      assert.ok(Math.abs(lb.s % (m(50) as number)) > 1, `标签不应落在 s 刻度站上（s=${lb.s}）`);
     }
   });
 });

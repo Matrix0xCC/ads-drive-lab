@@ -4,14 +4,13 @@
 // 本模块不得 import DOM/three：所有副作用通过 UiEffects 注入，
 // 是"状态集中"与"DOM 只是渲染投影"之间的唯一边界。
 
-import { UiState, UiEvent, UiMode, SidebarSection, reduce, deriveHint, INITIAL_UI_STATE } from './state.js';
+import { UiState, UiEvent, UiMode, RoutePickPhase, reduce, deriveHint, INITIAL_UI_STATE } from './state.js';
 import type { RouteState } from '../sim/engine.js';
 import type { SpeedUnit } from '../shared/display.js';
 
 export interface UiEffects {
   onLivePaused(paused: boolean): void;
   onMode(mode: UiMode): void;
-  onSidebarSection(section: SidebarSection | null): void;
   onInfoPanel(open: boolean): void;
   onDebugPanel(open: boolean): void;
   onRunPicker(open: boolean): void;
@@ -19,6 +18,8 @@ export interface UiEffects {
   onSpeedUnit(unit: SpeedUnit): void;
   onCorridorVisible(visible: boolean): void;
   onFrenetTicksVisible(visible: boolean): void;
+  onLidarVisible(visible: boolean): void;
+  onRoutePickPhase(phase: RoutePickPhase): void;
 }
 
 export class UiController {
@@ -41,13 +42,14 @@ export class UiController {
     this._state = next;
     if (next.livePaused !== prev.livePaused) this.effects.onLivePaused(next.livePaused);
     if (next.mode !== prev.mode) this.effects.onMode(next.mode);
-    if (next.sidebarSection !== prev.sidebarSection) this.effects.onSidebarSection(next.sidebarSection);
     if (next.infoOpen !== prev.infoOpen) this.effects.onInfoPanel(next.infoOpen);
     if (next.debugOpen !== prev.debugOpen) this.effects.onDebugPanel(next.debugOpen);
     if (next.runPickerOpen !== prev.runPickerOpen) this.effects.onRunPicker(next.runPickerOpen);
     if (next.speedUnit !== prev.speedUnit) this.effects.onSpeedUnit(next.speedUnit);
     if (next.corridorVisible !== prev.corridorVisible) this.effects.onCorridorVisible(next.corridorVisible);
     if (next.frenetTicksVisible !== prev.frenetTicksVisible) this.effects.onFrenetTicksVisible(next.frenetTicksVisible);
+    if (next.lidarVisible !== prev.lidarVisible) this.effects.onLidarVisible(next.lidarVisible);
+    if (next.routePick !== prev.routePick) this.effects.onRoutePickPhase(next.routePick);
     this.effects.onHint(deriveHint(next, this.getRouteState()));
   }
 
@@ -55,13 +57,14 @@ export class UiController {
   refresh(): void {
     this.effects.onLivePaused(this._state.livePaused);
     this.effects.onMode(this._state.mode);
-    this.effects.onSidebarSection(this._state.sidebarSection);
     this.effects.onInfoPanel(this._state.infoOpen);
     this.effects.onDebugPanel(this._state.debugOpen);
     this.effects.onRunPicker(this._state.runPickerOpen);
     this.effects.onSpeedUnit(this._state.speedUnit);
     this.effects.onCorridorVisible(this._state.corridorVisible);
     this.effects.onFrenetTicksVisible(this._state.frenetTicksVisible);
+    this.effects.onLidarVisible(this._state.lidarVisible);
+    this.effects.onRoutePickPhase(this._state.routePick);
     this.effects.onHint(deriveHint(this._state, this.getRouteState()));
   }
 }

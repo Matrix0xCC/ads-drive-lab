@@ -38,24 +38,36 @@ describe('reduce: 回放进出不触碰 livePaused（核心修复）', () => {
 });
 
 describe('reduce: 路线拾取', () => {
-  it('idle + RIGHT_CLICK → picking-goal 并记录起点', () => {
-    const s = reduce(live(), { type: 'RIGHT_CLICK', idx: 5 });
+  it('T 进入模式 + PICK_POINT → picking-goal 并记录起点', () => {
+    const s = reduce(reduce(live(), { type: 'TOGGLE_ROUTE_SET' }), { type: 'PICK_POINT', idx: 5 });
     assert.strictEqual(s.routePick, 'picking-goal');
     assert.strictEqual(s.pickStartIdx, 5);
   });
 
-  it('picking-goal + RIGHT_CLICK → 状态引用不变（建路线由 controller 处理）', () => {
-    const s = reduce(live(), { type: 'RIGHT_CLICK', idx: 5 });
-    assert.strictEqual(reduce(s, { type: 'RIGHT_CLICK', idx: 9 }), s);
+  it('picking-goal + PICK_POINT → 状态引用不变（建路线由 controller 处理）', () => {
+    const s = reduce(reduce(live(), { type: 'TOGGLE_ROUTE_SET' }), { type: 'PICK_POINT', idx: 5 });
+    assert.strictEqual(reduce(s, { type: 'PICK_POINT', idx: 9 }), s);
   });
 
-  it('REPLAY 中 RIGHT_CLICK 被忽略', () => {
+  it('未进入模式时 PICK_POINT 无效（不再有"随手右键就设起点"）', () => {
+    const l = live();
+    assert.strictEqual(reduce(l, { type: 'PICK_POINT', idx: 5 }), l);
+  });
+
+  it('TOGGLE_ROUTE_SET 再按一次 → 退出模式', () => {
+    const on = reduce(live(), { type: 'TOGGLE_ROUTE_SET' });
+    assert.strictEqual(on.routePick, 'picking-start');
+    assert.strictEqual(reduce(on, { type: 'TOGGLE_ROUTE_SET' }).routePick, 'idle');
+  });
+
+  it('REPLAY 中进入模式/PICK_POINT 均被忽略', () => {
     const s = live({ mode: 'REPLAY' });
-    assert.strictEqual(reduce(s, { type: 'RIGHT_CLICK', idx: 5 }), s);
+    assert.strictEqual(reduce(s, { type: 'TOGGLE_ROUTE_SET' }), s);
+    assert.strictEqual(reduce(s, { type: 'PICK_POINT', idx: 5 }), s);
   });
 
   it('CANCEL 取消选点；idle 时 no-op', () => {
-    const picking = reduce(live(), { type: 'RIGHT_CLICK', idx: 5 });
+    const picking = reduce(reduce(live(), { type: 'TOGGLE_ROUTE_SET' }), { type: 'PICK_POINT', idx: 5 });
     const cancelled = reduce(picking, { type: 'CANCEL' });
     assert.strictEqual(cancelled.routePick, 'idle');
     assert.strictEqual(cancelled.pickStartIdx, null);
@@ -63,7 +75,7 @@ describe('reduce: 路线拾取', () => {
   });
 
   it('ROUTE_SET 回到 idle；SCENARIO_CHANGED 重置选路并记录场景名', () => {
-    const picking = reduce(live(), { type: 'RIGHT_CLICK', idx: 5 });
+    const picking = reduce(reduce(live(), { type: 'TOGGLE_ROUTE_SET' }), { type: 'PICK_POINT', idx: 5 });
     const done = reduce(picking, { type: 'ROUTE_SET' });
     assert.strictEqual(done.routePick, 'idle');
     assert.strictEqual(done.pickStartIdx, null);
@@ -72,25 +84,6 @@ describe('reduce: 路线拾取', () => {
     assert.strictEqual(changed.scenarioName, 'oval-avoid-1');
     assert.strictEqual(changed.routePick, 'idle');
     assert.strictEqual(changed.pickStartIdx, null);
-  });
-});
-
-describe('reduce: 左侧菜单手风琴（世界/仿真/数据）', () => {
-  it('默认全收起（sidebarSection=null）', () => {
-    assert.strictEqual(live().sidebarSection, null);
-  });
-
-  it('点开分区 → 展开；单开：切换分区时前一个自动收起', () => {
-    const s1 = reduce(live(), { type: 'TOGGLE_SECTION', section: 'world' });
-    assert.strictEqual(s1.sidebarSection, 'world');
-    const s2 = reduce(s1, { type: 'TOGGLE_SECTION', section: 'data' });
-    assert.strictEqual(s2.sidebarSection, 'data');
-  });
-
-  it('点已展开的分区 → 收起（null）', () => {
-    const open = reduce(live(), { type: 'TOGGLE_SECTION', section: 'world' });
-    const closed = reduce(open, { type: 'TOGGLE_SECTION', section: 'world' });
-    assert.strictEqual(closed.sidebarSection, null);
   });
 });
 
@@ -136,11 +129,13 @@ describe('reduce: 速度显示单位', () => {
 });
 
 describe('deriveHint', () => {
-  it('四种分支文案', () => {
+  it('各分支文案（含路线模式两段）', () => {
     assert.strictEqual(deriveHint(live(), 'NONE'),
-      '右键设置路线起点 · 左键查看物体 · Space 暂停 · R 重置视角');
-    assert.strictEqual(deriveHint(reduce(live(), { type: 'RIGHT_CLICK', idx: 1 }), 'NONE'),
-      '再次右键设置终点（Esc 取消）');
+      'T 设路线 · WASD 平移视角 · 左键查看物体 · Space 暂停 · R 重置视角');
+    assert.strictEqual(deriveHint(reduce(live(), { type: 'TOGGLE_ROUTE_SET' }), 'NONE'),
+      '设起点：左键点击赛道（Esc 取消）');
+    assert.strictEqual(deriveHint(reduce(reduce(live(), { type: 'TOGGLE_ROUTE_SET' }), { type: 'PICK_POINT', idx: 1 }), 'NONE'),
+      '设终点：左键点击赛道（Esc 取消）');
     assert.strictEqual(deriveHint(reduce(live(), { type: 'TOGGLE_PAUSE' }), 'NONE'),
       '已暂停（Space 继续）');
     assert.strictEqual(deriveHint(live({ mode: 'REPLAY' }), 'NONE'),
@@ -165,5 +160,16 @@ describe('reduce: Frenet 刻度开关', () => {
     assert.strictEqual(off.corridorVisible, false, '不应联动走廊开关');
     assert.strictEqual(reduce(off, { type: 'TOGGLE_CORRIDOR' }).frenetTicksVisible, false, '走廊开关不影响刻度');
     assert.strictEqual(reduce(off, { type: 'TOGGLE_FRENET_TICKS' }).frenetTicksVisible, true);
+  });
+});
+
+describe('reduce: LiDAR 射线开关', () => {
+  it('默认开；TOGGLE_LIDAR 翻转，且不影响走廊/刻度开关', () => {
+    assert.strictEqual(INITIAL_UI_STATE.lidarVisible, true);
+    const off = reduce(live(), { type: 'TOGGLE_LIDAR' });
+    assert.strictEqual(off.lidarVisible, false);
+    assert.strictEqual(off.corridorVisible, false);
+    assert.strictEqual(off.frenetTicksVisible, true);
+    assert.strictEqual(reduce(off, { type: 'TOGGLE_LIDAR' }).lidarVisible, true);
   });
 });

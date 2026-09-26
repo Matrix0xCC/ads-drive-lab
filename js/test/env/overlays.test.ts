@@ -6,7 +6,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import * as THREE from 'three';
-import { updateCorridorViz, resetOverlayCache } from '../../env/renderer/overlays.js';
+import { updateCorridorViz, updateLidar, resetOverlayCache } from '../../env/renderer/overlays.js';
 import type { PlanningViz } from '../../shared/debug.js';
 
 function makeViz(over: Partial<PlanningViz> = {}): PlanningViz {
@@ -19,9 +19,9 @@ function makeViz(over: Partial<PlanningViz> = {}): PlanningViz {
     pinchSegments: [[{ x: 1, y: -4 }, { x: 1, y: 0.5 }]],
     pinch: { s: 1, width: 1.2, sealed: false },
     candidates: [
-      { targetL: 7.5, develop: 48, blocked: false, blockedHard: false, sBlock: Infinity, sBlockHard: Infinity,
+      { targetL: 7.5, develop: 48, blocked: false, blockedHard: false, sBlock: Infinity, sBlockHard: Infinity, cost: 1,
         points: [{ s: 0, x: 0, y: 0 }, { s: 1, x: 1, y: 0.2 }, { s: 2, x: 2, y: 0.5 }] },
-      { targetL: -8, develop: 48, blocked: true, blockedHard: true, sBlock: 1, sBlockHard: 2,
+      { targetL: -8, develop: 48, blocked: true, blockedHard: true, sBlock: 1, sBlockHard: 2, cost: 9,
         points: [{ s: 0, x: 0, y: 0 }, { s: 1, x: 1, y: -0.3 }, { s: 2, x: 2, y: -0.6 }] },
     ],
     bestTargetL: 7.5,
@@ -89,7 +89,7 @@ describe('走廊可视化：数据 → 场景对象', () => {
     const scene = new THREE.Scene();
     updateCorridorViz(scene, makeViz({
       candidates: [
-        { targetL: 7.5, develop: 48, blocked: true, blockedHard: true, sBlock: 1, sBlockHard: 2,
+        { targetL: 7.5, develop: 48, blocked: true, blockedHard: true, sBlock: 1, sBlockHard: 2, cost: 9,
           points: [{ s: 0, x: 0, y: 0 }, { s: 1, x: 1, y: 0.2 }, { s: 2, x: 2, y: 0.5 }, { s: 3, x: 3, y: 0.9 }] },
       ],
       bestTargetL: 7.5,
@@ -116,5 +116,50 @@ describe('走廊可视化：数据 → 场景对象', () => {
     updateCorridorViz(scene, makeViz());
     resetOverlayCache(scene);
     assert.strictEqual(scene.children.length, 0, 'reset 应清理');
+  });
+});
+
+describe('回放用走廊载荷（corridorVizForReplay）', () => {
+  it('用扫描 + 车位姿直接重建载荷（不跑规划器）', async () => {
+    const { corridorVizForReplay } = await import('../../algo/plan/planner.js');
+    const { buildFrenetReference } = await import('../../algo/plan/frenet.js');
+    const { MAX_SENSOR_DIST } = await import('../../algo/perception.js');
+    const { px, rad, m } = await import('../../shared/dimensions.js');
+    const ref = buildFrenetReference(
+      Array.from({ length: 61 }, (_, i) => ({ x: px(i * 40), y: px(0) })), false);
+    const angles = [], distances = [];
+    for (let i = 0; i < 61; i++) {
+      angles.push(rad(-Math.PI / 3 + (i / 60) * 2 * Math.PI / 3));
+      distances.push(i === 30 ? px(160) : MAX_SENSOR_DIST);   // 正前方 40m 一个命中点
+    }
+    const scan = { angles, distances, rawDistances: [...distances], confidences: new Array(61).fill(1), timestamp: 0 };
+    const viz = corridorVizForReplay(ref, scan, 0, 0);
+    assert.ok(viz.bands.length > 0, '应生成自由带');
+    assert.strictEqual(viz.bandObserved.length, viz.bands.length);
+    assert.ok(viz.candidates.length >= 1, '应有候选（回放里也能看选路）');
+    assert.ok(viz.pinchSegments.length > 0, '40m 处的点障碍应形成瓶颈横断线');
+    for (const q of viz.bands) for (const p of q) assert.ok(Number.isFinite(p.x) && Number.isFinite(p.y));
+  });
+});
+
+describe('LiDAR 射线开关', () => {
+  it('scan=null（开关关闭/无数据）→ 已有射线必须全部隐藏，不得残留', () => {
+    const scene = new THREE.Scene();
+    const lines = [0, 1, 2].map(() => {
+      const l = new THREE.Line(
+        new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3()]),
+        new THREE.LineBasicMaterial());
+      scene.add(l);
+      return l;
+    });
+    const scan = {
+      angles: [0, 0.1], distances: [100, 120], rawDistances: [100, 120],
+      confidences: [1, 1], timestamp: 0,
+    } as any;
+    updateLidar(scene, scan, lines, 0, 0);
+    assert.ok(lines[0].visible && lines[1].visible, '有数据时应显示');
+    assert.strictEqual(lines[2].visible, false, '多余射线池应隐藏');
+    updateLidar(scene, null, lines, 0, 0);
+    assert.ok(lines.every((l: any) => !l.visible), '关掉开关后不得残留上一帧射线');
   });
 });
