@@ -148,9 +148,15 @@ Pure Pursuit：δ = atan2(2·L·sin α, ld)，预瞄距离 = clamp(0.4×speed, 1
     精度也只有 4 位（≈11m，配准会整体偏）——`js/test/mapgen/georef.test.ts` 现在把这类错误钉死。
 - **摆放与朝向**（`env/renderer/basemap.ts`）：每张瓦片取**四个角**各自投影（局部系是等距的 → 瓦片仍是轴对齐矩形，
   用中心+宽高即可精确表示，不必假设瓦片是正方形）；平面 y = `BASEMAP_Y`（-0.05：地面 -0.1、网格 0、路面 0.01 之间）。
-  **`rotation.x = +π/2`** 才让"图片上方朝北"（世界 +z）；代价是法线朝下 → 必须 `side: DoubleSide`
-  （渲染层其它平面用 -π/2 是因为它们先做过 `Vector2(x, -y)` 镜像，别混）。纹理要设 `SRGBColorSpace` + mipmap + anisotropy，
-  换地图必须 `dispose()`（否则 VRAM 泄漏）。
+  **朝向要同时满足三条不变量**（少一条就会"看着像对了"，其实是镜像/翻转 —— 实测踩过：地图文字左右反读）：
+  ① **法线朝上**（`rotation.x = -π/2`，配 `side: FrontSide`）→ 从上方看到**正面**；
+     若用 `+π/2`，法线朝下 → 看到的是**背面** → **整张图左右镜像**（文字反读）；
+  ② **图象上方朝北**（世界 +z）：`-π/2` 会把平面 local +Y 转到世界 **-z**，所以必须**同时**设 `texture.flipY = false`
+     （图象首行 → local -Y → 世界 +z）；默认 `flipY = true` 会让图象上方落到南边（南北翻转）；
+  ③ **图象右方朝东**（世界 +x）：PlaneGeometry 的 u 沿 local +X，`-π/2` 不动 X ✓。
+  三者由 `js/test/renderer/basemap.test.ts` 逐条断言（旧版只查"上方朝北"，**镜像的配置恰好也能过** —— 所以必须查法线方向）。
+  纹理还要设 `SRGBColorSpace` + mipmap + anisotropy；换地图必须 `dispose()`（否则 VRAM 泄漏）。
+  （渲染层其它平面用 -π/2 是因为它们先做过 `Vector2(x, -y)` 镜像，别混。）
 - **量纲**：瓦片是 Web Mercator，其"米"不是米（纬度 φ 处比例因子 1/cos φ，北京 39.9° → **1.30**，
   同样的 z 赤道 2.39 m/px、北京 1.83 m/px）。所有换算走 `js/shared/geo.ts`，
   `geo.test.ts` 专门断言这条 30% 的坑。**别把瓦片像素当米。**

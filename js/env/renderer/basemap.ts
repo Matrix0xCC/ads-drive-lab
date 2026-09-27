@@ -6,12 +6,17 @@
 //      任何一步失败（清单 404 / 瓦片 404 / 解码失败）都只是"没有底图"，不许影响仿真。
 //   ② **异步不阻塞**：加载是 fire-and-forget，瓦片就绪一张显示一张。
 //
-// 【摆放】（两个容易搞错的地方，都写在代码里）
+// 【摆放】（三个容易搞错的地方，都写在代码里）
 //   · 坐标：用 `maps/<name>.tiles.json` 里的 `worldOrigin`（世界坐标 (0,0) 的经纬度）换算，
 //     不是 `geometry.origin`（那是**投影**原点；地图点列做过世界平移，两者差几百米~几公里）。
-//   · 朝向：World z = 仿真 y（北）。PlaneGeometry 默认 +Y 是纹理上方；`rotation.x = +π/2`
-//     把 +Y 转到世界 +z（北）→ 图片上方朝北 ✓；代价是法线朝下，所以要 DoubleSide。
-//     （渲染层其它平面用 -π/2，是因为它们先用 `Vector2(x, -y)` 做了镜像，别混。）
+//   · **朝向三件事必须同时满足**（少一件就会"看起来对但其实是镜像/翻转"，实测踩过）：
+//       ① 法线朝**上**（`rotation.x = -π/2`）→ 从上方看到的是**正面**；
+//          若用 `+π/2`，法线朝下，从上方看到的是**背面** → **整张图左右镜像**（文字反着读）。
+//       ② 图象**上方朝北**（世界 +z）。`-π/2` 会把平面的 local +Y 转到世界 **-z**（南），
+//          所以必须配 `texture.flipY = false`（图象首行 → local -Y → 世界 +z ✓）。
+//       ③ 图象**右方朝东**（世界 +x）——PlaneGeometry 的 u 沿 local +X，`-π/2` 不动 X ✓。
+//     三者合起来才等于"把瓦片平铺在地上、北在上"。
+//     （渲染层其它平面用 -π/2 是因为它们先用 `Vector2(x, -y)` 做了镜像，别混。）
 import * as THREE from 'three';
 import { tileWorldRect, type LatLon } from '../../shared/geo.js';
 
@@ -121,7 +126,7 @@ export async function loadBasemap(mapKey: string, opts?: { dim?: number }): Prom
     map: tex,
     color: new THREE.Color(dim, dim, dim),          // 乘法压暗（同时削弱"瓦片路面 vs 仿真路面"的双线感）
     transparent: true, opacity: 0.95,
-    side: THREE.DoubleSide,                          // 法线朝下（rotation.x = +π/2），需双面
+    side: THREE.FrontSide,                            // 法线朝上，正面可见（背面镜像的坑见文件头）
     depthWrite: false,                               // 让上层路面/射线正常绘制
   });
   const stats = { loaded: 0, total: manifest.tiles.length, failed: 0 };
@@ -133,12 +138,15 @@ export async function loadBasemap(mapKey: string, opts?: { dim?: number }): Prom
     const t = { z: q.z, x: q.x, y: q.y };
     const geom = new THREE.PlaneGeometry(rect.width, rect.height);
     const mesh = new THREE.Mesh(geom, new THREE.MeshBasicMaterial({ visible: false }));
-    mesh.rotation.x = Math.PI / 2;                  // 图片上方 → 北（见文件头）
+    mesh.rotation.x = -Math.PI / 2;                 // 法线朝上（看正面 → 不镜像）；上方朝北靠 flipY=false，见文件头
     mesh.position.set(rect.cx, BASEMAP_Y, rect.cy);
     mesh.userData = { type: 'basemap', label: `底图瓦片 ${t.z}/${t.x}/${t.y}`, width: rect.width, height: 0, length: `${manifest.provider}` };
     group.add(mesh);
     geometries.push(geom);
     loader.load(q.url, (tex) => {
+      // 【必须】图象首行 → 平面 local -Y → 世界 +z（北）。默认 flipY=true 会让图象上方落到南边
+      // （整张图南北翻转；配合"看背面"时还容易被误判成"已经对了"）。
+      tex.flipY = false;
       tex.colorSpace = THREE.SRGBColorSpace;        // 不设会明显发灰
       tex.anisotropy = 8;                           // 斜视可读（上限由设备决定，超了会被夹住）
       tex.generateMipmaps = true;

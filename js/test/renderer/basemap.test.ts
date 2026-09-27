@@ -95,21 +95,47 @@ describe('basemap：瓦片摆放（纯函数）', () => {
   });
 });
 
-describe('basemap：朝向（图片上方必须朝北，即世界 +z）', () => {
-  it('rotation.x = +π/2 时，平面的"上边缘"在世界 +z 方向', () => {
-    const [q] = planBasemapQuads(manifest);
-    // 与 basemap.ts 里完全一致的摆放方式
+describe('basemap：朝向（三条不变量，缺一条就会镜像/翻转）', () => {
+  /** 与 basemap.ts 完全一致的摆放：rotation.x = -π/2 + texture.flipY = false */
+  function place(q: { width: number; height: number; cx: number; cy: number }) {
     const mesh = new THREE.Mesh(new THREE.PlaneGeometry(q.width, q.height));
-    mesh.rotation.x = Math.PI / 2;
+    mesh.rotation.x = -Math.PI / 2;
     mesh.position.set(q.cx, BASEMAP_Y, q.cy);
     mesh.updateMatrixWorld(true);
-    const top = new THREE.Vector3(0, q.height / 2, 0).applyMatrix4(mesh.matrixWorld);    // 贴图上边缘
-    const bottom = new THREE.Vector3(0, -q.height / 2, 0).applyMatrix4(mesh.matrixWorld);
-    assert.ok(top.z > bottom.z, `贴图上方必须朝北（世界 +z）：top.z=${top.z} 应 > bottom.z=${bottom.z}`);
-    // 并且正好等于矩形中心 ± 半高（没有意外的缩放/旋转）
-    assert.ok(Math.abs(top.z - (q.cy + q.height / 2)) < 1e-6, `上边缘 z 应为 cy+高/2，实际 ${top.z}`);
-    assert.ok(Math.abs(top.x - q.cx) < 1e-6);
-    assert.ok(Math.abs(top.y - BASEMAP_Y) < 1e-6, '底图平面应贴在 BASEMAP_Y');
+    const at = (x: number, y: number) => new THREE.Vector3(x, y, 0).applyMatrix4(mesh.matrixWorld);
+    return {
+      // texture.flipY = false ⇒ 图象**首行（上方）**对应平面 local -Y，末行对应 local +Y
+      imageTop: at(0, -q.height / 2),
+      imageBottom: at(0, q.height / 2),
+      imageLeft: at(-q.width / 2, 0),
+      imageRight: at(q.width / 2, 0),
+      normal: new THREE.Vector3(0, 0, 1).transformDirection(mesh.matrixWorld),
+    };
+  }
+
+  const [q] = planBasemapQuads(manifest);
+
+  it('① 法线朝上 → 从上方看到的是**正面**（法线朝下会看到背面 → 整张图左右镜像，文字反读）', () => {
+    const { normal } = place(q);
+    assert.ok(normal.y > 0.99, `法线必须朝上（+Y），实际 (${normal.x.toFixed(2)}, ${normal.y.toFixed(2)}, ${normal.z.toFixed(2)})`);
+    assert.ok(Math.abs(normal.x) < 1e-6 && Math.abs(normal.z) < 1e-6, '法线不应有水平分量');
+  });
+
+  it('② 图象上方朝北（世界 +z）、下方朝南', () => {
+    const { imageTop, imageBottom } = place(q);
+    assert.ok(imageTop.z > imageBottom.z, `图象上方应朝北：top.z=${imageTop.z} 必须 > bottom.z=${imageBottom.z}`);
+    assert.ok(Math.abs(imageTop.z - (q.cy + q.height / 2)) < 1e-6, '上边缘 z = cy + 高/2');
+  });
+
+  it('③ 图象右方朝东（世界 +x）、左方朝西（镜像会让两者换位）', () => {
+    const { imageLeft, imageRight } = place(q);
+    assert.ok(imageRight.x > imageLeft.x, `图象右方应朝东：right.x=${imageRight.x} 必须 > left.x=${imageLeft.x}`);
+  });
+
+  it('底图平面贴在地面与路面之间（-0.1 < y < 0.01）', () => {
+    const { imageTop } = place(q);
+    assert.ok(Math.abs(imageTop.y - BASEMAP_Y) < 1e-6);
+    assert.ok(BASEMAP_Y > -0.1 && BASEMAP_Y < 0.01, `BASEMAP_Y=${BASEMAP_Y} 应在（地面 -0.1, 路面 0.01）之间`);
   });
 });
 
