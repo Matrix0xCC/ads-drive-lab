@@ -6,7 +6,7 @@ import { UiController } from './controller.js';
 import type { UiDeps } from './index.js';
 import { ReplayController } from '../replay.js';
 import { parseBundle } from '../headless/bundle.js';
-import { frameSmart, FOLLOW_WORLD_THRESHOLD } from '../env/renderer.js';
+import { frameSmart } from '../env/renderer.js';
 import { setRunList } from './runList.js';
 
 export interface ToolbarHelpers {
@@ -20,10 +20,6 @@ export function wireToolbar(
 ): void {
   const { enterReplay, exitReplayIfActive } = helpers;
 
-  /** 新世界是否"长条大世界"（决定相机跟随的默认值）：径向图整图取景不需要跟随 */
-  const bigWorld = (): boolean =>
-    Math.max(deps.engine.worldW, deps.engine.worldH) > FOLLOW_WORLD_THRESHOLD;
-
   // ── 地图选择（保留场景配置仅换地图；回放中先退出回放）──
   // 下拉初值由 main 的 applyScenario 同步（它在 setupUI 之前执行）
   const mapSelect = document.getElementById('map-dropdown') as HTMLSelectElement | null;
@@ -35,7 +31,7 @@ export function wireToolbar(
         mapSelect.value = deps.actions.currentMapKey();   // 失败：回滚下拉，避免"下拉与世界不一致"
         return;
       }
-      ctl.dispatch({ type: 'SCENARIO_CHANGED', name: `browser-${mapSelect.value}`, followCamDefault: bigWorld() });
+      ctl.dispatch({ type: 'SCENARIO_CHANGED', name: `browser-${mapSelect.value}` });
     });
   }
 
@@ -61,7 +57,7 @@ export function wireToolbar(
         // 注意用 **key**（下拉的值）而不是 mapDef.name：合成地图的 name 是显示名（Oval / Tech Circuit），
         // 拿它当 key 会被 parseScenario 拒绝（实测踩过——"随机场景"在径向图上直接弹错误框）
         if (deps.actions.loadDefaultScenario(deps.actions.currentMapKey())) {
-          ctl.dispatch({ type: 'SCENARIO_CHANGED', name: '随机场景', followCamDefault: bigWorld() });
+          ctl.dispatch({ type: 'SCENARIO_CHANGED', name: '随机场景' });
         }
         return;
       }
@@ -69,7 +65,7 @@ export function wireToolbar(
         const res = await fetch(`scenarios/${file}`, { cache: 'no-store' });   // 场景文件开发中会被编辑，不吃缓存
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const name = deps.actions.loadScenario(await res.json());
-        if (name) ctl.dispatch({ type: 'SCENARIO_CHANGED', name, followCamDefault: bigWorld() });
+        if (name) ctl.dispatch({ type: 'SCENARIO_CHANGED', name });
         else scenarioSelect.value = '';                    // 失败：回滚下拉（别停在"看起来已加载"）
       } catch (e) {
         alert(`场景加载失败: ${(e as Error).message}`);

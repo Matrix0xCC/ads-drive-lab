@@ -35,7 +35,8 @@ export interface UiState {
   /** 真实地图底图（纯表现层；无缓存时静默降级） */
   basemapVisible: boolean;
   /** 相机跟随车辆（toolbar / F 键）。默认随地图：长条大世界（OSM 高速）默认开，
-   *  小世界（径向赛道，整图取景）默认关——见 SCENARIO_CHANGED 的 followCamDefault */
+   *  **默认关**：只有用户显式打开（F / toolbar「跟随」）才跟随；换地图/换场景**不再自动改它**
+   *  （曾经按世界尺寸自动开：长条 OSM 图上会被强制打开，连用户手动关掉后换个场景又会被打开） */
   followCam: boolean;
   /** 路线来源 + 摘要（"场景自带 · 节点 2→93 · 2.93km" / "手工 · 1.9km" / "无路线（车辆静止）"） */
   routeInfo: { source: RouteSource; summary: string };
@@ -55,7 +56,7 @@ export type UiEvent =
   | { type: 'TOGGLE_ROUTE_SET' }
   | { type: 'PICK_POINT'; idx: number }
   | { type: 'CANCEL' }
-  | { type: 'SCENARIO_CHANGED'; name: string; followCamDefault?: boolean }
+  | { type: 'SCENARIO_CHANGED'; name: string }
   | { type: 'ROUTE_SET' }
   | { type: 'TOGGLE_INFO' }
   | { type: 'TOGGLE_DEBUG' }
@@ -124,10 +125,8 @@ export function reduce(state: UiState, e: UiEvent): UiState {
     case 'SCENARIO_CHANGED':
       // followCamDefault 由调用方按**新世界尺寸**给（长条大世界默认开、小世界默认关）：
       // 不给则保持用户当前选择，避免"换场景把用户的开关改掉"。
-      return {
-        ...state, scenarioName: e.name, routePick: 'idle', pickStartIdx: null,
-        ...(e.followCamDefault !== undefined ? { followCam: e.followCamDefault } : {}),
-      };
+      // 注意：**不动 followCam**（默认关；跟随与否是用户的选择，换场景不该替他改）
+      return { ...state, scenarioName: e.name, routePick: 'idle', pickStartIdx: null };
     case 'ROUTE_SET':
       return state.routePick === 'picking-goal'
         ? { ...state, routePick: 'idle', pickStartIdx: null }

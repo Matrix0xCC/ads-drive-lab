@@ -122,7 +122,9 @@ requestAnimationFrame 主循环 (~60Hz)
     刻度间距取"整数好看"值（与底部比例尺同一套视觉语言——可数格子）。
   - **与「设路线」互斥**（两者都吃左键）：`state.ts` 里互相清掉，`interactions.ts` 里量距优先让位（不吃走拾取）；
     `Esc` **优先退出量距**；退出模式清掉尺子（免得留下一条看不懂的线）。
-  （画布左缘纵向 toolbar 另有同功能按钮；两者默认：刻度/射线开、走廊关、**相机跟随按地图**——长条大世界（OSM 高速）开、径向小世界关）
+  （画布左缘纵向 toolbar 另有同功能按钮；两者默认：刻度/射线开、走廊关、**相机跟随默认关**——
+  只有用户显式打开（F / toolbar「跟随」）才跟随；**换地图/换场景不再自动改它**
+  （曾经按世界尺寸自动开，长条 OSM 图会被强制打开，用户手动关掉后换个场景又会被打开））
   **`main.ts` 的模块初始化顺序是硬约束**：`const ui = setupUI(...)` 在**顶层调用 `applyScenario` 之后**才初始化，
   所以"模块初始化阶段就会被调用"的函数（`applyScenario`）**不得引用 `ui`/`replay` 之类后声明的绑定**，
   否则刷新即崩 `Cannot access 'x' before initialization`（TDZ；TypeScript 不报，实测踩过两次：
@@ -255,7 +257,10 @@ Pure Pursuit：δ = atan2(2·L·sin α, ld)，预瞄距离 = clamp(0.4×speed, 1
 - **路网路线**：场景用 `route: { fromNode, toNode }`；`buildGraphFromEdges` + `buildNetworkRoute`（Dijkstra 出节点序列 → 逐段取链几何并按方向拼接）→ 规划器/感知照常把它当开环参考线用；`waypointIndices` 记途经链序号（归档可查"走了哪几条匝道"）。浏览器 `T`/toolbar 设路线时**吸附到节点**（`pickPoints()`），与 headless 走同一个 `buildNetworkRoute`。检测器的越界判据对路网用**链并集**（`world.track.chains` 进归档），否则路口处会误报。
 - **开环语义**：`closed: false` → `innerBoundary` 为空，`outerBoundary` 是**闭合路面多边形**（左缘→末端帽→右缘→起点帽），并且两端帽沿切线**外延 25m**（否则车出生点正好压在端帽上 → 每帧判越界复位）。`buildRoadGraph`/`sToIndex`/`resetToTrack`/`generateObstacles` 都不再绕接。
 - **世界尺寸不再是全局常量**：`engine.worldW/worldH` 取地图声明；地面/网格用 `setWorldExtent` 随地图重建。
-- **相机跟随**：toolbar「跟随」开关 / `F` 键（状态在 `ui/state.ts` 的 `followCam`）。开启时 `followCar` 每帧把相机与目标点同步平移（保留用户的旋转/缩放）；**换地图时按世界尺寸给默认值**（`SCENARIO_CHANGED.followCamDefault`：长条图默认开、径向图默认关），用户手动切过后不受影响。`R`/重置视角走 `frameSmart`（小世界整图、大世界取车周围 250m）。
+- **相机跟随**：toolbar「跟随」开关 / `F` 键（状态在 `ui/state.ts` 的 `followCam`，**默认关**）。开启时 `followCar`
+  每帧把相机与目标点同步平移（保留用户的旋转/缩放）。**只有用户显式打开才跟随**：`SCENARIO_CHANGED` 不带默认值、
+  也不改这个开关（否则"手动关掉→换个场景又被打开"）。注意代价：长条 OSM 图上不开跟随时，车会驶出
+  `frameSmart` 给的初始局部视野（250m）——要跟随就按 `F`。`R`/重置视角走 `frameSmart`（小世界整图、大世界取车周围 250m）。
 
 ### 路线设置（`ui/interactions.ts` + `js/algo/routePlanner.ts`）
 

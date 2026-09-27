@@ -136,11 +136,15 @@ describe('reduce: 相机跟随开关', () => {
     assert.strictEqual(reduce(on, { type: 'TOGGLE_FOLLOW_CAM' }).followCam, false);
   });
 
-  it('SCENARIO_CHANGED 带 followCamDefault → 按新世界尺寸设默认（长条图开/小世界关）', () => {
-    const big = reduce(live(), { type: 'SCENARIO_CHANGED', name: 'osm', followCamDefault: true });
-    assert.strictEqual(big.followCam, true);
-    const small = reduce(big, { type: 'SCENARIO_CHANGED', name: 'oval', followCamDefault: false });
-    assert.strictEqual(small.followCam, false);
+  it('SCENARIO_CHANGED 不再改 followCam（默认关；跟随与否是用户的选择）', () => {
+    // 用户打开后换场景 → 保持打开
+    const on0 = reduce(live(), { type: 'TOGGLE_FOLLOW_CAM' });
+    assert.strictEqual(reduce(on0, { type: 'SCENARIO_CHANGED', name: 'osm' }).followCam, true);
+    // 默认（关）时换场景 → 保持关闭
+    const big = reduce(live(), { type: 'SCENARIO_CHANGED', name: 'osm' });
+    assert.strictEqual(big.followCam, false);
+    const small = reduce(big, { type: 'SCENARIO_CHANGED', name: 'oval' });
+    assert.strictEqual(small.followCam, false, '小世界/大世界都不该自动改这个开关');
   });
 
   it('SCENARIO_CHANGED 不带 followCamDefault → 保留用户当前选择', () => {
