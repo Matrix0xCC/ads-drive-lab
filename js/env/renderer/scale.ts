@@ -26,6 +26,33 @@ export function metersPerPixel(
   return worldPerPx / unitsPerMeter;
 }
 
+/**
+ * **在指定地面点处**的横向尺度（米/像素）——比例尺**必须**用自己所在位置的尺度。
+ *
+ * 为什么不能用画面中心（目标点）的尺度：透视相机下横向尺度随**深度**变化，而斜视时
+ * 屏幕底部的地面比中心近得多（实测 33.7° 取景下差 ~1.25 倍）。比例尺画在屏幕底部，
+ * 若不按它自己的位置取尺度，画出来的条**实际覆盖距离与标注不符**（用户就是拿地面刻度线
+ * 对照发现的：条长看着像 10m，标注却是 5m）。
+ *
+ * 做法：把相机右向量投到地面作为"屏幕水平方向"，取 `point + 1m·该方向` 投影到屏幕，
+ * 量出像素差 → 精确得到该点的 m/px（对离轴点也正确，不像"欧氏距离"那样偏大）。
+ */
+export function metersPerPixelAtGround(
+  camera: THREE.PerspectiveCamera, point: THREE.Vector3, viewW: number, viewH: number,
+  unitsPerMeter: number = SIM_UNITS_PER_METER,
+): number {
+  if (viewW <= 0 || viewH <= 0 || unitsPerMeter <= 0) return Number.NaN;
+  const right = new THREE.Vector3().setFromMatrixColumn(camera.matrixWorld, 0);   // 相机右（世界）
+  right.y = 0;                                                                   // 投到地面
+  if (right.lengthSq() < 1e-12) return Number.NaN;                               // 正俯视退化
+  right.normalize();
+  const neighbor = point.clone().addScaledVector(right, unitsPerMeter);          // 地面上 1 米
+  const a = point.clone().project(camera), b = neighbor.clone().project(camera);
+  const dpx = Math.abs(b.x - a.x) * viewW / 2;
+  if (!(dpx > 1e-9)) return Number.NaN;
+  return 1 / dpx;
+}
+
 /** "整数好看"的候选：1 / 2 / 5 × 10ⁿ */
 function niceValues(max: number): number[] {
   const out: number[] = [];

@@ -7,7 +7,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import * as THREE from 'three';
 import {
-  metersPerPixel, niceScaleBar, formatMeters, niceRulerInterval, rulerTicks,
+  metersPerPixel, metersPerPixelAtGround, niceScaleBar, formatMeters, niceRulerInterval, rulerTicks,
 } from '../../env/renderer/scale.js';
 
 function cam(fov = 45): THREE.PerspectiveCamera { return new THREE.PerspectiveCamera(fov, 1.5, 10, 20000); }
@@ -80,5 +80,73 @@ describe('量距尺：刻度', () => {
     const p = new THREE.Vector3(0, 0.06, 0);
     assert.deepStrictEqual(rulerTicks(p, p.clone(), 10), []);
     assert.deepStrictEqual(rulerTicks(p, new THREE.Vector3(100, 0.06, 0), 0), []);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// 比例尺必须"量出来就是标注"——**在它自己所在的位置上**
+// 用户就是拿地面上的 s 刻度线（50m 一道）对照发现的：条长看着像 10m，标注却是 5m。
+// 根因：透视相机下横向尺度随**深度**变化，而比例尺画在屏幕**底部**（那里地面近得多），
+// 旧实现却用画面中心（OrbitControls 目标点）的尺度 → 条的实际覆盖 ≠ 标注。
+// 下面用"把条两端的屏幕点打到地面、量真实距离"来判（与用户的做法一致，不依赖实现细节）。
+// ─────────────────────────────────────────────────────────────
+describe('比例尺：条的覆盖必须等于标注（在它自己的位置上）', () => {
+  const W = 702, H = 378;
+  /** 复现 app 的典型取景：frameLocal(span=250) + 北在上 */
+  function appCamera(): THREE.PerspectiveCamera {
+    const cam = new THREE.PerspectiveCamera(45, W / H, 10, 20000);
+    cam.position.set(0, 0.9 * 250, 0 - 0.6 * 250);        // 世界：北 = −z → 相机在南侧（与 app 同）
+    cam.lookAt(new THREE.Vector3(0, 0, 0));
+    cam.updateMatrixWorld(true);
+    return cam;
+  }
+  const plane = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
+  const ray = new THREE.Raycaster();
+  /** 屏幕点 → 地面点（世界坐标） */
+  function groundAt(cam: THREE.PerspectiveCamera, sx: number, sy: number): THREE.Vector3 | null {
+    ray.setFromCamera(new THREE.Vector2((sx / W) * 2 - 1, -(sy / H) * 2 + 1), cam);
+    const hit = new THREE.Vector3();
+    return ray.ray.intersectPlane(plane, hit) ? hit : null;
+  }
+  /** 条两端打到地面后的**真实距离（米）** */
+  function coveredMeters(cam: THREE.PerspectiveCamera, widthPx: number, sy: number): number {
+    const a = groundAt(cam, W / 2 - widthPx / 2, sy), b = groundAt(cam, W / 2 + widthPx / 2, sy);
+    assert.ok(a && b, '条两端都应能打到地面');
+    return a!.distanceTo(b!) / 4;                          // 世界单位 → 米
+  }
+  const SY = H - 16;                                       // 比例尺所在高度（贴近底部）
+
+  it('用**条自己所在处**的尺度 → 覆盖 = 标注（误差 <2%）', () => {
+    const cam = appCamera();
+    const point = groundAt(cam, W / 2, SY)!;
+    const mpp = metersPerPixelAtGround(cam, point, W, H);
+    const bar = niceScaleBar(mpp);
+    const covered = coveredMeters(cam, bar.widthPx, SY);
+    assert.ok(Math.abs(covered - bar.meters) / bar.meters < 0.02,
+      `标注 ${bar.label}，实际覆盖 ${covered.toFixed(2)}m（差 ${(100 * Math.abs(covered - bar.meters) / bar.meters).toFixed(1)}%）`);
+  });
+
+  it('用**画面中心**的尺度（旧实现）→ 覆盖与标注明显不符（这就是被修掉的 bug）', () => {
+    const cam = appCamera();
+    const center = metersPerPixel(cam, new THREE.Vector3(0, 0, 0), H);
+    const bottomPoint = groundAt(cam, W / 2, SY)!;
+    const bottom = metersPerPixelAtGround(cam, bottomPoint, W, H);
+    assert.ok(Math.abs(center / bottom - 1) > 0.1,
+      `斜视时屏幕底部与中心的横向尺度应当明显不同（实测比 ${(center / bottom).toFixed(2)}）`);
+    const bar = niceScaleBar(center);
+    const covered = coveredMeters(cam, bar.widthPx, SY);
+    assert.ok(Math.abs(covered - bar.meters) / bar.meters > 0.1,
+      `旧实现应当明显不符：标注 ${bar.label} vs 实际覆盖 ${covered.toFixed(2)}m`);
+  });
+
+  it('正俯视（2D）时两者一致——没有斜视就没有深度差（守卫不能把正常情况改坏）', () => {
+    const cam = new THREE.PerspectiveCamera(45, W / H, 10, 20000);
+    cam.position.set(0, 250, 0.001);                       // 几乎正上方
+    cam.lookAt(new THREE.Vector3(0, 0, 0));
+    cam.updateMatrixWorld(true);
+    const point = groundAt(cam, W / 2, SY)!;
+    const at = metersPerPixelAtGround(cam, point, W, H);
+    const center = metersPerPixel(cam, new THREE.Vector3(0, 0, 0), H);
+    assert.ok(Math.abs(at / center - 1) < 0.05, `正俯视下应基本一致，实际比 ${(at / center).toFixed(3)}`);
   });
 });

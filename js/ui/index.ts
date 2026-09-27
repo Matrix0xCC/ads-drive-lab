@@ -20,7 +20,7 @@ import { UiController } from './controller.js';
 import type { RouteSource } from './state.js';
 import { wireToolbar } from './toolbar.js';
 import { setupMeasure } from './measure.js';
-import { metersPerPixel, niceScaleBar } from '../env/renderer/scale.js';
+import { metersPerPixel, metersPerPixelAtGround, niceScaleBar } from '../env/renderer/scale.js';
 import { wireRunPicker, setRunPickerOpen } from './runList.js';
 import { wireInteractions } from './interactions.js';
 import { setupReplayPanel } from './replayPanel.js';
@@ -299,10 +299,23 @@ export function setupUI(deps: UiDeps): {
   };
   let lastScaleLabel = '';
   let lastScalePx = -1;
+  const scaleRay = new THREE.Raycaster();
+  const scaleGround = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   function renderScaleBar(): void {
-    const h = canvas.clientHeight;
-    if (!h) return;
-    const { widthPx, label } = niceScaleBar(metersPerPixel(camera, controls.target, h));
+    const w = canvas.clientWidth, h = canvas.clientHeight;
+    if (!w || !h) return;
+    // 【必须在比例尺**自己所在的地面点**取尺度】它在屏幕底部，斜视时那里比画面中心近得多；
+    // 用中心尺度画出来的条会与实际覆盖对不上（用户拿地面刻度线一对照就发现了）。
+    const fr = scaleEls.fill?.getBoundingClientRect();
+    const cr = canvas.getBoundingClientRect();
+    const sy = fr && cr.height > 0 ? fr.top - cr.top + fr.height / 2 : h - 16;
+    scaleRay.setFromCamera(new THREE.Vector2(0, -(sy / h) * 2 + 1), camera);
+    const hit = new THREE.Vector3();
+    const onGround = scaleRay.ray.intersectPlane(scaleGround, hit);
+    const mpp = onGround
+      ? metersPerPixelAtGround(camera, hit, w, h)
+      : metersPerPixel(camera, controls.target, h);      // 打不到地面（几乎不可能）时退回中心尺度
+    const { widthPx, label } = niceScaleBar(mpp);
     const px = Math.round(widthPx);
     // 数值与**条宽**都要比：数值没变但相机缩放了 → 条宽必须跟着变，否则"20 m"会画成旧宽度（比例就错了）
     if (label === lastScaleLabel && px === lastScalePx) return;
