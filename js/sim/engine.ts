@@ -178,7 +178,13 @@ export class SimEngine {
 
   private _wireSubscribers(): void {
     // ── 交通流：**必须最先**（在同一 tick 里先动，感知/规划才看到本帧位置）──
-    this.bus.subscribe('tick', ({ dt }: { dt: number }) => { this.traffic?.step(dt); });
+    this.bus.subscribe('tick', ({ dt }: { dt: number }) => {
+      // 自车也参与 NPC 的前车搜索（方案 B：自车切入时后车会刹车）
+      this.traffic?.step(dt, {
+        x: this.car.x as number, y: this.car.y as number, speed: this.car.speed as number,
+        length: this.car.length as number,
+      });
+    });
 
     // ── 感知 20Hz ──
     this.bus.subscribe('tick', ({ dt }: { dt: number }) => {

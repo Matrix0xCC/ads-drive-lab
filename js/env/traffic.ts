@@ -1,25 +1,43 @@
-// ==================== 环境：交通流（方案 A：定速巡航车） ====================
+// ==================== 环境：交通流（方案 B：IDM 跟驰） ====================
 //
-// 【为什么先做这个】它把整条管线打通而**不引入新的算法风险**：
-//   车辆 = 会动的 `Obstacle` 矩形 → 感知/规划/检测器/渲染全部复用现有通路。
-// 之后再升级到 B（IDM 跟驰）只需替换 `step()` 里的速度更新，外围不动。
+// 【演进】A（定速巡航）先把管线打通；B 把"定速"换成 **IDM**（Intelligent Driver Model）——
+// 每辆车对**同车道的前车**加减速，而**自车也参与前车搜索**（自车切入时后车会刹车）。
+// 车辆对外依然只是一个 `Obstacle` 矩形 → 感知/规划/检测器/渲染一行没改。
 //
-// 【车道纪律：同车道同速 → 永不追尾】
-// 每条车道一个固定速度，车距由"等间距 + 小抖动"给定（抖动 ≤ 间距的 1/4，保证不重排）。
-// 于是**同车道内车辆间距恒定**，不需要任何 NPC-NPC 交互 —— 这是方案 A 的取巧之处，
-// 也是它便宜的代价：NPC 之间"看不见"彼此（方案 B 才引入跟驰）。
+// 【IDM 是什么】经典的微观跟驰模型，加速度由三项叠加：
+//     dv/dt = a·[ 1 − (v/v₀)^δ − (s*/gap)² ]
+//     s* = s₀ + max(0, v·T + v·Δv / (2·√(a·b)))          （期望间距）
+//   · v₀ = 期望速度（自由流时趋近它）；a = 最大加速度；b = 舒适减速度
+//   · gap = 净车距（自己车头到前车尾）；Δv = v − v_前（正数=在接近）
+//   · s₀ = 静止时的最小间距；T = 期望车头时距（秒）
+//   直觉：`1 − (v/v₀)^δ` 让他想开到 v₀；`(s*/gap)²` 让他在间距不足时刹车，
+//   且**间距越小、接近越快，刹车越猛**（这正是"不会追尾"的来源）。
+//
+// 【确定性】同步更新：先用**旧状态**算完所有车的加速度，再统一应用（与遍历顺序无关）。
+//   停车判定、回收、补车全部只看 state → 同种子逐位一致（traject.test.ts 钉住）。
 //
 // 【越界处理】闭环参考线（径向/环线）到末端回绕；开环参考线（OSM 链/路线）到末端**回收**，
-// 并在起点空出足够间距时**重生**（全部由 state 决定 → 确定性不受影响）。
+// 起点留出安全间距才**重生**。
 
 import { Obstacle } from '../shared/types/interfaces/geometry.js';
 import { FrenetReference } from '../shared/types/interfaces/planning.js';
 import { Vehicle, TrafficConfig } from '../shared/types/interfaces/traffic.js';
-import { frenetToCartesian, buildFrenetReference } from '../algo/plan/frenet.js';
+import { frenetToCartesian, buildFrenetReference, cartesianToFrenet } from '../algo/plan/frenet.js';
 import { Rng, createRng, deriveSeed } from '../shared/rng.js';
 import { Point2D } from '../shared/types/interfaces/geometry.js';
 import { laneCentersOf } from './track.js';
-import { px, m, mps, Px, PxPerSec } from '../shared/dimensions.js';
+import { px, m, mps, mps2, Px, PxPerSec } from '../shared/dimensions.js';
+
+/** IDM 参数（全部用 m()/mps()/mps2() 书写：改比例尺不用动这里） */
+const IDM_A = mps2(1.5) as number;          // 最大加速度
+const IDM_B = mps2(2.0) as number;          // 舒适减速度
+const IDM_T = 1.2;                          // 期望车头时距（秒）
+const IDM_S0 = m(2.0) as number;            // 静止最小间距
+const IDM_DELTA = 4;
+/** 物理减速度上限：IDM 在"间距 → 0"时会给出巨大的负值，必须夹住（否则一帧内速度反号） */
+const IDM_MAX_DECEL = mps2(-8) as number;
+/** 判定"在自车前面"的横向容差：自车与本车横向差小于它就算同一车道 */
+const EGO_LANE_TOL = m(1.8) as number;
 
 /** 车长/车宽（米 → px；略大于自车，便于观察） */
 const VEH_LEN = m(4.6);
@@ -32,8 +50,9 @@ const EGO_CLEAR = m(120);
 const RESPAWN_GAP = m(60);
 
 export interface TrafficSystem {
-  /** 固定步长推进（引擎在**感知之前**调用，保证雷达看到的是本帧位置） */
-  step(dt: number): void;
+  /** 固定步长推进（引擎在**感知之前**调用，保证雷达看到的是本帧位置）。
+   *  `ego` 传自车位置/速度：**自车参与 NPC 的前车搜索** → 自车切入时后车会刹车（方案 B 的核心）。 */
+  step(dt: number, ego?: { x: number; y: number; speed: number; length?: number }): void;
   /** 当前所有车辆当帧的障碍矩形（感知/规划/检测器用；与静态障碍同一个概念） */
   obstacles(): Obstacle[];
   /** 车辆内部状态（渲染/归档/测试用） */
@@ -51,6 +70,9 @@ export interface TrafficOptions {
   speedLimit: PxPerSec;
   config?: TrafficConfig;
   rng: Rng;
+  /** 注入初始车辆（**测试用**：想验"跟驰/让行"这类行为，必须能摆一个确定的车阵）。
+   *  给了它就跳过按密度生成；回收/补车逻辑照旧（开环时仍会在起点补车）。 */
+  initialVehicles?: Vehicle[];
 }
 
 export function createTraffic(o: TrafficOptions): TrafficSystem {
@@ -72,8 +94,12 @@ export function createTraffic(o: TrafficOptions): TrafficSystem {
     return mps(((o.speedLimit as number) / 4) * t) as PxPerSec;
   });
 
-  const vehicles: Vehicle[] = [];
-  if (L > 0 && perLane > 0 && (o.speedLimit as number) > 0) {
+  const vehicles: Vehicle[] = (o.initialVehicles ?? []).map(v => {
+    // 越界车道号会让 laneSpeeds[lane] 变成 undefined → NaN 静默传播（实测踩过）→ 注入时先夹住
+    const lane = Math.max(0, Math.min(nLanes - 1, v.lane));
+    return { ...v, lane, l: laneCenters[lane] };
+  });
+  if (!o.initialVehicles && L > 0 && perLane > 0 && (o.speedLimit as number) > 0) {
     const spacing = L / perLane;
     for (let lane = 0; lane < nLanes; lane++) {
       for (let k = 0; k < perLane; k++) {
@@ -93,14 +119,78 @@ export function createTraffic(o: TrafficOptions): TrafficSystem {
     }
   }
 
-  /** 起点附近是否已经够空（开环重生用） */
-  function startClear(): boolean {
-    return vehicles.every(v => v.s > RESPAWN_GAP);
+  /**
+   * 某条车道的起点是否够空（可以补一辆新车）。
+   *
+   * 【为什么按车道判、且必须有总量上限】实测：全局每步只补一辆时，入流上限 ≈ 1 辆/(空档/速度)，
+   * 跟不上出流（密度×速度×车道数）→ 车流跑着跑着**密度衰减到 1/3**。按车道独立补车后入流≈出流，
+   * 密度才守得住；总量上限防止"末端拥堵、车出不去"时无限膨胀。
+   */
+  function laneStartClear(lane: number, newSpeed: number): boolean {
+    const need = RESPAWN_GAP + IDM_S0 + newSpeed * IDM_T;
+    for (const v of vehicles) {
+      if (v.lane !== lane) continue;
+      if (v.s <= need) return false;                    // 本车道起点附近还有车
+    }
+    return true;
+  }
+
+  /** 自车在**本参考线**上的投影（同一条路才谈得上"前车"）；投影用规划器同一套 cartesianToFrenet */
+  function projectEgo(ego: { x: number; y: number; speed: number }): { s: number; l: number; speed: number } | null {
+    const f = cartesianToFrenet(px(ego.x), px(ego.y), o.ref);
+    if (!Number.isFinite(f.s)) return null;
+    return { s: f.s as number, l: f.l as number, speed: ego.speed };
+  }
+
+  /** 找前车（同车道、s 在自己前面最近的一辆；闭环时"绕回来"的车也算前面） */
+  function findLeader(v: Vehicle): { gap: number; speed: number; leadLen: number } | null {
+    let best: { gap: number; speed: number; leadLen: number } | null = null;
+    for (const other of vehicles) {
+      if (other === v || other.lane !== v.lane) continue;
+      let ds = other.s - v.s;
+      if (o.closed) { if (ds <= 0) ds += L; } else if (ds <= 0) continue;
+      if (!best || ds < best.gap) best = { gap: ds, speed: other.speed, leadLen: other.length };
+    }
+    return best;
+  }
+
+  /** IDM 加速度（px/s²）；`gap` 是**净车距** = 中心距 − 两车各半长（前车的车长也要算！） */
+  function idmAccel(v: Vehicle, v0: number, lead: { gap: number; speed: number; leadLen: number } | null): number {
+    const free = 1 - Math.pow(Math.max(0, v.speed) / Math.max(1e-6, v0), IDM_DELTA);
+    if (!lead) return IDM_A * free;
+    // 中心距 → 车头到前车尾的净距：**两车车长都要扣**（只扣自己的会停得比 s₀ 更近，实测差 ~2.5m）
+    const gap = Math.max(0.1, lead.gap - (VEH_LEN + lead.leadLen) / 2);
+    const dv = v.speed - lead.speed;                       // >0 = 在接近
+    const sStar = IDM_S0 + Math.max(0, v.speed * IDM_T + v.speed * dv / (2 * Math.sqrt(IDM_A * IDM_B)));
+    return IDM_A * (free - (sStar / gap) * (sStar / gap));
   }
 
   return {
-    step(dt: number) {
-      for (const v of vehicles) v.s += v.speed * dt;
+    step(dt: number, ego?: { x: number; y: number; speed: number; length?: number }) {
+      const egoLen = (ego?.length ?? (m(4.6) as number)) as number;   // 车长（px）；引擎传 CarState.length
+      const egoState = ego ? projectEgo(ego) : null;
+      // ① 先用**旧状态**把所有人的加速度算完（同步更新 → 与遍历顺序无关，确定性稳）
+      const accels = o.config?.model === 'constant' ? null : vehicles.map((v) => {
+        const v0 = (laneSpeeds[v.lane] ?? laneSpeeds[0]) as number;   // 兜底：绝不让 undefined 变成 NaN
+        let lead = findLeader(v);
+        // 自车也是"前车"之一：同车道且在 v 前面、比现有前车更近 → 换成自车
+        if (egoState && Math.abs(egoState.l - v.l) <= EGO_LANE_TOL) {
+          let ds = egoState.s - v.s;
+          if (o.closed) { if (ds <= 0) ds += L; } else if (ds <= 0) ds = -1;
+          if (ds > 0 && (!lead || ds < lead.gap)) lead = { gap: ds, speed: egoState.speed, leadLen: egoLen };
+        }
+        return idmAccel(v, v0, lead);
+      });
+      // ② 再统一应用（速度夹到 [0, a] 的物理区间；减速度夹到 IDM_MAX_DECEL）
+      for (let i = 0; i < vehicles.length; i++) {
+        const v = vehicles[i];
+        if (accels) {
+          const acc = Math.max(IDM_MAX_DECEL, Math.min(IDM_A, accels[i]));
+          v.speed = Math.max(0, v.speed + acc * dt);         // 不倒退
+        }
+        // model = 'constant'（方案 A 基线）：速度不变，只推进位置
+        v.s += v.speed * dt;
+      }
       if (o.closed) {
         for (const v of vehicles) { if (v.s >= L) v.s -= L; }
       } else {
@@ -109,13 +199,18 @@ export function createTraffic(o: TrafficOptions): TrafficSystem {
             vehicles.splice(i, 1);                       // 回收（出了参考线范围）
           }
         }
-        if (startClear()) {                              // 起点空了就补一辆（密度靠这个维持）
-          const lane = Math.floor(o.rng() * nLanes);
-          vehicles.push({
-            s: 0, lane, l: laneCenters[lane],
-            speed: laneSpeeds[lane] as number,
-            length: VEH_LEN as number, width: VEH_WID as number,
-          });
+        // 按车道独立补车（入流≈出流才守得住密度），但不超过目标总量
+        const targetTotal = perLane * nLanes;
+        if (vehicles.length < targetTotal) {
+          for (let lane = 0; lane < nLanes && vehicles.length < targetTotal; lane++) {
+            const v0 = laneSpeeds[lane] as number;
+            if (!laneStartClear(lane, v0)) continue;
+            vehicles.push({
+              s: 0, lane, l: laneCenters[lane],
+              speed: v0,
+              length: VEH_LEN as number, width: VEH_WID as number,
+            });
+          }
         }
       }
     },
