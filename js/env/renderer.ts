@@ -68,17 +68,18 @@ let _basemapVisible = false;
  * 按地图换底图（异步）。瓦片缓存是 gitignore 的 → **没有清单就静默降级为"无底图"**，
  * 绝不阻塞或影响仿真。换地图时释放上一张的纹理（否则 VRAM 泄漏）。
  */
-export async function applyBasemap(scene: THREE.Scene, mapName: string, visible: boolean): Promise<void> {
+export async function applyBasemap(scene: THREE.Scene, mapName: string, visible: boolean): Promise<string | null> {
   _basemapVisible = visible;
-  if (_basemapKey === mapName && _basemap) { _basemap.setVisible(visible); return; }
+  if (_basemapKey === mapName && _basemap) { _basemap.setVisible(visible); return _basemap.attribution; }
   if (_basemap) { scene.remove(_basemap.group); _basemap.dispose(); _basemap = null; }
   _basemapKey = mapName;
   const handle = await loadBasemap(mapName);
-  if (!handle || _basemapKey !== mapName) { handle?.dispose(); return; }   // 加载期间又换了地图
+  if (!handle || _basemapKey !== mapName) { handle?.dispose(); return null; }   // 加载期间又换了地图
   _basemap = handle;
   _basemap.setVisible(_basemapVisible);
   scene.add(handle.group);
   console.info(`[basemap] ${mapName}: ${handle.stats.total} 张瓦片（z=${handle.zoom}）开始加载；署名 ${handle.attribution}`);
+  return handle.attribution;
 }
 
 /** 底图是否可用（供 UI 提示；未加载完返回 false） */

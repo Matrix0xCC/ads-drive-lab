@@ -65,8 +65,13 @@ function applyScenario(json: unknown): string | null {
   resetSceneCache(scene);
   // 世界尺寸随地图（OSM 长条图 900×1840m ≫ 默认 450×200m）：地面/网格重建 + 智能取景
   setWorldExtent(scene, engine.worldW, engine.worldH);
-  // 底图（真实地图瓦片）：**异步、可失败**——没有瓦片缓存时静默降级为无底图，不影响仿真
-  void applyBasemap(scene, engine.mapDef.name, ui.isBasemapVisible());
+  // 底图（真实地图瓦片）：**异步、可失败**——没有瓦片缓存时静默降级为无底图，不影响仿真。
+  // 署名是许可义务（OSM ODbL）：拿到后写进 HUD，并随底图开关显示/隐藏。
+  basemapAttribution = '';
+  void applyBasemap(scene, engine.mapDef.name, ui.isBasemapVisible()).then(attr => {
+    basemapAttribution = attr ?? '';
+    renderBasemapAttribution();
+  });
   frameSmart(camera, controls, canvas.clientWidth || W, canvas.clientHeight || H,
     engine.worldW, engine.worldH, engine.car.x as number, engine.car.y as number);
   frames.length = 0;   // 归档从本次场景加载起重新收集
@@ -130,10 +135,21 @@ const ui = setupUI({
 
 engine.bus.subscribe('control:state', ({ snapshot, lidarScan, trajectory, state }: any) => {
   latestCar = { x: snapshot.car.x as number, y: snapshot.car.y as number };
+  renderBasemapAttribution();
   updateScene(scene, snapshot, lidarScan, state, lidarLines, trajectory, engine.route, engine.latestGPS,
     ui.isCorridorVisible() ? (debug.planning?.viz ?? null) : null, ui.isFrenetTicksVisible(),
     ui.isLidarVisible(), ui.isPaused(), ui.isBasemapVisible());
 });
+
+// 底图署名（许可义务）：只在底图打开且有署名时显示
+let basemapAttribution = '';
+function renderBasemapAttribution(): void {
+  const el = document.getElementById('hud-basemap-attribution');
+  if (!el) return;
+  const show = basemapAttribution !== '' && ui.isBasemapVisible();
+  el.style.display = show ? 'block' : 'none';
+  if (show) el.textContent = basemapAttribution;
+}
 
 // ==================== 主循环（固定步长累积器） ====================
 //

@@ -150,7 +150,8 @@ Pure Pursuit：δ = atan2(2·L·sin α, ld)，预瞄距离 = clamp(0.4×speed, 1
   `geo.test.ts` 专门断言这条 30% 的坑。**别把瓦片像素当米。**
 - **冲突处理**：瓦片上画的道路与仿真路面**边缘不会重合**（宽度/描边风格不同 + 平滑带来米级位移）→ 默认把底图
   **压暗**（`color` 乘法 ≈0.55）当上下文，仿真路面仍是视觉主体。
-- **署名**：清单里的 `attribution` 必须在界面上显示（OSM ODbL / 各提供方要求）。
+- **署名**：清单里的 `attribution` 必须**可见**（OSM ODbL / 各提供方要求）——实现为画布左下 HUD 的
+  `#hud-basemap-attribution`，只在底图打开且有署名时显示（`main.ts:renderBasemapAttribution`）。
 
 ### 地图来源与开环/路网道路（`env/mapDefinitions.ts` + `env/track.ts`）
 
