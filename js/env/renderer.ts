@@ -81,7 +81,9 @@ export async function applyBasemap(scene: THREE.Scene, mapKey: string): Promise<
   _basemap = handle;
   _basemap.setVisible(_basemapVisible);
   scene.add(handle.group);
-  console.info(`[basemap] ${mapKey}: ${handle.stats.total} 张瓦片（z=${handle.zoom}）开始加载；署名 ${handle.attribution}`);
+  // 把摆法写进日志：出问题时能一眼区分"代码没生效（旧模块）"与"摆法算错了"
+  console.info(`[basemap] ${mapKey}: ${handle.stats.total} 张瓦片（z=${handle.zoom}）开始加载；`
+    + `摆法 rotation.x=-π/2 + flipY=false（正面可见 / 图象上方朝北 / 右方朝东）；署名 ${handle.attribution}`);
   return handle.attribution;
 }
 
