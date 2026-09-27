@@ -181,6 +181,8 @@ export function initScene(
   // 上限须容纳窄视口取景的拉远距离（k 最大 ≈ worldAspect/minAspect，600k/400k 缩放）
   controls.maxDistance = 15000;
   controls.maxPolarAngle = Math.PI / 2 - 0.05;  // 不允许翻到底部
+  // 用户一开始拖动，就放弃罗盘的平滑转动（否则动画会和手指抢方向盘）
+  controls.addEventListener('start', () => { _viewSnap = null; });
   frameCamera(camera, controls, viewW, viewH, worldW, worldH);
 
   // 光照
@@ -199,3 +201,134 @@ export function initScene(
 
   return { renderer, scene, camera, controls, lidarLines };
 }
+
+// ═══════════════════════════════════════════════════
+// 罗盘（导航软件式）：方位角/俯仰角的读取与平滑转动
+// ═══════════════════════════════════════════════════
+//
+// 【约定】世界：x = 东、y = 上、z 的**负方向**是北（场景根 z 镜像，见文件头）。
+// 罗盘的"方位角"= **视线方向**在地面上的朝向，以正北为 0°、顺时针为正（东 90°、南 180°、西 270°）
+// ——也就是"屏幕上方指向哪个方位"，这正是导航软件罗盘显示的量。
+//
+// 与 OrbitControls 的关系：控件用球坐标表达相机相对目标点的位置：
+//   x = r·sinφ·sinθ, y = r·cosφ, z = r·sinφ·cosθ   （θ 自 +Z 起算、朝 +X 为正）
+//   → 视线方向（水平分量）= −(sinθ, cosθ)，而正北 = (0, −1)
+//   → 方位角 bearing = atan2(−sinθ, cosθ) = **−θ**
+// 所以"转到方位 b"就是 **θ = −b**（下面 `bearingToThetaRad` 钉住了这个符号）。
+
+/** 俯仰角（度）：0 = 垂直俯视（2D），90 = 与地面平行。取 OrbitControls 的 φ（自 +Y 起算）。 */
+export function viewPitchDeg(camera: THREE.PerspectiveCamera, target: THREE.Vector3): number {
+  const off = camera.position.clone().sub(target);
+  const r = off.length();
+  if (r < 1e-6) return 0;
+  return Math.acos(Math.min(1, Math.max(-1, off.y / r))) * 180 / Math.PI;
+}
+
+/** 方位角（度，0=正北、顺时针）：即"屏幕上方"指向的方位。见上方推导。 */
+export function compassBearingDeg(camera: THREE.PerspectiveCamera, target: THREE.Vector3): number {
+  const off = camera.position.clone().sub(target);
+  const theta = Math.atan2(off.x, off.z);           // OrbitControls 的 θ
+  return normalizeDeg(-theta * 180 / Math.PI);
+}
+
+/** 把角度规范到 [0, 360) */
+export function normalizeDeg(deg: number): number {
+  return ((deg % 360) + 360) % 360;
+}
+
+/** 方位角 → OrbitControls 的 θ（弧度）。**符号在这里**：θ = −bearing。 */
+export function bearingToThetaRad(bearingDeg: number): number {
+  return -bearingDeg * Math.PI / 180;
+}
+
+/** 从 a 转到 b 的**最短**角度差（度，含符号，∈(−180, 180]）——避免"350°→10° 倒着转 340°" */
+export function shortestAngleDeltaDeg(a: number, b: number): number {
+  let d = normalizeDeg(b) - normalizeDeg(a);
+  if (d > 180) d -= 360;
+  if (d <= -180) d += 360;
+  return d;
+}
+
+/** 同上，弧度版（转 θ 用） */
+export function shortestAngleDeltaRad(a: number, b: number): number {
+  return shortestAngleDeltaDeg(a * 180 / Math.PI, b * 180 / Math.PI) * Math.PI / 180;
+}
+
+/** 方位角的中文标签：正北 / 北偏东 23° / 东偏南 23° … */
+export function bearingLabel(bearingDeg: number): string {
+  const b = normalizeDeg(bearingDeg);
+  const cardinals: [number, string][] = [[0, '正北'], [90, '正东'], [180, '正南'], [270, '正西']];
+  for (const [deg, name] of cardinals) {
+    if (Math.abs(shortestAngleDeltaDeg(b, deg)) < 1) return name;
+  }
+  // 以最近的象限基准（北/东/南/西）为参照，给出 ≤45° 的偏移
+  const base = Math.round(b / 90) * 90;
+  const diff = shortestAngleDeltaDeg(base, b);          // ∈ (−45, 45)
+  const baseName = ({ 0: '北', 90: '东', 180: '南', 270: '西' } as Record<number, string>)[normalizeDeg(base)];
+  const dir = diff > 0 ? '偏东' : '偏西';
+  // "东偏南"？约定用**相邻顺时针/逆时针**的名字更符合习惯：北→东→南→西 顺时针
+  const clockwiseOf: Record<string, string> = { 北: '东', 东: '南', 南: '西', 西: '北' };
+  const ccwOf: Record<string, string> = { 北: '西', 西: '南', 南: '东', 东: '北' };
+  const toward = diff > 0 ? clockwiseOf[baseName] : ccwOf[baseName];
+  return `${baseName}偏${toward} ${Math.abs(diff).toFixed(0)}°`;
+}
+
+/** 2D（垂直俯视）与 3D（斜视）的目标俯仰角。3D 取 atan2(0.6, 0.9) ≈ 33.7°，
+ *  与 `frameLocal` 的默认取景（0.9 高 / 0.6 后）一致，点 3D 即回到"看上去正常"的视角。 */
+export const VIEW_PITCH_2D_DEG = 1.5;                 // 留一点余量：正上方 lookAt 会退化
+export const VIEW_PITCH_3D_DEG = Math.atan2(0.6, 0.9) * 180 / Math.PI;
+
+interface ViewSnap {
+  t: number; ms: number;
+  fromTheta: number; dTheta: number; fromPhi: number; dPhi: number;
+}
+
+let _viewSnap: ViewSnap | null = null;
+
+/**
+ * 平滑转到目标方位/俯仰（只改朝向，**保持目标点与距离**）。
+ * 用户一旦拖动就放弃（`initScene` 里注册的 controls 'start'）。
+ */
+export function snapView(
+  camera: THREE.PerspectiveCamera, controls: OrbitControls,
+  opts: { bearingDeg?: number; pitchDeg?: number }, ms = 250,
+): void {
+  const off = camera.position.clone().sub(controls.target);
+  const r = off.length();
+  if (r < 1e-6) return;
+  const fromTheta = Math.atan2(off.x, off.z);
+  const fromPhi = Math.acos(Math.min(1, Math.max(-1, off.y / r)));
+  const toTheta = opts.bearingDeg === undefined
+    ? fromTheta
+    : fromTheta + shortestAngleDeltaRad(fromTheta, bearingToThetaRad(opts.bearingDeg));
+  const toPhi = opts.pitchDeg === undefined
+    ? fromPhi
+    : Math.min(controls.maxPolarAngle, Math.max(0, opts.pitchDeg * Math.PI / 180));
+  _viewSnap = { t: 0, ms: Math.max(1, ms), fromTheta, dTheta: toTheta - fromTheta, fromPhi, dPhi: toPhi - fromPhi };
+}
+
+/** 每帧推进平滑转动（主循环里调用；不在动画中则什么都不做） */
+export function stepViewSnap(
+  camera: THREE.PerspectiveCamera, controls: OrbitControls, dtMs: number,
+): boolean {
+  if (!_viewSnap) return false;
+  const s = _viewSnap;
+  s.t = Math.min(s.ms, s.t + dtMs);
+  const u = s.t / s.ms;
+  const e = u * u * (3 - 2 * u);                       // smoothstep 缓动
+  const off = camera.position.clone().sub(controls.target);
+  const r = off.length();
+  const phi = s.fromPhi + s.dPhi * e;
+  const theta = s.fromTheta + s.dTheta * e;
+  camera.position.set(
+    controls.target.x + r * Math.sin(phi) * Math.sin(theta),
+    controls.target.y + r * Math.cos(phi),
+    controls.target.z + r * Math.sin(phi) * Math.cos(theta),
+  );
+  controls.update();
+  if (s.t >= s.ms) _viewSnap = null;
+  return true;
+}
+
+/** 是否正在平滑转动（界面层可用它显示状态） */
+export function isViewSnapping(): boolean { return _viewSnap !== null; }

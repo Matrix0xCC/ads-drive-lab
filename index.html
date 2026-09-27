@@ -81,6 +81,55 @@
     #hud-mini .state-normal { color: #44ff44; font-weight: bold; }
     #hud-mini .state-avoid  { color: #ff4444; font-weight: bold; }
 
+    /* ── 罗盘（画布左下，导航软件式）：随相机方位实时旋转 + 2D/3D 俯仰快捷 ──
+       圆环上的 N/E/S/W 是**可点的按钮**（转到该方向）；字母随圆环移动但文字保持正立
+       （圆环 rotate(-bearing)，字母各自 rotate(+bearing) 抵消）。 */
+    #compass {
+      position: absolute; left: 12px; bottom: 12px; z-index: 16;
+      display: flex; flex-direction: column; align-items: center; gap: 5px;
+      font-family: monospace; user-select: none;
+    }
+    #compass-dial {
+      position: relative; width: 74px; height: 74px; border-radius: 50%;
+      background: radial-gradient(circle at 50% 42%, #2a2a2acc, #161616ee);
+      border: 1px solid #4a4a4a; box-shadow: 0 1px 6px rgba(0,0,0,0.6);
+      padding: 0; cursor: pointer;
+    }
+    #compass-dial:hover { border-color: #6a6a6a; }
+    /* 屏幕上方固定刻度：读"圆环上的字在哪个位置"就靠它 */
+    #compass-dial::before {
+      content: ''; position: absolute; left: 50%; top: -1px; transform: translateX(-50%);
+      border-left: 5px solid transparent; border-right: 5px solid transparent;
+      border-top: 7px solid #ff5555;
+    }
+    #compass-ring { position: absolute; inset: 0; }
+    .compass-dir {
+      position: absolute; width: 20px; height: 16px; padding: 0;
+      background: none; border: none; cursor: pointer;
+      font-family: monospace; font-size: 12px; font-weight: bold; color: #bbb;
+      transform-origin: 50% 50%;
+    }
+    .compass-dir:hover { color: #fff; }
+    .compass-dir.north { color: #ff5555; }
+    /* 四个字母贴在圆环上下左右；用 margin 居中（**不用 transform** —— transform 要留给
+       反向旋转，让文字在圆环转动时保持正立） */
+    .compass-dir[data-bearing="0"]   { top: 3px;    left: 50%; margin-left: -10px; }
+    .compass-dir[data-bearing="90"]  { top: 50%;    right: 3px; margin-top: -8px; }
+    .compass-dir[data-bearing="180"] { bottom: 3px; left: 50%; margin-left: -10px; }
+    .compass-dir[data-bearing="270"] { top: 50%;    left: 3px;  margin-top: -8px; }
+    /* 2D/3D：当前生效的一侧高亮（俯仰角决定，每帧对齐） */
+    #compass-pitch { display: flex; gap: 4px; }
+    .compass-pitch-btn {
+      padding: 2px 8px; background: #202020dd; color: #bbb; border: 1px solid #3a3a3a;
+      border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 11px;
+    }
+    .compass-pitch-btn:hover { background: #2c2c2cee; }
+    .compass-pitch-btn.active { border-color: #22dd77; background: #17351fff; color: #7ef0ab; }
+    #compass-bearing {
+      color: #ddd; font-size: 11px; text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+      min-width: 78px; text-align: center;
+    }
+
     /* ── 右侧面板（信息 / 调试） ── */
     #info-panel, #inspect-panel {
       position: absolute; right: 15px; z-index: 20;
@@ -236,6 +285,26 @@
         <div id="hud-state" class="state-normal">状态: NORMAL</div>
         <!-- 底图署名：OSM ODbL / 各瓦片提供方要求**可见**署名；仅在底图打开时显示 -->
         <div id="hud-basemap-attribution" style="display:none"></div>
+      </div>
+
+      <!-- 罗盘（左下）：点圆环上的 N/E/S/W 转到该方向；点圆心回到正北；2D=垂直俯视、3D=斜视 -->
+      <div id="compass">
+        <!-- 注意：圆盘是 div 不是 button —— 里面还有 4 个字母按钮，button 嵌套 button 是非法 HTML，
+             浏览器会把内层按钮提出去，圆环布局会散 -->
+        <div id="compass-dial" role="button" tabindex="0"
+             title="点圆环上的 N/E/S/W 转到该方向；点中心回到正北 (N)">
+          <div id="compass-ring">
+            <button class="compass-dir north" data-bearing="0"   title="正北 (N)">N</button>
+            <button class="compass-dir"       data-bearing="90"  title="正东">E</button>
+            <button class="compass-dir"       data-bearing="180" title="正南">S</button>
+            <button class="compass-dir"       data-bearing="270" title="正西">W</button>
+          </div>
+        </div>
+        <div id="compass-bearing">正北</div>
+        <div id="compass-pitch">
+          <button class="compass-pitch-btn" id="btn-view-2d" title="垂直俯视 (2)">2D</button>
+          <button class="compass-pitch-btn" id="btn-view-3d" title="斜视 3D (3)">3D</button>
+        </div>
       </div>
 
       <!-- 信息面板（右上，可折叠）：详细遥测 -->

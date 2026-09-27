@@ -83,6 +83,18 @@ requestAnimationFrame 主循环 (~60Hz)
 4. **量纲安全** — `dimensions.ts` 品牌类型（Px, Radians, PxPerSec, DimLess...）编译时防量纲错误，编译后完全擦除。工厂函数（`px()`, `m()`, `rad()`...）是唯一 unsafe cast 点，只允许在模块边界使用
 5. **单位系统** — 所有物理量配置用 `m()` / `mps()` / `mps2()` 书写（`SIM_UNITS_PER_METER = 4`，改比例尺只需改这一个常量），不要硬编码 px 值
 6. **UI 状态单一来源** — 所有 UI 行为经 `ui/state.ts` 的纯函数 reduce 驱动，DOM 只是状态的渲染投影；`ui/controller.ts` 是"状态变化 → 副作用"的唯一边界；main 只通过 `UiDeps.actions` 改世界。布局：左侧菜单栏（分区**常展开**：世界/数据）+ **画布左缘纵向 toolbar**（暂停/视角/**跟随**/走廊/刻度/射线/路线，图标+两字标签，开关类高亮=开）+ 画布右上「信息」面板（详细遥测）+ 右下「调试」面板（Inspect，`infoOpen`/`debugOpen` 可折叠）+ 画布左上速度/状态精简行。快捷键：Space 暂停/回放播放、Esc 取消选点/退出回放、R 视角、F 相机跟随、I 折叠「调试」面板、C 走廊可视化、G Frenet 刻度、L LiDAR 射线、T 设路线、WASD 平移视角
+  + **画布左下罗盘**（导航软件式）：圆环上的 **N/E/S/W 可点**（转到该方位）、**点圆心回正北**、下方 **2D/3D**
+  （2D = 垂直俯视 1.5°、3D = 斜视 33.7° = `atan2(0.6,0.9)`，与 `frameLocal` 默认取景一致），
+  圆环下方显示**方位文字**（`正北` / `北偏东 23°` …）。快捷键 **`N` 正北、`2` 2D、`3` 3D**（不与既有键冲突）。
+  **只改朝向、不动目标点与距离**，可组合（"正北 + 2D" = 点两下）；**用户一拖动就放弃动画**（`controls` 的 `start`）；
+  跟随模式下也有效（`followCar` 只平移不旋转）。
+  **方位角的定义与符号都在 `renderer/scene.ts`**（`compassBearingDeg` / `bearingToThetaRad` / `shortestAngleDeltaDeg`）：
+  世界 z 负向是北 ⇒ `bearing = −θ`（θ 是 OrbitControls 的球坐标），由 `js/test/renderer/compass.test.ts` 用
+  "相机在南/西/北/东侧时读数应为 0/90/180/270"逐条钉住（这类符号本会话已经栽过几次）。
+  罗盘**界面**只是相机状态的投影：每帧在 `ui.tick` 里读相机、**变化才写 DOM**（圆环转 `−bearing`、字母各自
+  转 `+bearing` 保持正立、2D/3D 高亮由**实际俯仰角**决定，手拖到中间角度时两个都不亮）。
+  `index.html` 的罗盘结构由 `js/test/ui/compass-dom.test.ts` 守（JS 取元素全是静默的 `?.`，
+  改名会无声失效；另外圆盘必须是 `div[role=button]`——里面还有按钮，`button` 套 `button` 是非法 HTML）。
   （画布左缘纵向 toolbar 另有同功能按钮；两者默认：刻度/射线开、走廊关、**相机跟随按地图**——长条大世界（OSM 高速）开、径向小世界关）
   **`main.ts` 的模块初始化顺序是硬约束**：`const ui = setupUI(...)` 在**顶层调用 `applyScenario` 之后**才初始化，
   所以"模块初始化阶段就会被调用"的函数（`applyScenario`）**不得引用 `ui`/`replay` 之类后声明的绑定**，

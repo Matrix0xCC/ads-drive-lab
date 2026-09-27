@@ -11,6 +11,10 @@ import { RoadGraph } from '../algo/routePlanner.js';
 import { ReplayController } from '../replay.js';
 import type { RouteState } from '../sim/engine.js';
 import { frameSmart } from '../env/renderer.js';
+import {
+  compassBearingDeg, viewPitchDeg, bearingLabel, snapView, stepViewSnap,
+  VIEW_PITCH_2D_DEG, VIEW_PITCH_3D_DEG,
+} from '../env/renderer/scene.js';
 import { panDelta } from './cameraKeys.js';
 import { UiController } from './controller.js';
 import { wireToolbar } from './toolbar.js';
@@ -199,6 +203,56 @@ export function setupUI(deps: UiDeps): {
     frameSmart(camera, controls, canvas.clientWidth, canvas.clientHeight,
       deps.engine.worldW, deps.engine.worldH, deps.engine.carX, deps.engine.carY);
   }
+  // ── 罗盘：一次性视角命令（与"视角/R"同类），以及每帧对齐的界面状态 ──
+  // 注释：方位角 0 = 正北、顺时针为正（见 renderer/scene.ts 的推导）；这里只做"命令 → 动画"。
+  const BEARINGS: Record<string, number> = { N: 0, E: 90, S: 180, W: 270 };
+  function snapViewToBearing(deg: number): void {
+    snapView(camera, controls, { bearingDeg: deg });
+  }
+  function snapViewToPitch(mode: '2d' | '3d'): void {
+    snapView(camera, controls, { pitchDeg: mode === '2d' ? VIEW_PITCH_2D_DEG : VIEW_PITCH_3D_DEG });
+  }
+  // 圆环上的 N/E/S/W：点哪个转到哪个（字母随圆环移动、文字保持正立，见 index.html 注释）
+  document.querySelectorAll<HTMLElement>('.compass-dir').forEach((btn) => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();                       // 别冒泡到圆心（圆心 = 正北）
+      const b = BEARINGS[btn.textContent?.trim() ?? ''];
+      if (b !== undefined) snapViewToBearing(b);
+    });
+  });
+  document.getElementById('compass-dial')?.addEventListener('click', () => snapViewToBearing(0));
+  document.getElementById('btn-view-2d')?.addEventListener('click', () => snapViewToPitch('2d'));
+  document.getElementById('btn-view-3d')?.addEventListener('click', () => snapViewToPitch('3d'));
+
+  /* 罗盘界面 = 相机状态的**投影**（不是 UI 状态）：每帧读相机、变化才写 DOM。
+     圆环转 −bearing（让 N 指向屏幕上的北），字母各自转 +bearing 抵消父级旋转 → 文字正立。 */
+  const compassEls = {
+    ring: document.getElementById('compass-ring'),
+    dirs: Array.from(document.querySelectorAll<HTMLElement>('.compass-dir')),
+    bearing: document.getElementById('compass-bearing'),
+    btn2d: document.getElementById('btn-view-2d'),
+    btn3d: document.getElementById('btn-view-3d'),
+  };
+  let lastBearing = NaN;
+  let lastPitchMode = '';
+  function renderCompass(): void {
+    const bearing = compassBearingDeg(camera, controls.target);
+    if (Math.abs(bearing - lastBearing) > 0.05) {
+      lastBearing = bearing;
+      if (compassEls.ring) compassEls.ring.style.transform = `rotate(${-bearing}deg)`;
+      for (const d of compassEls.dirs) d.style.transform = `rotate(${bearing}deg)`;
+      if (compassEls.bearing) compassEls.bearing.textContent = bearingLabel(bearing);
+    }
+    // 2D/3D 高亮：由**实际俯仰角**决定（用户手拖到中间角度时两个都不亮，如实反映）
+    const pitch = viewPitchDeg(camera, controls.target);
+    const mode = pitch < 8 ? '2d' : pitch > 20 ? '3d' : '';
+    if (mode !== lastPitchMode) {
+      lastPitchMode = mode;
+      compassEls.btn2d?.classList.toggle('active', mode === '2d');
+      compassEls.btn3d?.classList.toggle('active', mode === '3d');
+    }
+  }
+
   // ── WASD 相机平移：按下集合由 window 维护，实际位移在 tick 里按 dt 应用 ──
   const heldKeys = new Set<string>();
   window.addEventListener('keydown', (e) => {
@@ -237,6 +291,15 @@ export function setupUI(deps: UiDeps): {
       case 'r': case 'R':
         resetCamera();
         break;
+      case 'n': case 'N':                       // N = 正北（navigation 习惯）
+        snapViewToBearing(0);
+        break;
+      case '2':
+        snapViewToPitch('2d');
+        break;
+      case '3':
+        snapViewToPitch('3d');
+        break;
       case 'i': case 'I':
         controller.dispatch({ type: 'TOGGLE_DEBUG' });
         break;
@@ -274,6 +337,8 @@ export function setupUI(deps: UiDeps): {
       if (controller.state.debugOpen) updateInspectPanel(dt);
       renderPauseButton();   // 回放播放态可能由 Space/回放栏改变 → 每帧对齐图标（变化才写 DOM）
       moveCameraByKeys(dt);  // WASD 平移相机（主循环每帧调用；controls.update 在其后应用）
+      stepViewSnap(camera, controls, dt * 1000);   // 罗盘的平滑转动（dt 秒 → 毫秒）
+      renderCompass();                             // 圆环旋转/方位文字/2D-3D 高亮（变化才写 DOM）
     },
     /** 走廊可视化是否生效（main 的渲染订阅用）：开关打开且处于实时模式——
      *  回放不跑规划器，debug.planning.viz 是上一帧实时数据，画出来会是陈旧走廊。 */
