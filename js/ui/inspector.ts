@@ -26,10 +26,20 @@ export function updateInspectPanel(dt: number) {
     html += `  射线: ${p.rayCount} | 前方: ${toM(p.frontDist)}m\n`;
     html += `  最近命中: ${toM(p.minDist)}m\n`;
     html += `  过滤: ${p.rawHits}→${p.filteredHits} (背景减除)\n`;
+    // 【S3】物体层：聚类 + 跟踪得到的物体（字段已是 m / m·s⁻¹）。列出最近的三个已确认物体，
+    // 便于在浏览器里直接核对"旁边那辆车被跟成了什么速度"。
+    if (p.objects && p.objects.length) {
+      const conf = p.objects.filter(o => o.confirmed);
+      html += `  物体: ${conf.length}/${p.objects.length} 已确认（聚类+跟踪）\n`;
+      for (const o of conf.slice(0, 3)) {
+        html += `    #${o.id} s=${o.s.toFixed(0)}m l=${o.l.toFixed(1)}m v=${o.vS.toFixed(1)}m/s 射线${o.rays} 传感器${o.sensor}\n`;
+      }
+    }
   }
   html += pl?.source === 'replay' ? '\n<b>Planning（回放·归档+重算）</b>\n' : '\n<b>Planning</b>\n';
   if (pl) {
     html += `  状态: ${pl.state} | S=${toM(pl.frenetS)}m L=${toM(pl.frenetL, 2)}m\n`;
+    if (pl.cruiseV) html += `  巡航目标: ${toM(pl.cruiseV)}m/s（地图限速 ∩ 本车道前方最近命中）\n`;
     html += `  dl/ds=${pl.dl_ds.toFixed(4)} | Δheading=${(pl.headingDiff*180/Math.PI).toFixed(1)}°\n`;
     if (pl.remainingDist > 0) html += `  剩余: ${toM(pl.remainingDist)}m\n`;
     html += `  速度: 目标 ${toM(pl.speedTarget)}m/s 模式 ${pl.speedMode}\n`;
