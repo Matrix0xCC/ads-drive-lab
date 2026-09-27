@@ -37,6 +37,7 @@ import { DEFAULT_SENSOR_RIG, rigRayCount } from '../shared/sensors.js';
 const RIG_RAY_COUNT = rigRayCount(DEFAULT_SENSOR_RIG);
 import { plan, getPlannerState } from '../algo/plan/index.js';
 import { resetClosing } from '../algo/plan/closing.js';
+import { trackedObjects, resetObjects, OBJECT_DT } from '../algo/objects.js';
 import { control } from '../algo/control.js';
 import { buildRoadGraph, buildGraphFromEdges, RoadGraph } from '../algo/routePlanner.js';
 import { Rng, createRng, deriveSeed } from '../shared/rng.js';
@@ -126,6 +127,7 @@ export class SimEngine {
     this.obstacles = cfg.obstacles ?? generateObstacles(this.track, count, 8, 14, obsRng);
     this.traffic = buildTrafficFor(this.track, this.route, cfg.traffic, seed);
     resetClosing();          // 换世界 → 丢掉上一个世界的雷达时序（否则首帧的前车速度是废数据）
+    resetObjects();          // 同理：物体轨迹也不能跨世界关联
 
     this.car = createCar(this.track.centerPoints[0], this.track.centerPoints[1]);
     if (cfg.carStart) {
@@ -198,6 +200,14 @@ export class SimEngine {
       if (this._perceptionTimer >= 1 / PERCEPTION_HZ) {
         const snapshot = createWorldSnapshot(this.car, this.track, this.activeObstacles(), this.route, this.traffic?.obstacles());
         this.latestLidarScan = sense(snapshot);
+        // 物体层（S3）：一帧扫描 → 聚类 → 跟踪 → 带速度的物体列表（规划器的下一步输入）
+        const tracks = trackedObjects(this.latestLidarScan, OBJECT_DT, this.track);
+        if (debug.perception) {
+          debug.perception.objects = tracks.map(t => ({
+            id: t.id, s: (t.s / 4), l: (t.l / 4), vS: (t.vS / 4), vL: (t.vL / 4),
+            rays: t.rays, sensor: t.sensor, confirmed: t.confirmed,
+          }));
+        }
         this.bus.publish('perception:result', {
           snapshot, scan: this.latestLidarScan,
           stats: debug.perception ? { ...debug.perception } : null,

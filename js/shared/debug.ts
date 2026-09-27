@@ -9,6 +9,8 @@ import { LidarScan, Trajectory, FrenetReference } from './types.js';
 export interface PerceptionDebug {
   rayCount: number;
   frontDist: number;           // 正前方距离
+  /** 【S3】物体层：聚类 + 跟踪得到的物体列表（**米**；供调试面板显示） */
+  objects?: { id: number; s: number; l: number; vS: number; vL: number; rays: number; sensor: number; confirmed: boolean }[];
   minDist: number;             // 全程最近命中
   minDistAngle: number;        // 最近命中方向（相对车头）
   rawHits: number;             // 未过滤命中数
