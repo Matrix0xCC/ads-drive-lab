@@ -85,6 +85,9 @@ export function attrsAtS(spans: AttrSpan[] | undefined, s: number): AttrSpan | n
 
 /** 障碍物 — 矩形，带位置、尺寸和朝向角 */
 export interface Obstacle {
+  /** 是否是**交通流车辆**（可选；缺省 undefined = 静态障碍）。
+   *  用途：感知不把车辆当"贴路缘的模糊带"（见 algo/perception.ts 的命中分支）。 */
+  isVehicle?: boolean;
   x: Px;
   y: Px;
   width: Px;

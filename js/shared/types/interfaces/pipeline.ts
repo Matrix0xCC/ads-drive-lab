@@ -19,6 +19,9 @@ export interface WorldSnapshot {
   timestamp: number;
   /** 当前路线（可选）：**路网地图的"道路"是路线**——感知要按它取路缘边界（见 perception.ts） */
   route?: Route | null;
+  /** 交通流当帧的车辆矩形（**只给渲染/记录分流用**）。
+   *  算法侧一律只看 `obstacles`（那里已经**含**交通流）——保持"障碍物只有一个概念"。 */
+  traffic?: Obstacle[];
 }
 
 /**
@@ -63,8 +66,9 @@ export interface ControlCommand {
 
 export function createWorldSnapshot(
   car: CarState, track: TrackGeometry, obstacles: Obstacle[], route?: Route | null,
+  traffic?: Obstacle[],
 ): WorldSnapshot {
-  return { car, track, obstacles, route: route ?? null, timestamp: performance.now() };
+  return { car, track, obstacles, route: route ?? null, traffic, timestamp: performance.now() };
 }
 
 export function createLidarScan(angles: Radians[], distances: Px[], rawDistances: Px[], confidences: number[]): LidarScan {

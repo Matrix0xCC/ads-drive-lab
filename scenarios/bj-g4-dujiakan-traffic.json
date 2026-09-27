@@ -1,0 +1,22 @@
+{
+  "version": 1,
+  "name": "bj-g4-dujiakan-traffic",
+  "map": "bj-g4-dujiakan",
+  "seed": 1,
+  "duration": 120,
+  "car": {
+    "speed": 20
+  },
+  "obstacles": {
+    "mode": "random",
+    "count": 0
+  },
+  "route": {
+    "startS": 0,
+    "goalS": 1900
+  },
+  "traffic": {
+    "densityPerKm": 8,
+    "lanes": 3
+  }
+}

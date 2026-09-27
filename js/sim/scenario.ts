@@ -37,6 +37,8 @@ export interface Scenario {
   obstacles: { mode: 'explicit'; list: ScenarioObstacle[] } | { mode: 'random'; count: number };
   /** 路线：链式/径向地图用弧长 `startS/goalS`；**路网地图用节点** `fromNode/toNode` */
   route?: { startS?: number; goalS?: number; fromNode?: number; toNode?: number };
+  /** 交通流（方案 A：定速巡航车）。**缺省 = 不启用**（与历史行为逐位一致） */
+  traffic?: { densityPerKm?: number; speedFactorRange?: [number, number]; lanes?: number };
   checks?: Record<string, number>;
 }
 
@@ -94,6 +96,22 @@ export function parseScenario(json: unknown): Scenario {
     if (byS && (o.route.startS < 0 || o.route.goalS < 0)) fail('route.startS/goalS 必须是非负数（米）');
     if (o.route.fromNode !== undefined && byNode && (o.route.fromNode < 0 || o.route.toNode < 0)) {
       fail('route.fromNode/toNode 必须是非负整数（路网节点序号）');
+    }
+  }
+  if (o.traffic !== undefined) {
+    if (typeof o.traffic !== 'object' || o.traffic === null) fail('traffic 必须是对象');
+    const t = o.traffic as Record<string, unknown>;
+    if (t.densityPerKm !== undefined && (!isNum(t.densityPerKm) || (t.densityPerKm as number) < 0 || (t.densityPerKm as number) > 200)) {
+      fail('traffic.densityPerKm 必须在 [0, 200]（辆/km/车道）');
+    }
+    if (t.lanes !== undefined && (!Number.isInteger(t.lanes) || (t.lanes as number) < 1 || (t.lanes as number) > 4)) {
+      fail('traffic.lanes 必须是 1..4 的整数');
+    }
+    if (t.speedFactorRange !== undefined) {
+      const r = t.speedFactorRange;
+      if (!Array.isArray(r) || r.length !== 2 || !isNum(r[0]) || !isNum(r[1]) || r[0] <= 0 || r[1] < r[0] || r[1] > 2) {
+        fail('traffic.speedFactorRange 需要 [下限, 上限]，满足 0 < 下限 ≤ 上限 ≤ 2');
+      }
     }
   }
 
@@ -304,7 +322,7 @@ export function buildScenarioWorld(scenario: Scenario, width: number, height: nu
     throw new ScenarioError('路线数据非法（长度为 NaN）');
   }
   return {
-    worldCfg: { map: mapDef, obstacles, seed: scenario.seed, carStart },
+    worldCfg: { map: mapDef, obstacles, seed: scenario.seed, carStart, traffic: scenario.traffic },
     track, route,
   };
 }

@@ -46,6 +46,10 @@ export interface StepRecord extends BaseRecord {
   type: 'step';
   car: { x: number; y: number; angle: number; speed: number; steerAngle: number };
   control: { lookaheadDist: number; alpha: number; steerAngle: number; throttle: number } | null;
+  /** 交通流当帧车辆（**扁平打包**：每 5 个数一辆 `[x, y, angle, width, height]`，px/rad，已四舍五入到 2 位）。
+   *  与 `scan.distances` 一样走扁平数组（车多时对象键会显著增大归档）。
+   *  **无交通流时不写这个字段** → 历史归档逐字节不变。 */
+  traffic?: number[];
 }
 
 export interface PerceptionRecord extends BaseRecord {

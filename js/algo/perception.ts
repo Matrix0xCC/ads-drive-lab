@@ -102,6 +102,9 @@ interface Segment {
    *  "横在路中间的一堵墙" → 停车（实测三环场景停在 s=2823m，那里正是匝道收窄的过渡段）。
    *  现在的规则：命中边界 → 一定是背景（conf 0）；命中障碍物 → 才用 |l| 比值做"贴路缘的模糊带"细化。 */
   boundary: boolean;
+  /** 该线段来自**交通流车辆**（不是静态障碍/路缘）。车辆无论 |l| 多大都算高置信障碍——
+   *  见下面命中分支的说明（|l| 降置信是为静态路缘设计的）。 */
+  vehicle?: boolean;
 }
 
 // ═══════════════════════════════════════════════════
@@ -299,7 +302,9 @@ export function sense(snapshot: WorldSnapshot): LidarScan {
   }
   // 障碍物矩形 → 4 条线段/个
   for (const obs of obstacles) {
-    for (const sgm of obstacleToSegments(obs)) allSegments.push({ ...sgm, boundary: false });
+    for (const sgm of obstacleToSegments(obs)) {
+      allSegments.push({ ...sgm, boundary: false, vehicle: obs.isVehicle === true });
+    }
   }
 
   // ── 2. HD Map 参考线（懒缓存）──
@@ -328,9 +333,10 @@ export function sense(snapshot: WorldSnapshot): LidarScan {
     // 对全部线段求交，取最近距离
     let minDist = maxDist;
     let hitBoundary = false;
+    let hitVehicle = false;
     for (const seg of allSegments) {
       const t = raySegmentIntersect(carX, carY, dx, dy, seg.x1, seg.y1, seg.x2, seg.y2);
-      if (t !== null && t < minDist) { minDist = t; hitBoundary = seg.boundary; }
+      if (t !== null && t < minDist) { minDist = t; hitBoundary = seg.boundary; hitVehicle = seg.vehicle === true; }
     }
 
     // 原始距离（渲染层使用）
@@ -354,7 +360,12 @@ export function sense(snapshot: WorldSnapshot): LidarScan {
         // 参考线终点附近 ⇒ 已知边界（与侧墙同等对待）。
         const atMapEnd = !(track.closed ?? true)
           && hit.s >= (bgRef.totalS as number) - (m(2) as number);
-        if (hitBoundary || atMapEnd) {
+        if (hitVehicle) {
+          // 命中的是**车辆**：无论 |l| 多大都保持高置信（车辆不可能是道路边界）。
+          // 否则外车道的真车会落进 0.6~0.8/0.8+ 两个模糊带被降成 0.5 → 检测器报 phantom_hit、
+          // 规划器对真车不设防（实测踩过）。
+          confidence = 1;
+        } else if (hitBoundary || atMapEnd) {
           // 命中的就是 HD Map 的路缘/端帽 → 一定是背景（不依赖 |l| 投影比值，见 Segment.boundary）
           filteredDist = maxDist;
           confidence = 0;

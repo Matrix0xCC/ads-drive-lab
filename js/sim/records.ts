@@ -14,6 +14,9 @@ export const ARCHIVE_TOPICS = [
   'control:state', 'perception:result', 'planning:result', 'gps:result', 'sim:event',
 ];
 
+/** 四舍五入到 2 位（交通流打包用；避免浮点尾巴把归档撑大） */
+function r2(v: number): number { return Math.round(v * 100) / 100; }
+
 /** 主题载荷 → 归档记录（纯映射；planning 的中间量来自 debug 快照） */
 export function recordFrom(topic: string, p: any): FrameRecord {
   switch (topic) {
@@ -21,7 +24,14 @@ export function recordFrom(topic: string, p: any): FrameRecord {
       return { type: 'step', t: p.t, step: p.step,
         car: { x: p.snapshot.car.x, y: p.snapshot.car.y, angle: p.snapshot.car.angle,
                speed: p.snapshot.car.speed, steerAngle: p.snapshot.car.steerAngle },
-        control: p.control };
+        control: p.control,
+        // 交通流：扁平打包（每 5 个数一辆）+ 2 位小数（px 精度 0.01 = 2.5mm，足够判碰撞）；
+        // 无交通流时**不写字段**，历史归档逐字节不变。
+        ...(p.snapshot.traffic?.length
+          ? { traffic: p.snapshot.traffic.flatMap((o: { x: number; y: number; angle: number; width: number; height: number }) =>
+              [r2(o.x), r2(o.y), r2(o.angle), r2(o.width), r2(o.height)]) }
+          : {}),
+      };
     case 'perception:result':
       return { type: 'perception', t: p.t, step: p.step,
         scan: { angles: p.scan.angles, distances: p.scan.distances,

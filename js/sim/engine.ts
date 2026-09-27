@@ -25,8 +25,10 @@ import { Radians, Px, PxPerSec, rad, m, mps, mps2, pxps } from '../shared/dimens
 import { debug } from '../shared/debug.js';
 import { buildTrack } from '../env/track.js';
 import { generateObstacles } from '../env/obstacle.js';
+import { TrafficSystem, buildTrafficFor } from '../env/traffic.js';
 import { createCar, stepPhysics, checkBounds } from '../env/car.js';
 import { MapDefinition } from '../env/mapDefinitions.js';
+import { TrafficConfig } from '../shared/types/interfaces/traffic.js';
 import { localize, LocalizationConfig } from '../env/localization.js';
 import { sense, MAX_SENSOR_DIST, SCAN_RAY_COUNT } from '../algo/perception.js';
 import { plan, getPlannerState } from '../algo/plan/index.js';
@@ -49,6 +51,8 @@ export interface WorldConfig {
   seed?: number;
   carStart?: { x: Px; y: Px; angle?: Radians; speed?: PxPerSec };
   gpsConfig?: Partial<LocalizationConfig>;
+  /** 交通流（缺省 = 无交通流，与历史行为逐位一致） */
+  traffic?: TrafficConfig;
 }
 
 export type RouteState = 'NONE' | 'ACTIVE' | 'ARRIVED';
@@ -66,6 +70,8 @@ export class SimEngine {
   roadGraph!: RoadGraph;
   car!: CarState;
   obstacles: Obstacle[] = [];
+  /** 交通流（方案 A：定速巡航车）。null = 无交通流（历史行为） */
+  traffic: TrafficSystem | null = null;
   route: Route | null = null;
   routeState: RouteState = 'NONE';
   routeStartIdx: number | null = null;
@@ -113,6 +119,7 @@ export class SimEngine {
     this._gpsRng = seed === undefined ? Math.random : createRng(deriveSeed(seed, 'gps'));
     const count = cfg.obstacleCount ?? (3 + Math.floor(obsRng() * 3));
     this.obstacles = cfg.obstacles ?? generateObstacles(this.track, count, 8, 14, obsRng);
+    this.traffic = buildTrafficFor(this.track, this.route, cfg.traffic, seed);
 
     this.car = createCar(this.track.centerPoints[0], this.track.centerPoints[1]);
     if (cfg.carStart) {
@@ -160,16 +167,24 @@ export class SimEngine {
     this.bus.publish('tick', { dt, t: this.simTime, step: this.stepCount });
   }
 
+  /** 感知/控制/归档看到的障碍 = 静态障碍 + **本帧的交通流**（对算法只有一个"障碍"概念） */
+  activeObstacles(): Obstacle[] {
+    return this.traffic ? [...this.obstacles, ...this.traffic.obstacles()] : this.obstacles;
+  }
+
   private _emit(kind: string, payload: Record<string, unknown>): void {
     this.bus.publish('sim:event', { kind, step: this.stepCount, t: this.simTime, payload });
   }
 
   private _wireSubscribers(): void {
+    // ── 交通流：**必须最先**（在同一 tick 里先动，感知/规划才看到本帧位置）──
+    this.bus.subscribe('tick', ({ dt }: { dt: number }) => { this.traffic?.step(dt); });
+
     // ── 感知 20Hz ──
     this.bus.subscribe('tick', ({ dt }: { dt: number }) => {
       this._perceptionTimer += dt;
       if (this._perceptionTimer >= 1 / PERCEPTION_HZ) {
-        const snapshot = createWorldSnapshot(this.car, this.track, this.obstacles, this.route);
+        const snapshot = createWorldSnapshot(this.car, this.track, this.activeObstacles(), this.route, this.traffic?.obstacles());
         this.latestLidarScan = sense(snapshot);
         this.bus.publish('perception:result', {
           snapshot, scan: this.latestLidarScan,
@@ -184,7 +199,7 @@ export class SimEngine {
     this.bus.subscribe('tick', ({ dt }: { dt: number }) => {
       this._planningTimer += dt;
       if (this._planningTimer >= 1 / PLANNING_HZ) {
-        const snapshot = createWorldSnapshot(this.car, this.track, this.obstacles, this.route);
+        const snapshot = createWorldSnapshot(this.car, this.track, this.activeObstacles(), this.route, this.traffic?.obstacles());
         this.latestTrajectory = plan(snapshot, this.latestLidarScan, this.route ?? undefined);
         if (debug.planning?.planMs !== undefined) this.planMsSamples.push(debug.planning.planMs);
         const state = getPlannerState();
@@ -240,7 +255,7 @@ export class SimEngine {
       } else {
         this.car.speed = pxps(0);
       }
-      const snapshot = createWorldSnapshot(this.car, this.track, this.obstacles, this.route);
+      const snapshot = createWorldSnapshot(this.car, this.track, this.activeObstacles(), this.route, this.traffic?.obstacles());
       this.bus.publish('control:state', {
         snapshot, lidarScan: this.latestLidarScan, trajectory: this.latestTrajectory,
         state: getPlannerState(), control: debug.control ? { ...debug.control } : null,

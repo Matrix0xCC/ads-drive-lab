@@ -70,11 +70,19 @@ export function runSafetyChecks(det: Detector, rec: FrameRecord): void {
     const car = rec.car;
 
     // ① 碰撞：车体 OBB vs 真值障碍物 OBB（每帧最多记一次）
-    for (const obs of det.world.obstacles) {
+    //    障碍物 = 静态障碍 + **当帧交通流**（交通车在 step 记录里扁平打包，见 StepRecord.traffic）
+    const frameObstacles: { x: number; y: number; angle: number; width: number; height: number }[] =
+      det.world.obstacles.map(o => ({ x: o.x as number, y: o.y as number, angle: o.angle as number, width: o.width as number, height: o.height as number }));
+    const tr = rec.traffic;
+    if (tr) {
+      for (let i = 0; i + 4 < tr.length; i += 5) {
+        frameObstacles.push({ x: tr[i], y: tr[i + 1], angle: tr[i + 2], width: tr[i + 3], height: tr[i + 4] });
+      }
+    }
+    for (const obs of frameObstacles) {
       if (obbOverlap(
         car.x, car.y, CAR_L, CAR_W, car.angle,
-        obs.x as number, obs.y as number,
-        obs.width as number, obs.height as number, obs.angle as number,
+        obs.x, obs.y, obs.width, obs.height, obs.angle,
       )) {
         det.merger.add({
           check: 'collision_true', category: 'safety', severity: 'high', step: rec.step,
