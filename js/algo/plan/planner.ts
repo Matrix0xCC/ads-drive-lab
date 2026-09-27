@@ -22,7 +22,7 @@ import {
 import {
   Px, PxPerSec, SIM_UNITS_PER_METER, m, mps, mps2, px, pxps, secs, dimless, perpx,
 } from '../../shared/dimensions.js';
-import { TRACK_HALF_WIDTH } from '../../env/track.js';
+import { TRACK_HALF_WIDTH, taperedHalfWidthAt } from '../../env/track.js';
 import { buildFrenetReference, cartesianToFrenet, frenetToCartesian } from './frenet.js';
 import { PlanState, nextState } from './states.js';
 import { debug } from '../../shared/debug.js';
@@ -147,10 +147,8 @@ function halfWidthAtFn(track: TrackGeometry, route?: Route): ((s: number) => num
   const spans = attrSpans(track, route);
   if (!spans || spans.length === 0) return undefined;
   const fallback = (track.halfWidth as number) ?? TRACK_HALF_WIDTH;
-  return (s: number) => {
-    const a = attrsAtS(spans, s);
-    return a ? a.halfWidthM * SIM_UNITS_PER_METER : fallback;
-  };
+  // 与路面几何/感知边界同一个**带过渡**的宽度函数（三处同源）
+  return taperedHalfWidthAt(spans, fallback);
 }
 
 /**

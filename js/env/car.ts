@@ -251,10 +251,15 @@ function isInsideNetwork(cx: number, cy: number, r: number, track: TrackGeometry
 /** 检查车体（中心+碰撞半径）是否在赛道内 */
 function isCarInsideTrack(cx: number, cy: number, r: number, track: TrackGeometry): boolean {
   if (track.chains && track.chains.length > 0) return isInsideNetwork(cx, cy, r, track);
-  // 距离外边界太近 → 越界
+  // 距离外边界太近 → 越界。
+  // 路面逐段变宽时（`outerBoundaryHalfWidth`），复位缓冲按**该边界点处的局部半宽**缩放——
+  // 否则窄路段会沿用宽路段的 0.5m 缓冲（域比崖宽 → 贴边传送）或反之（域比崖窄 → 死锁）。
+  const bw = track.outerBoundaryHalfWidth;
+  const carHalf = r - (BOUNDS_BUFFER as number);
   for (let i = 0; i < track.outerBoundary.length - 1; i++) {
     const p = track.outerBoundary[i], n = track.outerBoundary[i + 1];
-    if (distToSegment(cx, cy, p.x as number, p.y as number, n.x as number, n.y as number) < r) return false;
+    const rLocal = bw && bw[i] !== undefined ? carHalf + boundsBufferFor(bw[i], carHalf) : r;
+    if (distToSegment(cx, cy, p.x as number, p.y as number, n.x as number, n.y as number) < rLocal) return false;
   }
   // 进入内边界 → 越界
   for (let i = 0; i < track.innerBoundary.length - 1; i++) {

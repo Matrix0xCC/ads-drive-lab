@@ -14,7 +14,7 @@ import { TrackGeometry, Point2D } from '../shared/types.js';
 import { Px, PxPerSec, m, mps, px } from '../shared/dimensions.js';
 import { Rng } from '../shared/rng.js';
 import { MapDefinition } from './mapDefinitions.js';
-import type { RoadAttrs, AttrSpan } from '../shared/types.js';
+import { attrsAtS, type RoadAttrs, type AttrSpan } from '../shared/types.js';
 import { SIM_UNITS_PER_METER } from '../shared/dimensions.js';
 
 /** 赛道半宽 7.5m ≈ 4 车道（15m 宽）；**径向历史地图的缺省值**——OSM 地图按车道数自带半宽 */
@@ -133,6 +133,97 @@ export function generateTrack(width: number, height: number, controlRadii?: numb
  * 法向取"切线逆时针 90°"（与 `frenet.ts` 的 normals 同约定），不再用历史径向图的
  * "指向环心"启发式（开环没有环心）。
  */
+/**
+ * **变宽**路面多边形：每个中心线点带自己的半宽（逐段道路属性 → 2 车道段比 3 车道段窄）。
+ *
+ * 与定宽版的关系：`ribbonPolygon(center, w)` 等价于 `ribbonPolygonVar(center, 全 w).poly`
+ * （有单测钉住这条等价，保证定宽地图逐位不变）。
+ * 返回 `halfW` 数组与 `poly` **逐点对齐**（含端帽点）——`checkBounds` 需要"最近边界点处的
+ * 局部半宽"来决定该点的复位缓冲（窄路段缓冲要按比例缩小，见 car.ts:boundsBufferFor）。
+ */
+export function ribbonPolygonVar(center: Point2D[], halfW: number[], endExtend = m(25)): {
+  poly: Point2D[]; halfW: number[];
+} {
+  const n = center.length;
+  const left: Point2D[] = [], right: Point2D[] = [];
+  const leftW: number[] = [], rightW: number[] = [];
+  const ext = endExtend as number;
+  for (let i = 0; i < n; i++) {
+    const a = center[Math.max(0, i - 1)], b = center[Math.min(n - 1, i + 1)];
+    const dx = (b.x as number) - (a.x as number), dy = (b.y as number) - (a.y as number);
+    const len = Math.hypot(dx, dy) || 1;
+    const nx = -dy / len, ny = dx / len;                 // 左法向
+    const w = halfW.length > 0 ? halfW[Math.min(i, halfW.length - 1)] : 0;
+    let cx = center[i].x as number, cy = center[i].y as number;
+    if (i === 0) { cx -= (dx / len) * ext; cy -= (dy / len) * ext; }
+    else if (i === n - 1) { cx += (dx / len) * ext; cy += (dy / len) * ext; }
+    left.push({ x: px(cx + nx * w), y: px(cy + ny * w) });
+    right.push({ x: px(cx - nx * w), y: px(cy - ny * w) });
+    leftW.push(w); rightW.push(w);
+  }
+  return {
+    poly: [...left, ...[...right].reverse(), left[0]],
+    // 端帽点在左缘/右缘之外各多一个：poly 的收尾是 left[0]
+    halfW: [...leftW, ...[...rightW].reverse(), leftW[0]],
+  };
+}
+
+/** 车道收窄/变宽的过渡段长度：真实道路上 3 车道→1 车道是渐变（车道收窄），不是一道台阶。 */
+export const WIDTH_TAPER_M = m(30);
+
+/**
+ * **带过渡的逐段半宽**：把属性区间（台阶函数）变成"提前 `taper` 米开始线性过渡"的函数。
+ *
+ * 【为什么必须过渡，且必须三处同源】宽度台阶会在路面多边形上生成一道**横向的墙**；
+ * 背景减除按命中点投影处的局部半宽判边界时，墙上的点会投影到台阶**之前**的 s（那里半宽
+ * 还是宽路的），于是 |l| 远小于局部半宽 → 被判成**高置信障碍物** → 规划器看见"一堵横在
+ * 路中间的墙"。实测：三环场景在匝道口（s=2546m）永久停住。
+ *
+ * 过渡后，界面上那条斜边上的每一点都满足 |l| ≈ 该点的局部半宽 → 正确归类为边界。
+ * **几何（ribbon）、分类阈值、规划域都调用本函数**，三者口径必须一致。
+ */
+export function taperedHalfWidthAt(
+  spans: AttrSpan[] | undefined, fallbackPx: number, taperPx = WIDTH_TAPER_M as number,
+): (sPx: number) => number {
+  if (!spans || spans.length === 0) return () => fallbackPx;
+  const stepAt = (s: number): number => {
+    const a = attrsAtS(spans, s);
+    return a ? a.halfWidthM * SIM_UNITS_PER_METER : fallbackPx;
+  };
+  const boundaries = spans.slice(1).map(sp => sp.s0 as number);
+  return (s: number): number => {
+    const here = stepAt(s);
+    let w = here;
+    for (const b of boundaries) {
+      const d = b - s;
+      if (d <= 0 || d > taperPx) continue;                 // 只看**前方**过渡段内的边界
+      const target = stepAt(b + 1);
+      // 线性过渡：离边界越近，越接近边界后的宽度
+      w = Math.min(w, here + (target - here) * (1 - d / taperPx));
+    }
+    return Math.max(0, w);
+  };
+}
+
+/** 逐点半宽：按累计弧长查属性区间（含过渡段；无属性 → 全部用 fallback） */
+export function halfWidthsAlongPoints(
+  points: Point2D[], spans: AttrSpan[] | undefined, fallbackPx: number,
+  taperPx = WIDTH_TAPER_M as number,
+): number[] {
+  if (!spans || spans.length === 0) return points.map(() => fallbackPx);
+  const wAt = taperedHalfWidthAt(spans, fallbackPx, taperPx);
+  const out: number[] = [];
+  let s = 0;
+  for (let i = 0; i < points.length; i++) {
+    if (i > 0) {
+      s += Math.hypot((points[i].x as number) - (points[i - 1].x as number),
+        (points[i].y as number) - (points[i - 1].y as number));
+    }
+    out.push(wAt(s));
+  }
+  return out;
+}
+
 export function ribbonPolygon(center: Point2D[], halfW: number, endExtend = m(25)): Point2D[] {
   const n = center.length;
   const left: Point2D[] = [], right: Point2D[] = [];
@@ -186,10 +277,16 @@ export function buildTrack(map: MapDefinition, defaultW: number, defaultH: numbe
     const halfW = (map.halfWidth ?? TRACK_HALF_WIDTH) as number;
     const laneW = m(map.laneWidthM ?? 3.75) as number;
     const lanes = laneCentersOf(halfW, laneW);
+    const spans = map.attrSpans ? toAttrSpans(map.attrSpans) : undefined;
+    // 路面与边界按**逐段宽度**：2 车道段比 3 车道段窄（渲染、复位崖、规划域三者同源）
+    const rib = spans
+      ? ribbonPolygonVar(map.points, halfWidthsAlongPoints(map.points, spans, halfW))
+      : null;
     return {
       centerPoints: map.points,
       innerBoundary: [],                                  // 开环无内场
-      outerBoundary: ribbonPolygon(map.points, halfW),
+      outerBoundary: rib ? rib.poly : ribbonPolygon(map.points, halfW),
+      ...(rib ? { outerBoundaryHalfWidth: rib.halfW } : {}),
       closed: false,
       halfWidth: px(halfW),
       laneWidth: px(laneW),
@@ -197,7 +294,7 @@ export function buildTrack(map: MapDefinition, defaultW: number, defaultH: numbe
       laneOffset: px(lanes.offset),
       ...(map.maxspeedKph !== undefined ? { speedLimitMps: mps(map.maxspeedKph / 3.6) } : {}),
       // 链式地图：中心线由多条 way 合并 → 逐段属性沿弧长成区间（车道数/限速/半宽逐段不同）
-      attrSpans: map.attrSpans ? toAttrSpans(map.attrSpans) : undefined,
+      attrSpans: spans,
     };
   }
   if (map.kind === 'network') {

@@ -48,6 +48,9 @@ export interface TrackGeometry {
   chainAttrs?: RoadAttrs[];
   /** 参考线上的逐段属性（弧长 px，沿 `centerPoints`）：无路线时规划域/限速就查它 */
   attrSpans?: AttrSpan[];
+  /** 与 `outerBoundary` **逐点对齐**的半宽（px）：路面/复位崖逐段变宽时给出。
+   *  `checkBounds` 用"最近边界点处的局部半宽"决定该点的复位缓冲（窄路段缓冲按比例缩小）。 */
+  outerBoundaryHalfWidth?: number[];
 }
 
 /** 逐段道路属性（"这段路几车道、限速多少、多宽"）——**地图起作用**的第二层：

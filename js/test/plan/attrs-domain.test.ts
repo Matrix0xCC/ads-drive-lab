@@ -11,11 +11,11 @@ import assert from 'node:assert';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { boundsBufferFor, BOUNDS_BUFFER } from '../../env/car.js';
-import { buildTrack } from '../../env/track.js';
+import { buildTrack, ribbonPolygon, ribbonPolygonVar, taperedHalfWidthAt, halfWidthsAlongPoints } from '../../env/track.js';
 import { MAP_PRESETS } from '../../env/mapDefinitions.js';
 import { buildGraphFromEdges, buildNetworkRoute } from '../../algo/routePlanner.js';
 import { attrsAtS } from '../../shared/types.js';
-import { m } from '../../shared/dimensions.js';
+import { m, px } from '../../shared/dimensions.js';
 
 const M = (v: number) => m(v) as number;
 
@@ -98,5 +98,61 @@ describe('路网路线：逐段属性沿路线装配（弧长 px，可查表）'
     const t = buildTrack(MAP_PRESETS['oval'], 1800, 800);
     assert.strictEqual(t.attrSpans, undefined);
     assert.strictEqual(attrsAtS(undefined, 0), null);
+  });
+});
+
+describe('变宽路面与过渡段', () => {
+  it('定宽版 == 变宽版（同宽数组）→ 定宽地图逐位不变', () => {
+    const pts: any[] = [];
+    for (let i = 0; i <= 40; i++) pts.push({ x: px(M(10) + i * M(3)), y: px(M(100) + (i % 2) * M(2)) });
+    const w = M(5.625);
+    const a = ribbonPolygon(pts, w);
+    const b = ribbonPolygonVar(pts, pts.map(() => w)).poly;
+    assert.deepStrictEqual(b, a, '变宽版在同宽时必须与定宽版逐位相同');
+  });
+
+  it('变宽版真的把窄段画窄了（G4：3 车道 5.625m / 2 车道 3.75m）', () => {
+    const t = buildTrack(MAP_PRESETS['bj-g4-dujiakan'], 1800, 800);
+    const hw = t.outerBoundaryHalfWidth!;
+    assert.ok(hw.length === t.outerBoundary.length, '逐点半宽必须与边界点一一对应');
+    // 含过渡段 → 中间值（3.75 ~ 5.625 之间的渐变），但两端值都必须出现
+    const vals = [...new Set(hw.map(v => +(v / 4).toFixed(2)))];
+    assert.ok(vals.every(v => v >= 3.74 && v <= 5.63), `半宽应落在 [3.75, 5.625]：${vals}`);
+    assert.ok(vals.some(v => Math.abs(v - 3.75) < 0.01), '应含 2 车道段 3.75m');
+    assert.ok(vals.some(v => Math.abs(v - 5.625) < 0.01), '应含 3 车道段 5.625m');
+    // 取中心线末端（2 车道段）验证：到边界的横向距离 ≈ 3.75m（含端帽外延，故只验证量级）
+    const last = t.centerPoints[t.centerPoints.length - 1];
+    let minD = Infinity;
+    for (const p of t.outerBoundary) {
+      minD = Math.min(minD, Math.hypot(p.x - last.x, p.y - last.y));
+    }
+    assert.ok(minD / 4 > 3 && minD / 4 < 9, `末端到边界距离应≈3.75m（含端帽），实际 ${(minD / 4).toFixed(2)}m`);
+  });
+
+  it('过渡段：远离台阶时等于台阶值，进入 taper 后线性逼近目标值', () => {
+    // [0,1000px] 半宽 22.5px → [1000,2000px] 半宽 7.5px
+    const spans = [
+      { highway: 'trunk', laneCount: 3, laneWidthM: 3.75, halfWidthM: 5.625, maxspeedKph: 100, s0: px(0), s1: px(1000) },
+      { highway: 'trunk_link', laneCount: 1, laneWidthM: 3.75, halfWidthM: 1.875, maxspeedKph: 50, s0: px(1000), s1: px(2000) },
+    ] as any;
+    const taper = px(M(30)) as number;
+    const wAt = taperedHalfWidthAt(spans, px(M(5.625)) as number, taper);
+    assert.strictEqual(wAt(0), 22.5, '远离台阶 → 宽段值');
+    assert.strictEqual(wAt(1000 - taper - 1), 22.5, '过渡段之前 → 宽段值');
+    const mid = wAt(1000 - taper / 2);          // 过渡中点 → 约在两者之间
+    assert.ok(mid > 7.5 && mid < 22.5, `过渡中点应在两值之间，实际 ${mid}`);
+    assert.ok(wAt(1000 + 1) <= 7.5 + 1e-6, '台阶之后 → 窄段值');
+    // 单调不增（越接近窄段越窄）
+    let prev = Infinity;
+    for (let s = 1000 - taper - 5; s <= 1000 + 5; s += 5) {
+      const w = wAt(s);
+      assert.ok(w <= prev + 1e-9, `过渡应单调不增：s=${s} w=${w} prev=${prev}`);
+      prev = w;
+    }
+  });
+
+  it('无属性时 halfWidthsAlongPoints 全为 fallback（零回归）', () => {
+    const pts = [{ x: px(0), y: px(0) }, { x: px(100), y: px(0) }];
+    assert.deepStrictEqual(halfWidthsAlongPoints(pts, undefined, 30), [30, 30]);
   });
 });

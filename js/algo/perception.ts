@@ -52,10 +52,10 @@
 //   20 Hz 运行 = 每秒 50 万次求交。每次求交只有几十次浮点运算，
 //   对现代浏览器 < 1ms。
 
-import { WorldSnapshot, LidarScan, TrackGeometry, Point2D, createLidarScan, obstacleToSegments, FrenetReference, Route } from '../shared/types.js';
-import { Radians, Px, m, rad, px, normalizeAngle } from '../shared/dimensions.js';
+import { WorldSnapshot, LidarScan, TrackGeometry, Point2D, AttrSpan, attrsAtS, createLidarScan, obstacleToSegments, FrenetReference, Route } from '../shared/types.js';
+import { Radians, Px, SIM_UNITS_PER_METER, m, rad, px, normalizeAngle } from '../shared/dimensions.js';
 import { buildFrenetReference, cartesianToFrenet } from './plan/frenet.js';
-import { TRACK_HALF_WIDTH, ribbonPolygon } from '../env/track.js';
+import { TRACK_HALF_WIDTH, ribbonPolygon, ribbonPolygonVar, halfWidthsAlongPoints, taperedHalfWidthAt } from '../env/track.js';
 import { debug } from '../shared/debug.js';
 
 // ═══════════════════════════════════════════════════
@@ -93,7 +93,16 @@ const CONF_LOW_RATIO = 0.8;
 // 线段类型
 // ═══════════════════════════════════════════════════
 
-interface Segment { x1: number; y1: number; x2: number; y2: number; }
+interface Segment {
+  x1: number; y1: number; x2: number; y2: number;
+  /** 该线段是否来自 HD Map 的**道路边界**（路缘/端帽）。
+   *  【为什么要这个标记】射线本来就是分别对"边界线段"与"障碍物矩形"求交的——**命中的是哪一类
+   *  自己就知道**，比事后用 |l| 比值反推可靠得多。|l| 比值受最近邻投影误差影响：在宽度过渡段的
+   *  斜边上，命中点会投影到几米外的 s，局部半宽对不上 → 真实路缘被判成 0.5 模糊带 → 规划器看成
+   *  "横在路中间的一堵墙" → 停车（实测三环场景停在 s=2823m，那里正是匝道收窄的过渡段）。
+   *  现在的规则：命中边界 → 一定是背景（conf 0）；命中障碍物 → 才用 |l| 比值做"贴路缘的模糊带"细化。 */
+  boundary: boolean;
+}
 
 // ═══════════════════════════════════════════════════
 // 射线-线段求交（2D 参数方程法 / Cramer's Rule）
@@ -154,6 +163,14 @@ let _bgRefKey: Point2D[] | null = null;
 // 边界线段缓存（射线求交用；按 track/route 对象身份失效）
 // ═══════════════════════════════════════════════════
 
+/** 本帧的逐段属性：路网用**路线**的、链式用**赛道**的（几何与分类阈值必须同源） */
+function boundarySpansFor(track: TrackGeometry, route?: Route | null): AttrSpan[] | undefined {
+  if (track.chains && track.chains.length > 0) {
+    return route?.waypoints && route.waypoints.length >= 2 ? route.attrSpans : track.attrSpans;
+  }
+  return track.attrSpans;
+}
+
 interface BoundedSeg { x1: number; y1: number; x2: number; y2: number; minX: number; minY: number; maxX: number; maxY: number }
 let _bdSegs: BoundedSeg[] = [];
 let _bdTrack: TrackGeometry | null = null;
@@ -172,14 +189,18 @@ let _bdRoute: unknown = null;
  * （幻影障碍 → 规划器假停车）。语义上正确的说法是"LiDAR 只该被**我要走的那条路**的路缘挡住"。
  * 无路线时退回最长链（与 planner 的回退一致）。
  */
-function getBoundarySegments(track: TrackGeometry, route?: Route | null): BoundedSeg[] {
+function getBoundarySegments(track: TrackGeometry, route: Route | null | undefined, spans: AttrSpan[] | undefined): BoundedSeg[] {
   const rw = route?.waypoints;
   if (_bdTrack === track && _bdRoute === (rw ?? null)) return _bdSegs;
   const polys: { x: Px; y: Px }[][] = [];
   if (track.chains && track.chains.length > 0) {
     const halfW = (track.halfWidth ?? TRACK_HALF_WIDTH) as number;
     const src = rw && rw.length >= 2 ? rw : track.centerPoints;
-    polys.push(ribbonPolygon(src, halfW));
+    // **逐段宽度**：1 车道匝道（半宽 1.875m）的路缘必须在 1.875m 处挡住射线，
+    // 用地图级半宽（5.625m）会让 LiDAR"看到"一条并不存在的宽路面。
+    polys.push(spans && spans.length > 0
+      ? ribbonPolygonVar(src as Point2D[], halfWidthsAlongPoints(src as Point2D[], spans, halfW)).poly
+      : ribbonPolygon(src, halfW));
   } else {
     polys.push(track.innerBoundary, track.outerBoundary);
   }
@@ -264,23 +285,35 @@ export function sense(snapshot: WorldSnapshot): LidarScan {
 
   // ── 1. 收集所有待检测线段 ──
   const allSegments: Segment[] = [];
+  // 本帧的半宽（地图级兜底值）与**逐段属性**：边界几何与分类阈值必须同源，
+  // 否则匝道路缘（|l|=1.875m）会被按地图级 5.625m 的门槛当成高置信障碍。
+  const halfWidthU = (track.halfWidth ?? TRACK_HALF_WIDTH) as number;
+  const bdSpans = boundarySpansFor(track, snapshot.route);
   // 道路边界（径向/开环 = 内外多边形；路网 = 路线 ribbon，见 getBoundarySegments）。
   // 用包围盒粗筛掉 125m 之外的段——射线最长 125m，过滤是**等价变换**，不动结果只省算力。
   const RANGE = MAX_SENSOR_DIST as number;
   const cx0 = car.x as number, cy0 = car.y as number;
-  for (const b of getBoundarySegments(track, snapshot.route)) {
+  for (const b of getBoundarySegments(track, snapshot.route, bdSpans)) {
     if (cx0 < b.minX - RANGE || cx0 > b.maxX + RANGE || cy0 < b.minY - RANGE || cy0 > b.maxY + RANGE) continue;
-    allSegments.push({ x1: b.x1, y1: b.y1, x2: b.x2, y2: b.y2 });
+    allSegments.push({ x1: b.x1, y1: b.y1, x2: b.x2, y2: b.y2, boundary: true });
   }
   // 障碍物矩形 → 4 条线段/个
-  for (const obs of obstacles) allSegments.push(...obstacleToSegments(obs));
+  for (const obs of obstacles) {
+    for (const sgm of obstacleToSegments(obs)) allSegments.push({ ...sgm, boundary: false });
+  }
 
   // ── 2. HD Map 参考线（懒缓存）──
   const bgRef = getBackgroundFrenetRef(track, snapshot.route);
-  // 本帧的分级阈值（按道路半宽比例；见文件头 CONF_*_RATIO 的说明）
-  const halfWidthU = (track.halfWidth ?? TRACK_HALF_WIDTH) as number;
-  const confHigh = halfWidthU * CONF_HIGH_RATIO;
-  const confLow = halfWidthU * CONF_LOW_RATIO;
+  /**
+   * **逐段半宽**：分类阈值必须用命中点所在路段的半宽，而不是地图级标量。
+   *
+   * 【为什么】路面与边界改成逐段宽度后，匝道上真实路缘在 |l|=1.875m 处；若仍按地图级
+   * 5.625m 判（高置信门槛 3.375m），整条匝道路缘都会被当成**高置信障碍物**——
+   * 实测车在匝道口（s=2528m）永久停住。这与"域/限速/复位崖都逐段"是同一件事：
+   * 背景减除的判据也必须逐段，否则 HD Map 与感知口径不一致。
+   */
+  // 与边界几何同一个过渡函数（几何、分类、规划域三处同源）
+  const localHalfWidthAt = taperedHalfWidthAt(bdSpans, halfWidthU);
 
   // ── 3. 扫描主循环 ──
   const carX = car.x as number, carY = car.y as number;
@@ -294,9 +327,10 @@ export function sense(snapshot: WorldSnapshot): LidarScan {
 
     // 对全部线段求交，取最近距离
     let minDist = maxDist;
+    let hitBoundary = false;
     for (const seg of allSegments) {
       const t = raySegmentIntersect(carX, carY, dx, dy, seg.x1, seg.y1, seg.x2, seg.y2);
-      if (t !== null && t < minDist) minDist = t;
+      if (t !== null && t < minDist) { minDist = t; hitBoundary = seg.boundary; }
     }
 
     // 原始距离（渲染层使用）
@@ -311,19 +345,23 @@ export function sense(snapshot: WorldSnapshot): LidarScan {
       const hit = hitFrenetAbsL(carX, carY, worldAngle, minDist, bgRef);
       if (hit !== null) {
         const absL = hit.absL;
+        // 该命中点所在路段的半宽 → 逐段阈值（宽路仍是地图级值 → 行为零变化）
+        const hwLocal = localHalfWidthAt(hit.s);
+        const chLocal = hwLocal * CONF_HIGH_RATIO;
+        const clLocal = hwLocal * CONF_LOW_RATIO;
         // 【开环地图的端帽】端帽是"地图尽头"的已知结构（track 生成时补的），它横跨路面 →
         // |l| 很小，会被当成高置信障碍物（检测器报 phantom_hit）。判据：命中点落在
         // 参考线终点附近 ⇒ 已知边界（与侧墙同等对待）。
         const atMapEnd = !(track.closed ?? true)
           && hit.s >= (bgRef.totalS as number) - (m(2) as number);
-        if (atMapEnd) {
+        if (hitBoundary || atMapEnd) {
+          // 命中的就是 HD Map 的路缘/端帽 → 一定是背景（不依赖 |l| 投影比值，见 Segment.boundary）
           filteredDist = maxDist;
           confidence = 0;
-        } else if (absL > confLow) {
-          // 超出 0.8×半宽：命中点落在已知边界上 → 背景
-          filteredDist = maxDist;
-          confidence = 0;
-        } else if (absL > confHigh) {
+        } else if (absL > clLocal) {
+          // 障碍物命中但贴得比 0.8×半宽还靠外 → 模糊带（可能是路缘/地图误差，低置信）
+          confidence = 0.5;
+        } else if (absL > chLocal) {
           // 0.6~0.8×半宽：边缘模糊区 → 低置信（可能是障碍物靠近路缘）
           confidence = 0.5;
         }
