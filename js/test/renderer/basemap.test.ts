@@ -223,3 +223,68 @@ describe('basemap：单位换算（米 → 仿真像素）', () => {
   });
 
 });
+
+// ─────────────────────────────────────────────────────────────
+// 泛化：**所有已入库的清单**都走同一套判据（新增地图自动纳入，不必再写测试）
+// 之前只测 bj-g4-dujiakan，新地图只能靠人工看——这里补上，顺带把"单位换算"那条
+// 判据（曾漏掉的那个 ×4）逐图钉一遍。
+// ─────────────────────────────────────────────────────────────
+describe('basemap：所有已入库清单的一致性', () => {
+  const keys = fs.readdirSync(path.resolve('maps'))
+    .filter(f => f.endsWith('.tiles.json'))
+    .map(f => f.replace('.tiles.json', ''))
+    .sort();
+
+  it('至少有一个清单，且都在 maps/ 下注册为可用的地图产物', () => {
+    assert.ok(keys.length > 0, 'maps/ 下应当有 *.tiles.json');
+    for (const k of keys) {
+      assert.ok(fs.existsSync(path.resolve('maps', `${k}.json`)), `${k}.tiles.json 缺少对应的地图产物 ${k}.json`);
+      assert.match(k, /^[a-z0-9][a-z0-9._-]*$/, `清单文件名必须等于地图产物 key（形状不对：${k}）`);
+    }
+  });
+
+  for (const key of keys) {
+    it(`${key}：清单 ↔ 地图产物自洽 + 覆盖到位 + 单位换算正确`, () => {
+      const man = JSON.parse(fs.readFileSync(path.resolve('maps', `${key}.tiles.json`), 'utf8')) as TileManifest;
+      const mp = JSON.parse(fs.readFileSync(path.resolve('maps', `${key}.json`), 'utf8'));
+      const quads = planBasemapQuads(man);
+
+      // ① 清单标识与地理原点
+      assert.strictEqual(man.name, key, '清单里的 name 必须是地图产物 key（不是显示名）');
+      assert.deepStrictEqual(man.worldOrigin, mp.geometry.originWorld,
+        'worldOrigin 必须取地图产物的 originWorld（世界 (0,0) 的经纬度），不是投影原点 origin');
+      assert.ok(quads.length > 0, '至少要有一张瓦片');
+
+      // ② 米制覆盖必须盖住道路
+      // 两种地图结构的道路点：链式/开环在 `geometry.points`；路网在 `network.chains`（多条链）
+      const pts: [number, number][] = mp.geometry.points
+        ?? (mp.network?.chains as [number, number][][] | undefined)?.flat()
+        ?? [];
+      assert.ok(pts.length > 0, `${key}：取不到道路点（既无 geometry.points 也无 network.chains）`);
+      const xs = pts.map(p => p[0]), ys = pts.map(p => p[1]);
+      const qx0 = Math.min(...quads.map(q => q.cx - q.width / 2)), qx1 = Math.max(...quads.map(q => q.cx + q.width / 2));
+      const qy0 = Math.min(...quads.map(q => q.cy - q.height / 2)), qy1 = Math.max(...quads.map(q => q.cy + q.height / 2));
+      assert.ok(qx0 <= Math.min(...xs) && qx1 >= Math.max(...xs), `x 方向没盖住道路：瓦片[${qx0.toFixed(0)},${qx1.toFixed(0)}] 道路[${Math.min(...xs).toFixed(0)},${Math.max(...xs).toFixed(0)}]`);
+      assert.ok(qy0 <= Math.min(...ys) && qy1 >= Math.max(...ys), `y 方向没盖住道路：瓦片[${qy0.toFixed(0)},${qy1.toFixed(0)}] 道路[${Math.min(...ys).toFixed(0)},${Math.max(...ys).toFixed(0)}]`);
+
+      // ③ 场景量纲：换算后必须与地图世界尺寸相当（差 4 倍就是"地图一小块"那个 bug）
+      const scene = quads.map(quadToSceneRect);
+      const sw = Math.max(...scene.map(r => r.cx + r.width / 2)) - Math.min(...scene.map(r => r.cx - r.width / 2));
+      const sh = Math.max(...scene.map(r => r.cy + r.height / 2)) - Math.min(...scene.map(r => r.cy - r.height / 2));
+      const ratioW = sw / ((mp.world.wM as number) * SIM_UNITS_PER_METER);
+      const ratioH = sh / ((mp.world.hM as number) * SIM_UNITS_PER_METER);
+      assert.ok(ratioW > 0.9 && ratioW < 1.6, `${key} 底图宽 ${sw.toFixed(0)}px vs 世界 ${((mp.world.wM as number) * 4).toFixed(0)}px（比值 ${ratioW.toFixed(2)}）`);
+      assert.ok(ratioH > 0.9 && ratioH < 1.6, `${key} 底图高 ${sh.toFixed(0)}px vs 世界 ${((mp.world.hM as number) * 4).toFixed(0)}px（比值 ${ratioH.toFixed(2)}）`);
+
+      // ④ 缓存（gitignore）在就校验 sha；不在就是"新克隆"，跳过而非失败
+      const cached = quads.filter(q => fs.existsSync(path.resolve(q.url)));
+      if (cached.length === 0) return;
+      for (const q of cached) {
+        const bytes = fs.readFileSync(path.resolve(q.url));
+        const sha = createHash('sha256').update(bytes).digest('hex');
+        const want = man.tiles.find(t => t.z === q.z && t.x === q.x && t.y === q.y)!;
+        assert.strictEqual(sha, want.sha256, `${q.url} 与清单不符（缓存被改过？）`);
+      }
+    });
+  }
+});
