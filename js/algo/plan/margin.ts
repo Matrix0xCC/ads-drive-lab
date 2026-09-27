@@ -19,6 +19,7 @@
 // 零接触）；"敢不敢试紧线"的裁决交给阶段 C 的路径-速度联合决策。
 
 import { FrenetReference } from '../../shared/types.js';
+import { m } from '../../shared/dimensions.js';
 
 /** 分段表节点（速度 m/s → 裕度 m） */
 const MARGIN_TABLE: { v: number; m: number }[] = [
@@ -33,6 +34,21 @@ export const MARGIN_MIN = 0.4;
 export const MARGIN_MAX = 1.2;
 
 /** 误差感知裕度（m）：速度分段线性插值，clamp 到 [0.4, 1.2] */
+/**
+ * 【A 方案·侧向间隙政策】**移动**物体（物体层给出的、有速度的物体）的侧向裕度附加量。
+ *
+ * 【为什么与静态障碍不同】"超越/被超越一辆车"本来就是贴着过去的：真实驾驶里两车中心距 3.75m
+ * （相邻车道）、车体间隙 ~1.9m 属于常态。而静态障碍（墙、锥桶、抛锚车）你并不预期它会动，
+ * 必须留足裕度。所以两者用不同政策：
+ *   · 静态障碍：车半宽 + `marginFor(v)`（标定速度表，≈1.5m @高速）
+ *   · 移动物体：车半宽 + `MARGIN_MOVING_EXTRA`（0.6m）
+ * 用户实测的"旁边超车就横移"就是被前者逼出来的（相邻车道的车把物理走廊压到本车道里 ✗）。
+ *
+ * 【边界】这**不是**取消安全裕度：0.6m 仍大于零，且物体层的速度是**有物理门与硬夹**的估计。
+ * 判据只看"物体层说它在动（|v| > 1.5m/s）"，静止/未知的一律按静态障碍处理（保守）。
+ */
+export const MARGIN_MOVING_EXTRA = m(0.6) as number;
+
 export function marginFor(vMps: number): number {
   const v = Math.max(0, vMps);
   const last = MARGIN_TABLE[MARGIN_TABLE.length - 1];

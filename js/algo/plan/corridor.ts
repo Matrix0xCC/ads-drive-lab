@@ -105,6 +105,10 @@ export function buildCorridor(o: {
   hits: { x: number; y: number; d: number; low: boolean }[];
   hitSegs: { ax: number; ay: number; bx: number; by: number; low: boolean }[];
   inflate: number; inflateLow: number;
+  /** 【A 方案】**移动**物体的 Frenet 包围盒（px）。落在盒内的命中点用小裕度 `movingInflate`，
+   *  其余（静态障碍/未知）用 inflate。政策见 margin.ts 的 MARGIN_MOVING_EXTRA。 */
+  moving?: { s1: number; s2: number; l1: number; l2: number }[];
+  movingInflate?: number;
   lMax: number; horizon: number; steps: number; windowRel: number;
   /** 可行驶域随 s 变化（逐段道路属性）：1 车道匝道的域比 4 车道主路窄得多。
    *  给了就**逐站**取域（走廊本来就是逐站求自由补集，接入点天然）；缺省用 lMax 常量。 */
@@ -115,17 +119,29 @@ export function buildCorridor(o: {
   // ── 1. 投影：命中 → (s,l) 包围盒 + 膨胀半径 ──
   interface Prim { s1: number; s2: number; l1: number; l2: number; infl: number }
   const prims: Prim[] = [];
+  // 命中点是否落在某个**移动**物体的包围盒里（A 方案：移动物体用更小的侧向裕度）
+  const inMoving = (s: number, l: number): boolean => {
+    const mv = o.moving;
+    if (!mv || !mv.length) return false;
+    for (const b of mv) if (s >= b.s1 && s <= b.s2 && l >= b.l1 && l <= b.l2) return true;
+    return false;
+  };
+  const inflOf = (s: number, l: number, low: boolean): number => {
+    if (inMoving(s, l)) return (o.movingInflate ?? o.inflate) + (low ? ((o.inflateLow as number) - (o.inflate as number)) : 0);
+    return low ? o.inflateLow : o.inflate;
+  };
   for (const h of o.hits) {
     const fl = projectToRef(h.x, h.y, o.ref);
-    prims.push({ s1: fl.s, s2: fl.s, l1: fl.l, l2: fl.l, infl: h.low ? o.inflateLow : o.inflate });
+    prims.push({ s1: fl.s, s2: fl.s, l1: fl.l, l2: fl.l, infl: inflOf(fl.s, fl.l, h.low) });
   }
   for (const g of o.hitSegs) {
     const fa = projectToRef(g.ax, g.ay, o.ref);
     const fb = projectToRef(g.bx, g.by, o.ref);
+    const sMid = (fa.s + fb.s) / 2, lMid = (fa.l + fb.l) / 2;
     prims.push({
       s1: Math.min(fa.s, fb.s), s2: Math.max(fa.s, fb.s),
       l1: Math.min(fa.l, fb.l), l2: Math.max(fa.l, fb.l),
-      infl: g.low ? o.inflateLow : o.inflate,
+      infl: inflOf(sMid, lMid, g.low),
     });
   }
 

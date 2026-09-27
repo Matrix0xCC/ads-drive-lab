@@ -26,7 +26,7 @@ import { solveQuintic } from './polynomial.js';
 import { frenetToCartesian } from './frenet.js';
 import { buildCorridor, deriveTargets, firstExit, coverageFromScan } from './corridor.js';
 import type { Corridor } from './corridor.js';
-import { marginFor } from './margin.js';
+import { marginFor, MARGIN_MOVING_EXTRA } from './margin.js';
 import { MAX_SENSOR_DIST } from '../perception.js';
 import { TRACK_HALF_WIDTH } from '../../env/track.js';
 import { boundsBufferFor } from '../../env/car.js';
@@ -135,6 +135,9 @@ export function solvePathLayer(o: {
   halfWidthAt?: (s: number) => number;
   carX: number; carY: number; lidarScan: LidarScan;
   carWidth: Px; collisionRadius: Px; laneOffset: Px;
+  /** 【A 方案】物体层给出的**已确认**轨迹（Frenet；px / px·s⁻¹）。有速度的物体用更小的侧向裕度
+   *  （政策见 margin.ts 的 MARGIN_MOVING_EXTRA）——"超越/被超越"本来就是贴着过去的。 */
+  objects?: { s: number; l: number; width: number; length: number; vS: number; vL: number }[];
   prevTargetL: number | null;
   /** 路线总弧长（开环）；传入后走廊视程截到路线剩余——mission 之外的障碍
    *  不参与规划（"路线终点之外"不是车要去的地方）。闭环（巡游）不传。 */
@@ -225,9 +228,21 @@ export function solvePathLayer(o: {
   const corridorHorizon = o.sEnd === undefined ? (PATH_HORIZON as number)
     : Math.max(stepU, Math.floor((o.sEnd - o.s0) / stepU) * stepU);
   const coverage = UNKNOWN_HANDLING === 'blocked' ? coverageFromScan(o.lidarScan, o.carX, o.carY) : undefined;
+  // 【A 方案】移动物体的 Frenet 包围盒 + 它们用的膨胀量。判据：物体层说它在动（|v| > 1.5m/s）；
+  // 静止/未知一律按静态障碍处理（保守）。
+  const MOVING_MIN_V = mps(1.5) as number;
+  const movingBoxes = (o.objects ?? [])
+    .filter(ob => Math.hypot(ob.vS, ob.vL) > MOVING_MIN_V)
+    .map(ob => ({
+      s1: ob.s - ob.length / 2 - (m(0.5) as number),
+      s2: ob.s + ob.length / 2 + (m(0.5) as number),
+      l1: ob.l - ob.width / 2 - (m(0.5) as number),
+      l2: ob.l + ob.width / 2 + (m(0.5) as number),
+    }));
   const mkCorridor = (extra: number, steps = Math.round(corridorHorizon / stepU), useCoverage = true) => buildCorridor({
     ref: o.ref, s0: o.s0, hits, hitSegs,
     inflate: halfW + extra, inflateLow: halfW + extra + (m(2.0) as number),
+    moving: movingBoxes, movingInflate: halfW + (MARGIN_MOVING_EXTRA as number),
     lMax: L_MAX, lMaxAt, horizon: corridorHorizon, steps,
     windowRel: COMMIT_WINDOW as number,
     coverage: useCoverage ? coverage : undefined,
