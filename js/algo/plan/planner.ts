@@ -29,6 +29,7 @@ import { debug } from '../../shared/debug.js';
 import type { PlanningViz } from '../../shared/debug.js';
 import { solvePathLayer, lateralSpeedCap, PATH_STEPS, PATH_HORIZON, TIGHT_SPEED, A_LAT_MAX } from './paths.js';
 import type { PathLayerResult } from './paths.js';
+import { updateLead, FOLLOW_ENABLED } from './closing.js';
 import { solveSpeedLayer, STObstacle } from './speed.js';
 import { nextTight, INITIAL_TIGHT, TightMemory } from './tight.js';
 import { refCurvatureAt } from './margin.js';
@@ -379,10 +380,17 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
       }
     }
   }
+  // 前车估计（雷达时序差分；方案 C）——规划器仍然只信任 LiDAR，不读障碍物的速度真值
+  const lead = updateLead(lidarScan, { angle: car.angle as number, speed: car.speed as number }, snapshot.track);
+  // 跟驰默认关（见 closing.ts 的 FOLLOW_ENABLED：逐帧差分估计质量还不够，实测无改善）
+  const follow = (FOLLOW_ENABLED && lead.gap !== null && lead.leadSpeed !== null)
+    ? { gap: lead.gap, leadSpeed: lead.leadSpeed }
+    : undefined;
+
   const stObstacles: STObstacle[] = stopEngaged
     ? [{ sMin: stopLineS - fl.s, sMax: stopLineS - fl.s + (STOP_ASSUMED_LEN as number), tMin: 0, tMax: Infinity }]
     : [];
-  const speedLayer = solveSpeedLayer({ stObstacles, v0: v0u, targetV });
+  const speedLayer = solveSpeedLayer({ stObstacles, v0: v0u, targetV, follow });
 
   // ─── 7. 合成 l(s(t)) ───
   const duration = speedLayer.profile.duration;

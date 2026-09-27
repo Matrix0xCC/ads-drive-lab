@@ -14,7 +14,7 @@
 // 【职责分工】路径层判"几何上过得去"（小间隙）；速度层管"安全距离"
 // （刹车/停车线）——解耦架构的核心分工（见 spec 2026-09-19-decoupled-planner）。
 
-import { m, mps2, px, pxps, pxps2, dimless, perpx, secs } from '../../shared/dimensions.js';
+import { m, mps, mps2, px, pxps, pxps2, dimless, perpx, secs } from '../../shared/dimensions.js';
 import { solveQuintic, solveSpeedProfile } from './polynomial.js';
 
 export interface STObstacle { sMin: number; sMax: number; tMin: number; tMax: number; }
@@ -29,16 +29,45 @@ export interface SpeedProfile {
 export interface SpeedLayerResult { profile: SpeedProfile; mode: SpeedMode; }
 
 export const SPEED_HORIZON = 2.0;
+/** 跟驰（方案 C）参数：期望车头时距、静止车距、判定"前车确实在动"的速度阈值 */
+export const HEADWAY_T = 1.4;                                  // s
+export const FOLLOW_MIN_GAP = m(6);                            // 车头到前车尾的最小间距
+/** 低于它按"静止障碍"处理 —— 这条是**逐位不变**的保险：无交通流的场景 v_obs≈0 → 走老逻辑 */
+export const FOLLOW_MIN_LEAD_SPEED = mps(1.5);
 export const STOP_MARGIN = m(4);
 export const A_COMFORT = mps2(3.5);
 export const A_MAX = mps2(6.0);
 export const T_STOP_MIN = 0.8;
 
-export function solveSpeedLayer(o: { stObstacles: STObstacle[]; v0: number; targetV: number }): SpeedLayerResult {
+export function solveSpeedLayer(o: {
+  stObstacles: STObstacle[];
+  v0: number;
+  targetV: number;
+  /** 前车估计（见 algo/plan/closing.ts）。缺省 undefined = 纯静态世界（历史行为逐位一致） */
+  follow?: { gap: number; leadSpeed: number };
+}): SpeedLayerResult {
   // 第一个站在路径正前方的静态障碍（sMin ≥ 0；tMin 必须为 0 = 现在起持续占据）
   const ahead = o.stObstacles
     .filter(ob => ob.tMin === 0 && ob.sMin >= 0)
     .sort((a, b) => a.sMin - b.sMin)[0];
+
+  // ── 跟驰（方案 C）：前车在动，且路径层的阻塞点**就是这辆前车** → 不停车，改为"跟到它的速度" ──
+  // 判据用"阻塞点与雷达最近障碍的距离是否吻合"：吻合说明阻塞来自这辆会走的车；
+  // 不吻合说明前面还有**静态**障碍（它才该决定停车线）→ 走老逻辑。
+  const lead = o.follow;
+  if (ahead && lead && lead.leadSpeed > (FOLLOW_MIN_LEAD_SPEED as number)
+      && Math.abs(ahead.sMin - lead.gap) < (m(8) as number)) {
+    const gap = Math.max(0, lead.gap);
+    // 安全速度 = 前车速度 + (富余间距 / 时距)：间距 = 最小车距时恰好等于前车速度（稳态跟车），
+    // 间距更大时允许略快地接近（受 targetV 上限约束），更小时自动降到前车速度之下（拉开距离）。
+    const vSafe = Math.max(0, lead.leadSpeed + (gap - (FOLLOW_MIN_GAP as number)) / HEADWAY_T);
+    const vTarget = Math.max(0, Math.min(o.targetV, vSafe));
+    const poly = solveSpeedProfile(pxps(o.v0), pxps2(0), pxps(vTarget), secs(SPEED_HORIZON));
+    return {
+      mode: 'cruise',
+      profile: { eval: t => poly.eval(t), deriv1: t => poly.deriv1(t), duration: SPEED_HORIZON },
+    };
+  }
 
   if (!ahead) {
     const poly = solveSpeedProfile(pxps(o.v0), pxps2(0), pxps(o.targetV), secs(SPEED_HORIZON));

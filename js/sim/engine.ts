@@ -32,6 +32,7 @@ import { TrafficConfig } from '../shared/types/interfaces/traffic.js';
 import { localize, LocalizationConfig } from '../env/localization.js';
 import { sense, MAX_SENSOR_DIST, SCAN_RAY_COUNT } from '../algo/perception.js';
 import { plan, getPlannerState } from '../algo/plan/index.js';
+import { resetClosing } from '../algo/plan/closing.js';
 import { control } from '../algo/control.js';
 import { buildRoadGraph, buildGraphFromEdges, RoadGraph } from '../algo/routePlanner.js';
 import { Rng, createRng, deriveSeed } from '../shared/rng.js';
@@ -120,6 +121,7 @@ export class SimEngine {
     const count = cfg.obstacleCount ?? (3 + Math.floor(obsRng() * 3));
     this.obstacles = cfg.obstacles ?? generateObstacles(this.track, count, 8, 14, obsRng);
     this.traffic = buildTrafficFor(this.track, this.route, cfg.traffic, seed);
+    resetClosing();          // 换世界 → 丢掉上一个世界的雷达时序（否则首帧的前车速度是废数据）
 
     this.car = createCar(this.track.centerPoints[0], this.track.centerPoints[1]);
     if (cfg.carStart) {
