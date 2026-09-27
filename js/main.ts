@@ -205,8 +205,10 @@ const ui = setupUI({
     setTraffic(on: boolean): boolean {
       const base = currentScenarioOrDefault() as unknown as Record<string, unknown>;
       const next: Record<string, unknown> = { ...base };
-      // 缺省密度取 4 辆/km/车道（G4 上约 35 辆）：8 对当前规划器太重（实测自车只能爬到 ~20% 进度）
-      if (on) next.traffic = (base.traffic as unknown) ?? { densityPerKm: 4, lanes: 3, model: 'idm' };
+      // 缺省取"轻交通"（用户反馈车太多/太快）：2.5 辆/km/车道（G4 上约 22 辆）、
+      // 期望速度 0.45~0.7× 限速（G4 上 54~84 km/h）——既看得清、也不会把自车堵死
+      if (on) next.traffic = (base.traffic as unknown)
+        ?? { densityPerKm: 2.5, lanes: 3, speedFactorRange: [0.45, 0.7], model: 'idm' };
       else delete next.traffic;
       const out = {} as WorldAnnounce;
       if (!applyScenario(next, out)) return false;

@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import {
   metersPerPixel, metersPerPixelAtGround, niceScaleBar, formatMeters, niceRulerInterval, rulerTicks,
 } from '../../env/renderer/scale.js';
+import { obstacleBoxYaw } from '../../env/renderer/geometry.js';
 
 function cam(fov = 45): THREE.PerspectiveCamera { return new THREE.PerspectiveCamera(fov, 1.5, 10, 20000); }
 
@@ -148,5 +149,36 @@ describe('比例尺：条的覆盖必须等于标注（在它自己的位置上�
     const at = metersPerPixelAtGround(cam, point, W, H);
     const center = metersPerPixel(cam, new THREE.Vector3(0, 0, 0), H);
     assert.ok(Math.abs(at / center - 1) < 0.05, `正俯视下应基本一致，实际比 ${(at / center).toFixed(3)}`);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// 障碍物/车辆盒子的朝向：**长轴必须指向行进方向**（实测踩过：写成 rotation.y = -angle 会转 90°，
+// 车斜着横在路上；这是既有问题——静态障碍也一样歪，只是车流一多才显眼）。
+// ─────────────────────────────────────────────────────────────
+describe('障碍物盒子朝向（长轴 = 行进方向）', () => {
+  function longAxisDot(simAngle: number, rotFn: (a: number) => number): number {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(8, 8, 18));   // 横向 2m、纵向 4.6m
+    mesh.position.set(0, 4, 0);                                     // local z ↔ 仿真 y（见 geometry.ts）
+    mesh.rotation.y = rotFn(simAngle);
+    mesh.updateMatrixWorld(true);
+    const longAxis = new THREE.Vector3(0, 0, 1).transformDirection(mesh.matrixWorld);
+    const travel = new THREE.Vector3(Math.cos(simAngle), 0, Math.sin(simAngle));
+    return longAxis.dot(travel);
+  }
+
+  it('八个行进方向上都对齐（长轴 · 行进方向 = 1）', () => {
+    for (let k = 0; k < 8; k++) {
+      const a = (k * Math.PI) / 4;
+      const dot = longAxisDot(a, obstacleBoxYaw);
+      assert.ok(Math.abs(dot - 1) < 1e-6, `朝向 ${(a * 180 / Math.PI).toFixed(0)}° 时点积 ${dot.toFixed(3)}（应为 1）`);
+    }
+  });
+
+  it('旧的 `rotation.y = -angle` 会转 90°（点积 0）——把 bug 钉在原地', () => {
+    for (const k of [1, 2, 3]) {
+      const a = (k * Math.PI) / 4;
+      assert.ok(Math.abs(longAxisDot(a, (x) => -x)) < 1e-6, '旧写法应当是"横着"的（点积 0）');
+    }
   });
 });

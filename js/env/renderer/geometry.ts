@@ -146,6 +146,19 @@ export function buildTrackGroup(track: TrackGeometry): THREE.Group {
 // ═══════════════════════════════════════════════════
 
 /** 构建障碍物组：红色 BoxGeometry + 边框线 */
+/**
+ * 障碍物盒子的**偏航角**：仿真朝向 → `mesh.rotation.y`。
+ *
+ * 【为什么不是 `-angle`】盒子几何是 `BoxGeometry(width, zH, height)`：**local x = 横向、local z = 纵向**，
+ * 而 `mesh.position.set(x, zH/2, simY)` 把 local z 对到仿真 y。要让"长轴指向行进方向"，
+ * 需要把 local +z 转到仿真 (cos a, sin a) —— 解出来是 `rotation.y = π/2 − a`。
+ * 写成 `-a` 会让盒子**转 90°**（斜着横在路上）——实测踩过：车流一多就非常显眼，
+ * 而且这是**既有**问题（静态障碍物也一样歪，只是以前少而小没注意）。
+ */
+export function obstacleBoxYaw(simAngle: number): number {
+  return Math.PI / 2 - simAngle;
+}
+
 export function buildObstacleGroup(obstacles: Obstacle[]): THREE.Group {
   const group = new THREE.Group();
   for (const obs of obstacles) {
@@ -154,7 +167,7 @@ export function buildObstacleGroup(obstacles: Obstacle[]): THREE.Group {
     const mat = new THREE.MeshStandardMaterial({ color: 0xdd3232, roughness: 0.4 });
     const mesh = new THREE.Mesh(geom, mat);
     mesh.position.set(obs.x as number, zH / 2, obs.y as number);
-    mesh.rotation.y = -(obs.angle as number);
+    mesh.rotation.y = obstacleBoxYaw(obs.angle as number);
     mesh.userData = { type: 'obstacle', label: '障碍物', width: obs.width, height: zH, length: obs.height };
 
     const edgeGeom = new THREE.EdgesGeometry(geom);

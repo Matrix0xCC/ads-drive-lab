@@ -16,7 +16,12 @@
     "goalS": 1900
   },
   "traffic": {
-    "densityPerKm": 8,
-    "lanes": 3
+    "densityPerKm": 3,
+    "lanes": 3,
+    "speedFactorRange": [
+      0.45,
+      0.7
+    ],
+    "model": "idm"
   }
 }

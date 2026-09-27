@@ -256,6 +256,12 @@ Pure Pursuit：δ = atan2(2·L·sin α, ld)，预瞄距离 = clamp(0.4×speed, 1
   也可以直接用 `scenarios/bj-g4-dujiakan-traffic.json` 这类带 `traffic` 块的场景（**新地图的默认场景不含车流**，
   所以刷新后看到的是没有车流的默认世界——这是"没看到蓝色车流"最常见的原因）。
 - **纵向模型**（`TrafficConfig.model`）：`'idm'`（缺省，方案 B 跟驰）/ `'constant'`（方案 A 定速，保留作对照基线）。
+- **缺省是"轻交通"**（用户实测反馈后定的）：`densityPerKm: 2.5`（G4 上约 18 辆）、
+  `speedFactorRange: [0.45, 0.7]`（G4 上 54~84 km/h）、`lanes: 3`。
+  **实测（G4 同种子）**：重交通（~70 辆、0.72~1.0×）时自车进度 18%、`collision_true` 87；
+  轻交通后 **进度 100%（83.5s 到达）**、碰撞 **12 帧**、EMERGENCY 20、state_flapping 18。
+  ⇒ 对当前"静态障碍假设"的规划器，**密度与相对速度比跟驰模型重要得多**；
+  残留的 12 帧碰撞才是方案 C（速度感知）要解决的。
 - **实测对照（G4 交通场景、同种子；注意"密度"是最大变量）**：
   | 世界 | 自车进度 | `collision_true` |
   |---|---|---|
@@ -286,6 +292,14 @@ Pure Pursuit：δ = atan2(2·L·sin α, ld)，预瞄距离 = clamp(0.4×speed, 1
   历史归档逐字节不变。检测器的碰撞判据把当帧车辆并进障碍列表（`checks/safety.ts`）。
 - **渲染**：`renderer/traffic.ts` 用 `InstancedMesh`（一次 draw call；**必须 `frustumCulled = false`**，
   与射线池同一个坑：包围球只算一次而实例矩阵每帧变 → 否则车辆时隐时现）。
+  · **盒子朝向**：`geometry.ts:obstacleBoxYaw(a) = π/2 − a`（**不是 `−a`**）。盒子几何是
+    `BoxGeometry(width, zH, height)`（local x = 横向、local z = 纵向），而 `position.set(x, zH/2, simY)`
+    把 local z 对到仿真 y → 要让长轴指向行进方向就得用 `π/2 − a`；写成 `−a` 会**转 90°**（车横在路上）。
+    这是**既有** bug（静态障碍物也歪），车流一多才显眼；`scale.test.ts` 用 8 个方向 + 一条"旧写法必错"的
+    断言把它钉死。
+  · **静态障碍组必须过滤掉车辆**：`_obstacleGroup` 只建一次（性能），而 `snapshot.obstacles` **含交通流**
+    （算法侧只有一个"障碍"概念）→ 不过滤的话 t=0 的车会被**冻成红色盒子**永远停在原地，
+    看起来就是"路上凭空多出一堆把路堵死的障碍"（实测踩过）。车辆只由 InstancedMesh 每帧画。
 - **方案 A 的已知短板（B/C 要解决的）**：NPC 不理会自车 + 规划器**把障碍当静态**（ST 条目 `tMin=0`）
   → 实测 G4 交通场景：`collision_true` 77 帧、进度 47%、反复 EMERGENCY/走走停停。
   这**不是 bug 而是 A 的定义**：B（IDM 跟驰，NPC 对自车反应并保持车距）与 C（给障碍加**速度**、

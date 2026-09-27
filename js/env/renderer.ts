@@ -120,7 +120,13 @@ export function updateScene(
 
   // 懒创建静态几何体
   if (!_trackGroup) { _trackGroup = buildTrackGroup(track); scene.add(_trackGroup); }
-  if (!_obstacleGroup) { _obstacleGroup = buildObstacleGroup(obstacles); scene.add(_obstacleGroup); }
+  // 【只把**静态**障碍烘进这个组】它只建一次（性能），而 `snapshot.obstacles` 里**含交通流**
+  // （算法侧只有一个"障碍"概念）→ 不过滤的话，t=0 的车会被冻成红色盒子永远停在原地，
+  // 看起来就是"路上多出一堆把路堵死的障碍"（实测踩过）。车辆由 traffic.ts 的 InstancedMesh 每帧画。
+  if (!_obstacleGroup) {
+    _obstacleGroup = buildObstacleGroup(obstacles.filter(o => o.isVehicle !== true));
+    scene.add(_obstacleGroup);
+  }
   if (!_carGroup) { _carGroup = buildCarGroup(); scene.add(_carGroup); }
 
   // 更新车辆位姿

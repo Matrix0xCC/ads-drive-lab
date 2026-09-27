@@ -12,6 +12,7 @@
 
 import * as THREE from 'three';
 import { Obstacle } from '../../shared/types/interfaces/geometry.js';
+import { obstacleBoxYaw } from './geometry.js';
 
 const CAPACITY = 160;
 const COLOR = 0x3f7fd8;          // 与静态障碍（红）区分：交通车是蓝的
@@ -45,7 +46,7 @@ export function updateTraffic(scene: THREE.Scene, traffic: Obstacle[] | undefine
     const o = list[i];
     const zH = o.zHeight || 8;
     _pos.set(o.x as number, zH / 2, o.y as number);
-    _q.setFromAxisAngle(_up, -(o.angle as number));   // 与静态障碍/车辆同一约定（rotation.y = -angle）
+    _q.setFromAxisAngle(_up, obstacleBoxYaw(o.angle as number));   // 与静态障碍同一约定（见 geometry.ts 的推导）
     _scale.set(o.width as number, zH, o.height as number);
     _m4.compose(_pos, _q, _scale);
     _mesh.setMatrixAt(i, _m4);
