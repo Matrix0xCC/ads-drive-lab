@@ -176,12 +176,15 @@ const ui = setupUI({
       const map = MAP_PRESETS[name] ? name : DEFAULT_MAP;
       const base = currentScenario ?? defaultScenario(map);
       const hadRoute = base.route !== undefined;
+      // 障碍物也是按**弧长 s** 摆的 → 换地点后位置必然变（不会崩，但要说清，免得下次困惑）
+      const nObs = base.obstacles?.mode === 'explicit' ? (base.obstacles.list?.length ?? 0) : 0;
       const { route: _dropped, ...rest } = base;          // 关键：不把旧路线的声明带过去
       const out = {} as WorldAnnounce;
       if (!applyScenario({ ...rest, map }, out)) return false;
       out.routeInfo = { source: 'none', summary: '无路线（车辆静止）' };
       out.notice = `已切换到「${engine.mapDef.name}」`
-        + (hadRoute ? '；原路线属于上一张地图，已清除 —— 要跑就点「手工设点」或选一个带路线的场景' : '');
+        + (hadRoute ? '；原路线属于上一张地图，已清除 —— 要跑就点「手工设点」或选一个带路线的场景' : '')
+        + (nObs > 0 ? `；${nObs} 个障碍物按弧长落位，位置已随地点变化` : '');
       ui.setRouteInfo(out.routeInfo.source, out.routeInfo.summary);
       ui.setNotice(out.notice);
       return true;
