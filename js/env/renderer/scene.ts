@@ -278,6 +278,19 @@ export function bearingLabel(bearingDeg: number): string {
  *  与 `frameLocal` 的默认取景（0.9 高 / 0.6 后）一致，点 3D 即回到"看上去正常"的视角。 */
 export const VIEW_PITCH_2D_DEG = 1.5;                 // 留一点余量：正上方 lookAt 会退化
 export const VIEW_PITCH_3D_DEG = Math.atan2(0.6, 0.9) * 180 / Math.PI;
+/** 判定"当前算 2D 还是 3D"：阈值之间留一段灰区（手拖到中间角度时不冒充任何一种） */
+export const VIEW_PITCH_2D_MAX_DEG = 8;
+export const VIEW_PITCH_3D_MIN_DEG = 20;
+export function pitchModeOf(pitchDeg: number): '2d' | '3d' | '' {
+  if (!Number.isFinite(pitchDeg)) return '';
+  if (pitchDeg <= VIEW_PITCH_2D_MAX_DEG) return '2d';
+  if (pitchDeg >= VIEW_PITCH_3D_MIN_DEG) return '3d';
+  return '';
+}
+/** 单按钮切换的目标：在 2D → 去 3D；其余 → 回 2D（灰区里按"回 2D"处理，符合同一个按钮的心智） */
+export function toggledPitchMode(pitchDeg: number): '2d' | '3d' {
+  return pitchModeOf(pitchDeg) === '2d' ? '3d' : '2d';
+}
 
 interface ViewSnap {
   t: number; ms: number;

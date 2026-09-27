@@ -11,7 +11,7 @@ import * as THREE from 'three';
 import {
   compassBearingDeg, viewPitchDeg, bearingToThetaRad, shortestAngleDeltaDeg,
   shortestAngleDeltaRad, bearingLabel, normalizeDeg,
-  VIEW_PITCH_2D_DEG, VIEW_PITCH_3D_DEG,
+  VIEW_PITCH_2D_DEG, VIEW_PITCH_3D_DEG, pitchModeOf, toggledPitchMode,
 } from '../../env/renderer/scene.js';
 
 const D = 1000;
@@ -96,6 +96,30 @@ describe('罗盘：方位文字', () => {
       if (label.startsWith('正')) continue;            // 正方向不带偏移角
       const num = Number(/(\d+)°/.exec(label)?.[1] ?? 999);
       assert.ok(num <= 45, `偏移角必须 ≤45°，bearing ${b} 给出 ${label}`);
+    }
+  });
+});
+
+describe('罗盘：2D/3D 单按钮的切换规则', () => {
+  it('俯仰角 → 当前算哪一档；中间灰区不冒充（两个都不是）', () => {
+    assert.strictEqual(pitchModeOf(0), '2d');
+    assert.strictEqual(pitchModeOf(VIEW_PITCH_2D_DEG), '2d');
+    assert.strictEqual(pitchModeOf(8), '2d');
+    assert.strictEqual(pitchModeOf(12), '', '8°~20° 之间是灰区：手拖出来的角度不该被说成 2D 或 3D');
+    assert.strictEqual(pitchModeOf(20), '3d');
+    assert.strictEqual(pitchModeOf(VIEW_PITCH_3D_DEG), '3d');
+    assert.strictEqual(pitchModeOf(NaN), '');
+  });
+  it('点一下切到**另一边**：2D → 3D；3D → 2D；灰区 → 回 2D', () => {
+    assert.strictEqual(toggledPitchMode(VIEW_PITCH_2D_DEG), '3d');
+    assert.strictEqual(toggledPitchMode(VIEW_PITCH_3D_DEG), '2d');
+    assert.strictEqual(toggledPitchMode(12), '2d', '灰区里点按钮 → 回 2D（同一个按钮的心智）');
+  });
+  it('来回切换是自逆的（连点两次回到原档）', () => {
+    for (const start of [VIEW_PITCH_2D_DEG, VIEW_PITCH_3D_DEG]) {
+      const once = toggledPitchMode(start) === '2d' ? VIEW_PITCH_2D_DEG : VIEW_PITCH_3D_DEG;
+      const twice = toggledPitchMode(once) === '2d' ? VIEW_PITCH_2D_DEG : VIEW_PITCH_3D_DEG;
+      assert.ok(Math.abs(twice - start) < 1e-9, `从 ${start}° 连点两次应回到原档，实际 ${twice}°`);
     }
   });
 });

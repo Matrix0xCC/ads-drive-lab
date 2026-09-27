@@ -16,7 +16,7 @@ const uiSrc = fs.readFileSync(path.resolve('js/ui/index.ts'), 'utf8');
 
 describe('罗盘 DOM 契约（index.html ↔ ui/index.ts）', () => {
   it('JS 里引用的每个罗盘元素都存在', () => {
-    for (const id of ['compass-dial', 'compass-ring', 'compass-bearing', 'btn-view-2d', 'btn-view-3d']) {
+    for (const id of ['compass-dial', 'compass-ring', 'compass-bearing', 'btn-view-pitch']) {
       assert.ok(html.includes(`id="${id}"`), `index.html 缺少 #${id}（JS 里用的是静默的 ?.，会无声失效）`);
     }
     assert.ok(html.includes('class="compass-dir'), 'index.html 缺少 .compass-dir 字母按钮');
@@ -35,6 +35,23 @@ describe('罗盘 DOM 契约（index.html ↔ ui/index.ts）', () => {
       assert.match(html, re, `字母 ${letter} 应对应 data-bearing="${deg}"`);
       assert.ok(uiSrc.includes(`${letter}: ${deg}`), `ui/index.ts 的 BEARINGS 表应有 ${letter}: ${deg}`);
     }
+  });
+
+  it('2D/3D 是**一个**切换按钮（用户要求合并；两个按钮还占一行高度）', () => {
+    assert.ok(!html.includes('id="btn-view-2d"') && !html.includes('id="btn-view-3d"'),
+      '不该再有分开的 2D/3D 两个按钮');
+    assert.match(uiSrc, /toggledPitchMode\(viewPitchDeg\(camera, controls\.target\)\)/,
+      '点击应当"切到另一边"（当前 2D → 去 3D），而不是固定设成某一个');
+  });
+
+  it('底部提示行不能压在罗盘下面（实测文字叠按钮）', () => {
+    const compassLeft = Number(/#compass \{[^}]*left:\s*(\d+)px/.exec(html)?.[1] ?? NaN);
+    const dialW = Number(/#compass-dial \{[^}]*width:\s*(\d+)px/.exec(html)?.[1] ?? NaN);
+    const hintLeft = Number(/#hint-bar \{[^}]*left:\s*(\d+)px/.exec(html)?.[1] ?? NaN);
+    assert.ok(Number.isFinite(compassLeft) && Number.isFinite(dialW) && Number.isFinite(hintLeft),
+      `解析不到布局数值：compassLeft=${compassLeft} dialW=${dialW} hintLeft=${hintLeft}`);
+    assert.ok(hintLeft >= compassLeft + dialW,
+      `提示行 left=${hintLeft}px 必须让开罗盘右缘 ${compassLeft + dialW}px，否则两者会叠在一起`);
   });
 
   it('快捷键 N/2/3 已接线（否则按钮能用但键盘没反应）', () => {

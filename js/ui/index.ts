@@ -13,7 +13,7 @@ import type { RouteState } from '../sim/engine.js';
 import { frameSmart } from '../env/renderer.js';
 import {
   compassBearingDeg, viewPitchDeg, bearingLabel, snapView, stepViewSnap,
-  VIEW_PITCH_2D_DEG, VIEW_PITCH_3D_DEG,
+  pitchModeOf, toggledPitchMode, VIEW_PITCH_2D_DEG, VIEW_PITCH_3D_DEG,
 } from '../env/renderer/scene.js';
 import { panDelta } from './cameraKeys.js';
 import { UiController } from './controller.js';
@@ -259,8 +259,10 @@ export function setupUI(deps: UiDeps): {
     });
   });
   document.getElementById('compass-dial')?.addEventListener('click', () => snapViewToBearing(0));
-  document.getElementById('btn-view-2d')?.addEventListener('click', () => snapViewToPitch('2d'));
-  document.getElementById('btn-view-3d')?.addEventListener('click', () => snapViewToPitch('3d'));
+  // 2D/3D 合成一个按钮：点一下切到另一边（当前是 2D → 去 3D；否则回 2D）
+  document.getElementById('btn-view-pitch')?.addEventListener('click', () => {
+    snapViewToPitch(toggledPitchMode(viewPitchDeg(camera, controls.target)));
+  });
 
   /* 罗盘界面 = 相机状态的**投影**（不是 UI 状态）：每帧读相机、变化才写 DOM。
      圆环转 −bearing（让 N 指向屏幕上的北），字母各自转 +bearing 抵消父级旋转 → 文字正立。 */
@@ -268,8 +270,7 @@ export function setupUI(deps: UiDeps): {
     ring: document.getElementById('compass-ring'),
     dirs: Array.from(document.querySelectorAll<HTMLElement>('.compass-dir')),
     bearing: document.getElementById('compass-bearing'),
-    btn2d: document.getElementById('btn-view-2d'),
-    btn3d: document.getElementById('btn-view-3d'),
+    btnPitch: document.getElementById('btn-view-pitch'),
   };
   let lastBearing = NaN;
   let lastPitchMode = '';
@@ -281,13 +282,11 @@ export function setupUI(deps: UiDeps): {
       for (const d of compassEls.dirs) d.style.transform = `rotate(${bearing}deg)`;
       if (compassEls.bearing) compassEls.bearing.textContent = bearingLabel(bearing);
     }
-    // 2D/3D 高亮：由**实际俯仰角**决定（用户手拖到中间角度时两个都不亮，如实反映）
-    const pitch = viewPitchDeg(camera, controls.target);
-    const mode = pitch < 8 ? '2d' : pitch > 20 ? '3d' : '';
+    // 单按钮高亮：由**实际俯仰角**决定（手拖到中间角度不高亮，如实反映；阈值见 scene.ts 的 pitchModeOf）
+    const mode = pitchModeOf(viewPitchDeg(camera, controls.target));
     if (mode !== lastPitchMode) {
       lastPitchMode = mode;
-      compassEls.btn2d?.classList.toggle('active', mode === '2d');
-      compassEls.btn3d?.classList.toggle('active', mode === '3d');
+      compassEls.btnPitch?.classList.toggle('active', mode === '2d');
     }
   }
 

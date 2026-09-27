@@ -242,7 +242,8 @@
 
     /* 底部上下文提示条（文案由 UI 状态机驱动） */
     #hint-bar {
-      position: absolute; bottom: 10px; left: 15px;
+      /* left 让开左下角的罗盘（74px 宽 + 边距）：两者都在底部，否则会**文字叠按钮**（用户实测反馈） */
+      position: absolute; bottom: 10px; left: 110px;
       z-index: 10; pointer-events: none;
       color: #888; font-family: monospace; font-size: 11px;
     }
@@ -353,8 +354,8 @@
         </div>
         <div id="compass-bearing">正北</div>
         <div id="compass-pitch">
-          <button class="compass-pitch-btn" id="btn-view-2d" title="垂直俯视 (2)">2D</button>
-          <button class="compass-pitch-btn" id="btn-view-3d" title="斜视 3D (3)">3D</button>
+          <button class="compass-pitch-btn" id="btn-view-pitch"
+                  title="2D/3D 切换：2D = 垂直俯视、3D = 斜视（高亮 = 当前是 2D）。快捷键 2 / 3 直接指定">2D</button>
         </div>
       </div>
 
