@@ -64,7 +64,7 @@ requestAnimationFrame 主循环 (~60Hz)
 - `js/headless/` — headless CLI（run.ts）、归档（archive.ts）、检测器（detector.ts + checks/）、报告（report.ts）
 - `js/shared/` — 接口契约（types/interfaces/，含归档记录 schema）、量纲系统（dimensions.ts）、rng、debug
 - `js/ui/` — UI 层（`state.ts` 纯状态机 + `controller.ts` 副作用边界 + sidebar/toolbar/hud/inspector/interactions/replayPanel 面板模块）；`js/replay.ts` — 回放控制器；`js/env/renderer/` — Three.js 渲染
-- `js/mapgen/` — **OSM 地图管线**（构建期工具，不进浏览器包）：`osm.ts` 纯几何（way 链合并 / 投影 / 均匀重采样 / **弧长窗口平滑** / 曲率统计 / `projectOntoPath` 地图匹配原语）+ `network.ts` **路网拓扑**（共享顶点处切段 → 节点/边图；`largestComponent`）+ `build-map.ts` CLI（同端点重试抓取、原始数据与侧车 meta 入库、`--from-raw` 离线复跑、`--start-at-toll`、`--network`）
+- `js/mapgen/` — **OSM 地图管线**（构建期工具，不进浏览器包）：`osm.ts` 纯几何（way 链合并 / 投影 / 均匀重采样 / **弧长窗口平滑** / 曲率统计 / `projectOntoPath` 地图匹配原语）+ `network.ts` **路网拓扑**（共享顶点处切段 → 节点/边图；`largestComponent`）+ `build-map.ts` CLI（同端点重试抓取、原始数据与侧车 meta 入库、`--from-raw` 离线复跑、`--start-at-toll`、`--network`、`--classes` 选道路类别、`--clip-bbox` 从大样本裁小图）；**抓取按模式分派查询**（路网必须用 `buildNetworkQuery`——曾误用链式查询导致"抓不到匝道"，还被误判成镜像数据版本问题）；`--from-raw` 也会把原始数据落到 `maps/raw/`（否则地图里有 `rawSha256` 却找不到对应原始文件）
 - `maps/` — 派生地图（入库）：`<name>.json`（中心线 + world + 校验统计 + 收费站桩号）、`raw/<name>.osm.json`（原始 Overpass 响应）、`raw/<name>.meta.json`（取数过程信息；**不进地图文件**，否则"重新生成逐字节相同"不成立）；`js/env/maps/<name>.gen.ts` 为机械转换产物（勿手改）
 - `scenarios/` — 场景用例（入库）；新增场景需登记 `scenarios/index.json` 才会出现在浏览器场景下拉；`runs/` — 运行归档（gitignore）
 - `js/test/` — node:test 单元测试（`.test.ts`，编译后运行到 `dist/`）
@@ -113,6 +113,7 @@ Pure Pursuit：δ = atan2(2·L·sin α, ld)，预瞄距离 = clamp(0.4×speed, 1
 
 - `MapDefinition.kind`：`'radial'`（历史：8 个径向控制点闭环，半宽 7.5m、世界 450×200m）、`'polyline'`（OSM：点列，可开环，半宽按车道数、世界按包围盒）、`'network'`（OSM 路网：多链 + 节点/边图）。地图下拉由 `MAP_PRESETS` **动态填充**（新增地图只需登记 MAP_PRESETS，不必改 index.html）。
 - **路网地图（多链）语义**：`track.chains`（全部可行驶链）+ `netNodes`/`netEdges`（路由图）。可行驶域 = **到最近链的距离 + 车半径 ≤ 半宽**（`car.ts` 的 `isInsideNetwork`；路口处链的并集天然覆盖，端部自动成墙）——不能用多边形表达。`centerPoints` 取最长链，仅作"无路线时的回退参考线"。渲染为每条链一条 ribbon 路面。**越界判定的提前退出条件只能写"已确定在内"**（写成 `best <= halfW` 会让先遍历到的邻近链把结果定成越界——实测车精确在链上却复位 3400+ 帧）。
+- **入库的两张真 OSM 路网**：`bj-g6-junction`（京藏 G6/S11 立交，**树状**：24 边/25 节点，路线唯一）、`bj-3rd-ring`（西三环/六里桥，**有环**：109 边/105 节点/38 路口）。mapgen 的 `routeSample` 会**主动挑一对"能演示选择"的起终点**并量化代价：逐段掐掉最短路上的边再重路由，取最小绕行距离（树状图恒为 `null`）。`bj-3rd-ring` 实测：最短路 2.93km（含 3 段匝道），绕开其中一段匝道要多走 **1159m**。
 - **路网路线**：场景用 `route: { fromNode, toNode }`；`buildGraphFromEdges` + `buildNetworkRoute`（Dijkstra 出节点序列 → 逐段取链几何并按方向拼接）→ 规划器/感知照常把它当开环参考线用；`waypointIndices` 记途经链序号（归档可查"走了哪几条匝道"）。浏览器 `T`/toolbar 设路线时**吸附到节点**（`pickPoints()`），与 headless 走同一个 `buildNetworkRoute`。检测器的越界判据对路网用**链并集**（`world.track.chains` 进归档），否则路口处会误报。
 - **开环语义**：`closed: false` → `innerBoundary` 为空，`outerBoundary` 是**闭合路面多边形**（左缘→末端帽→右缘→起点帽），并且两端帽沿切线**外延 25m**（否则车出生点正好压在端帽上 → 每帧判越界复位）。`buildRoadGraph`/`sToIndex`/`resetToTrack`/`generateObstacles` 都不再绕接。
 - **世界尺寸不再是全局常量**：`engine.worldW/worldH` 取地图声明；地面/网格用 `setWorldExtent` 随地图重建。
