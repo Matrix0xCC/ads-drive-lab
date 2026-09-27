@@ -68,19 +68,20 @@ let _basemapVisible = false;
  * 按地图换底图（异步）。瓦片缓存是 gitignore 的 → **没有清单就静默降级为"无底图"**，
  * 绝不阻塞或影响仿真。换地图时释放上一张的纹理（否则 VRAM 泄漏）。
  */
-export async function applyBasemap(scene: THREE.Scene, mapName: string): Promise<string | null> {
+export async function applyBasemap(scene: THREE.Scene, mapKey: string): Promise<string | null> {
+  // mapKey = **地图产物 key**（MAP_PRESETS 的键），不是显示名（见 basemap.ts:fetchTileManifest）
   // **不接受 visible 参数**：可见性由每帧 `updateScene(..., showBasemap)` 同步（单一来源）。
   // 这样调用点（main.applyScenario）就不必去读 UI 状态——那会踩 TDZ：
   // applyScenario 在顶层被调用，而 `const ui = setupUI(...)` 在它之后才初始化（实测崩过）。
-  if (_basemapKey === mapName && _basemap) { _basemap.setVisible(_basemapVisible); return _basemap.attribution; }
+  if (_basemapKey === mapKey && _basemap) { _basemap.setVisible(_basemapVisible); return _basemap.attribution; }
   if (_basemap) { scene.remove(_basemap.group); _basemap.dispose(); _basemap = null; }
-  _basemapKey = mapName;
-  const handle = await loadBasemap(mapName);
-  if (!handle || _basemapKey !== mapName) { handle?.dispose(); return null; }   // 加载期间又换了地图
+  _basemapKey = mapKey;
+  const handle = await loadBasemap(mapKey);
+  if (!handle || _basemapKey !== mapKey) { handle?.dispose(); return null; }   // 加载期间又换了地图
   _basemap = handle;
   _basemap.setVisible(_basemapVisible);
   scene.add(handle.group);
-  console.info(`[basemap] ${mapName}: ${handle.stats.total} 张瓦片（z=${handle.zoom}）开始加载；署名 ${handle.attribution}`);
+  console.info(`[basemap] ${mapKey}: ${handle.stats.total} 张瓦片（z=${handle.zoom}）开始加载；署名 ${handle.attribution}`);
   return handle.attribution;
 }
 

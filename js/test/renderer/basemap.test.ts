@@ -13,6 +13,7 @@ import * as path from 'node:path';
 import * as THREE from 'three';
 import { createHash } from 'node:crypto';
 import { planBasemapQuads, fetchTileManifest, BASEMAP_Y, type TileManifest } from '../../env/renderer/basemap.js';
+import { MAP_PRESETS } from '../../env/mapDefinitions.js';
 import { tileResolutionMetersPerPx, tileBounds } from '../../shared/geo.js';
 
 const NAME = 'bj-g4-dujiakan';
@@ -115,5 +116,49 @@ describe('basemap：朝向（图片上方必须朝北，即世界 +z）', () => 
 describe('basemap：无缓存时优雅降级', () => {
   it('没有清单 → fetchTileManifest 返回 null（不抛异常）', async () => {
     assert.strictEqual(await fetchTileManifest('__不存在的底图__'), null);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// 底图查找必须用**地图产物 key**，不能用显示名
+// （实测：拿 `MapDefinition.name` 去找 → `GET /maps/Oval.tiles.json 404`；
+//   OSM 地图恰好 key==name，所以只在切回径向图时才暴露）
+// ─────────────────────────────────────────────────────────────
+describe('basemap：查找 key 的约定', () => {
+  it('不像产物 key 的名字（显示名）→ 直接跳过，**不发请求**', async () => {
+    const orig = globalThis.fetch;
+    let called = 0;
+    globalThis.fetch = (async () => { called++; throw new Error('不该发请求'); }) as typeof fetch;
+    try {
+      for (const display of ['Oval', 'Tech Circuit', 'Hairpin']) {
+        assert.strictEqual(await fetchTileManifest(display), null, `${display} 应返回 null`);
+      }
+      assert.strictEqual(called, 0, '显示名不该触发任何网络请求（否则控制台就是 404 噪音）');
+    } finally { globalThis.fetch = orig; }
+  });
+
+  it('合法的 key 形状 → 会去查清单（查不到也只是 null，不抛）', async () => {
+    const orig = globalThis.fetch;
+    let called = 0;
+    globalThis.fetch = (async () => { called++; return { ok: false } as Response; }) as typeof fetch;
+    try {
+      assert.strictEqual(await fetchTileManifest('no-such-map'), null);
+      assert.strictEqual(called, 1, '形状合法的 key 应当真的去查（判据不能被过度拦截）');
+    } finally { globalThis.fetch = orig; }
+  });
+
+  it('地图定义契约：非径向地图的 name 必须是合法产物 key；径向地图一律跳过底图', () => {
+    const keyRe = /^[a-z0-9][a-z0-9._-]*$/;
+    let radialWithDisplayName = 0;
+    for (const [key, def] of Object.entries(MAP_PRESETS)) {
+      assert.ok(keyRe.test(key), `preset key "${key}" 必须是合法产物 key`);
+      if (def.kind === 'radial') {
+        radialWithDisplayName++;                     // 径向图没有地理坐标 → 不查底图
+      } else {
+        assert.ok(keyRe.test(String(def.name)),
+          `非径向地图 ${key} 的 name（"${def.name}"）必须是合法产物 key —— 底图/产物查找都用它`);
+      }
+    }
+    assert.ok(radialWithDisplayName > 0, '应当存在径向（合成）地图，它们正是"没有底图"的那一类');
   });
 });

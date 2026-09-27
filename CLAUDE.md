@@ -158,6 +158,12 @@ Pure Pursuit：δ = atan2(2·L·sin α, ld)，预瞄距离 = clamp(0.4×speed, 1
   **压暗**（`color` 乘法 ≈0.55）当上下文，仿真路面仍是视觉主体。
 - **署名**：清单里的 `attribution` 必须**可见**（OSM ODbL / 各提供方要求）——实现为画布左下 HUD 的
   `#hud-basemap-attribution`，只在底图打开且有署名时显示（`main.ts:renderBasemapAttribution`）。
+- **查底图必须用"地图产物 key"**（`MAP_PRESETS` 的键 / 场景里的 `scenario.map`），**不是 `MapDefinition.name`**——
+  后者对合成地图是显示名（`Oval`、`Tech Circuit`），实测造成 `GET /maps/Oval.tiles.json 404`；
+  OSM 地图恰好 key==name，所以只在切回径向图时才暴露。`fetchTileManifest` 会先做 key 形状检查
+  （不像 key 就跳过并打日志，不发注定 404 的请求）。
+- **径向（合成）地图不查底图**：它们没有经纬度（`geometry.originWorld` 都不存在），瓦片无意义 →
+  `main.applyScenario` 里 `kind !== 'radial'` 才调用 `applyBasemap`。
 
 ### 地图来源与开环/路网道路（`env/mapDefinitions.ts` + `env/track.ts`）
 

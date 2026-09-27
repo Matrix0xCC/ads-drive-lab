@@ -77,8 +77,10 @@ function applyScenario(json: unknown): string | null {
   // 世界尺寸随地图（OSM 长条图 900×1840m ≫ 默认 450×200m）：地面/网格重建 + 智能取景
   setWorldExtent(scene, engine.worldW, engine.worldH);
   // 底图（真实地图瓦片）：**异步、可失败**——没有瓦片缓存时静默降级为无底图，不影响仿真。
+  // ① 用 `scenario.map`（**产物 key**）而不是 `engine.mapDef.name`（对合成地图是显示名，如 `Oval`/`Tech Circuit`）；
+  // ② 径向图是**合成**地图（没有经纬度）→ 找瓦片没有意义，直接跳过（否则控制台一条 404 噪音）。
   // 署名（许可义务）由 renderer 的底图句柄提供，每帧读取 → 异步加载完成后自动出现在 HUD。
-  void applyBasemap(scene, engine.mapDef.name);
+  if (engine.mapDef.kind !== 'radial') void applyBasemap(scene, scenario.map);
   frameSmart(camera, controls, canvas.clientWidth || W, canvas.clientHeight || H,
     engine.worldW, engine.worldH, engine.car.x as number, engine.car.y as number);
   frames.length = 0;   // 归档从本次场景加载起重新收集

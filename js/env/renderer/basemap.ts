@@ -75,10 +75,24 @@ export function planBasemapQuads(manifest: TileManifest): BasemapQuad[] {
 
 const loader = new THREE.TextureLoader();
 
-/** 读取清单（缺失/损坏 → null，属正常情况：缓存是 gitignore 的） */
-export async function fetchTileManifest(mapName: string): Promise<TileManifest | null> {
+/** 产物 key 的形状：小写字母/数字/._-（地图下拉的 key 就是它，例如 `oval`、`bj-g4-dujiakan`） */
+const ARTIFACT_KEY_RE = /^[a-z0-9][a-z0-9._-]*$/;
+
+/**
+ * 读取清单（缺失/损坏 → null，属正常情况：缓存是 gitignore 的）。
+ *
+ * @param mapKey **地图产物 key**（`MAP_PRESETS` 的键），**不是** `MapDefinition.name`——
+ *   后者对合成地图是显示名（`Oval` / `Tech Circuit`）。实测踩过：拿显示名去找 `maps/Oval.tiles.json`
+ *   → 控制台一条 404 噪音（OSM 地图恰好 key==name，所以只在切换回径向图时才暴露）。
+ *   这里先做形状检查：不像 key 就**直接跳过**（并给出可读日志），而不是发一个注定 404 的请求。
+ */
+export async function fetchTileManifest(mapKey: string): Promise<TileManifest | null> {
+  if (!ARTIFACT_KEY_RE.test(mapKey)) {
+    console.info(`[basemap] "${mapKey}" 不是地图产物 key（显示名？）→ 跳过底图查找`);
+    return null;
+  }
   try {
-    const res = await fetch(`maps/${mapName}.tiles.json`, { cache: 'no-cache' });
+    const res = await fetch(`maps/${mapKey}.tiles.json`, { cache: 'no-cache' });
     if (!res.ok) return null;
     const m = await res.json() as TileManifest;
     if (!Array.isArray(m.tiles) || m.tiles.length === 0) return null;
@@ -93,11 +107,11 @@ export async function fetchTileManifest(mapName: string): Promise<TileManifest |
  * 加载底图（异步、逐张）。返回 handle 供显示/隐藏/释放；没有清单时返回 null。
  * @param mapName 地图名（找 `maps/<name>.tiles.json`）
  */
-export async function loadBasemap(mapName: string, opts?: { dim?: number }): Promise<BasemapHandle | null> {
-  const manifest = await fetchTileManifest(mapName);
+export async function loadBasemap(mapKey: string, opts?: { dim?: number }): Promise<BasemapHandle | null> {
+  const manifest = await fetchTileManifest(mapKey);
   if (!manifest) {
-    console.info(`[basemap] ${mapName} 无底图清单（maps/${mapName}.tiles.json）——按"无底图"运行。`
-      + `如需底图：npm run tiles -- --map ${mapName}`);
+    console.info(`[basemap] ${mapKey} 无底图清单（maps/${mapKey}.tiles.json）——按"无底图"运行。`
+      + `如需底图：npm run tiles -- --map ${mapKey}`);
     return null;
   }
   const group = new THREE.Group();
