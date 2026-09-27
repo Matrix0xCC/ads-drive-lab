@@ -15,6 +15,7 @@ import * as THREE from 'three';
 import { WorldSnapshot, LidarScan, Trajectory, Route, GPSReading } from '../shared/types.js';
 import { initScene, frameCamera, frameSmart, followCar, setWorldExtent, FOLLOW_WORLD_THRESHOLD } from './renderer/scene.js';
 import { buildTrackGroup, buildObstacleGroup, buildCarGroup, buildFrenetTicksGroup } from './renderer/geometry.js';
+import { loadBasemap, type BasemapHandle } from './renderer/basemap.js';
 import { updateLidar, updateTrajectoryLine, updateRouteLine, updateGPSRing, updateObstacleMarkers, updateCorridorViz, resetOverlayCache } from './renderer/overlays.js';
 import type { PlanningViz } from '../shared/debug.js';
 import { updateHUD } from './renderer/hud.js';
@@ -51,8 +52,37 @@ export function resetSceneCache(scene: THREE.Scene) {
   _frenetTicks = null;
   _frenetTicksKey = null;
   _carGroup = null;
+  // 底图：换地图要释放纹理（否则 VRAM 泄漏），并清 key 让 applyBasemap 重新加载
+  if (_basemap) { scene.remove(_basemap.group); _basemap.dispose(); _basemap = null; _basemapKey = ''; }
   resetOverlayCache(scene);
 }
+
+// ═══════════════════════════════════════════════════
+// 底图（真实地图瓦片；纯表现层，见 renderer/basemap.ts）
+// ═══════════════════════════════════════════════════
+let _basemap: BasemapHandle | null = null;
+let _basemapKey = '';
+let _basemapVisible = false;
+
+/**
+ * 按地图换底图（异步）。瓦片缓存是 gitignore 的 → **没有清单就静默降级为"无底图"**，
+ * 绝不阻塞或影响仿真。换地图时释放上一张的纹理（否则 VRAM 泄漏）。
+ */
+export async function applyBasemap(scene: THREE.Scene, mapName: string, visible: boolean): Promise<void> {
+  _basemapVisible = visible;
+  if (_basemapKey === mapName && _basemap) { _basemap.setVisible(visible); return; }
+  if (_basemap) { scene.remove(_basemap.group); _basemap.dispose(); _basemap = null; }
+  _basemapKey = mapName;
+  const handle = await loadBasemap(mapName);
+  if (!handle || _basemapKey !== mapName) { handle?.dispose(); return; }   // 加载期间又换了地图
+  _basemap = handle;
+  _basemap.setVisible(_basemapVisible);
+  scene.add(handle.group);
+  console.info(`[basemap] ${mapName}: ${handle.stats.total} 张瓦片（z=${handle.zoom}）开始加载；署名 ${handle.attribution}`);
+}
+
+/** 底图是否可用（供 UI 提示；未加载完返回 false） */
+export function basemapAvailable(): boolean { return _basemap !== null; }
 
 // ═══════════════════════════════════════════════════
 // 每帧更新编排
@@ -63,8 +93,10 @@ export function updateScene(
   plannerState: string, lidarLines: THREE.Line[], trajectory: Trajectory | null,
   route: Route | null = null, gps: GPSReading | null = null,
   corridorViz: PlanningViz | null = null, showFrenetTicks = true,
-  showLidar = true, showCandidateLabels = false,
+  showLidar = true, showCandidateLabels = false, showBasemap = false,
 ) {
+  // 底图可见性（每帧同步；瓦片未就绪时组里只有占位平面，不影响任何东西）
+  if (_basemap) _basemap.setVisible(showBasemap);
   const { car, track, obstacles } = snapshot;
 
   // 懒创建静态几何体

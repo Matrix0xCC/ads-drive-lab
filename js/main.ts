@@ -6,7 +6,7 @@ import { SIM_W, SIM_H, FIXED_DT, SimEngine } from './sim/engine.js';
 import { Scenario, parseScenario, buildScenarioWorld, defaultScenario } from './sim/scenario.js';
 import { ARCHIVE_TOPICS, recordFrom } from './sim/records.js';
 import { assembleBundle } from './headless/bundle.js';
-import { initScene, updateScene, resetSceneCache, frameSmart, followCar, setWorldExtent } from './env/renderer.js';
+import { initScene, updateScene, resetSceneCache, frameSmart, followCar, setWorldExtent, applyBasemap } from './env/renderer.js';
 import { MAP_PRESETS, DEFAULT_MAP } from './env/mapDefinitions.js';
 import { setupUI, populateMapDropdown } from './ui/index.js';
 import { ReplayController } from './replay.js';
@@ -65,6 +65,8 @@ function applyScenario(json: unknown): string | null {
   resetSceneCache(scene);
   // 世界尺寸随地图（OSM 长条图 900×1840m ≫ 默认 450×200m）：地面/网格重建 + 智能取景
   setWorldExtent(scene, engine.worldW, engine.worldH);
+  // 底图（真实地图瓦片）：**异步、可失败**——没有瓦片缓存时静默降级为无底图，不影响仿真
+  void applyBasemap(scene, engine.mapDef.name, ui.isBasemapVisible());
   frameSmart(camera, controls, canvas.clientWidth || W, canvas.clientHeight || H,
     engine.worldW, engine.worldH, engine.car.x as number, engine.car.y as number);
   frames.length = 0;   // 归档从本次场景加载起重新收集
@@ -130,7 +132,7 @@ engine.bus.subscribe('control:state', ({ snapshot, lidarScan, trajectory, state 
   latestCar = { x: snapshot.car.x as number, y: snapshot.car.y as number };
   updateScene(scene, snapshot, lidarScan, state, lidarLines, trajectory, engine.route, engine.latestGPS,
     ui.isCorridorVisible() ? (debug.planning?.viz ?? null) : null, ui.isFrenetTicksVisible(),
-    ui.isLidarVisible(), ui.isPaused());
+    ui.isLidarVisible(), ui.isPaused(), ui.isBasemapVisible());
 });
 
 // ==================== 主循环（固定步长累积器） ====================

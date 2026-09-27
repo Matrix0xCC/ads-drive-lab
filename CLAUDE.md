@@ -15,6 +15,11 @@ npm run watch       # 监听模式
 npm test            # tsc + node --test（dist 下的 .test.js；脚本里用 shell 通配展开文件列表，
 #                     兼容 Node 18~24——Node 24 不再接受目录参数，见路线图 R2）
 
+# 底图瓦片（构建期；清单入库、瓦片入 gitignore 缓存；缺失时渲染优雅降级为"无底图"）
+npm run tiles -- --map bj-g4-dujiakan                 # 默认 z=17、缓存到 maps/tiles/
+npm run tiles -- --map bj-3rd-ring --zoom 17 --buffer 120
+npm run tiles -- --map bj-g4-dujiakan --dry-run       # 只报瓦片数与体积，不联网
+
 # OSM 地图生成（构建期；联网抓取，--from-raw 可离线复跑）
 npm run mapgen -- --name bj-g4-dujiakan --ref G4 --bbox 39.80,116.16,39.89,116.26 \
   --min-length 1500 --length 2000 --start-at-toll
@@ -62,9 +67,9 @@ requestAnimationFrame 主循环 (~60Hz)
 - `js/algo/` — 感知（perception）、规划（plan/）、控制（control）、全局路径（routePlanner）
 - `js/sim/` — SimEngine 共用核心（浏览器/headless 同一管线装配）+ 场景加载（scenario.ts）
 - `js/headless/` — headless CLI（run.ts）、归档（archive.ts）、检测器（detector.ts + checks/）、报告（report.ts）
-- `js/shared/` — 接口契约（types/interfaces/，含归档记录 schema）、量纲系统（dimensions.ts）、rng、debug
+- `js/shared/` — 接口契约（types/interfaces/，含归档记录 schema）、量纲系统（dimensions.ts）、rng、debug、**地理换算**（`geo.ts`：经纬度 ↔ 局部米制、Web Mercator 瓦片 ↔ 经纬度 —— 地图管线与渲染层共用同一份公式）
 - `js/ui/` — UI 层（`state.ts` 纯状态机 + `controller.ts` 副作用边界 + sidebar/toolbar/hud/inspector/interactions/replayPanel 面板模块）；`js/replay.ts` — 回放控制器；`js/env/renderer/` — Three.js 渲染
-- `js/mapgen/` — **OSM 地图管线**（构建期工具，不进浏览器包）：`osm.ts` 纯几何（way 链合并 / 投影 / 均匀重采样 / **弧长窗口平滑** / 曲率统计 / `projectOntoPath` 地图匹配原语）+ `network.ts` **路网拓扑**（共享顶点处切段 → 节点/边图；`largestComponent`）+ `attrs.ts` **逐段道路属性**（车道数/限速/半宽 + 回退规则 + `osm`/`derived:class` 来源标注 + 区间压缩与查表）+ `build-map.ts` CLI（同端点重试抓取、原始数据与侧车 meta 入库、`--from-raw` 离线复跑、`--start-at-toll`、`--network`、`--classes` 选道路类别、`--clip-bbox` 从大样本裁小图）；**抓取按模式分派查询**（路网必须用 `buildNetworkQuery`——曾误用链式查询导致"抓不到匝道"，还被误判成镜像数据版本问题）；`--from-raw` 也会把原始数据落到 `maps/raw/`（否则地图里有 `rawSha256` 却找不到对应原始文件）
+- `js/mapgen/` — **OSM 地图管线**（构建期工具，不进浏览器包）：`osm.ts` 纯几何（way 链合并 / 投影 / 均匀重采样 / **弧长窗口平滑** / 曲率统计 / `projectOntoPath` 地图匹配原语）+ `network.ts` **路网拓扑**（共享顶点处切段 → 节点/边图；`largestComponent`）+ `attrs.ts` **逐段道路属性**（车道数/限速/半宽 + 回退规则 + `osm`/`derived:class` 来源标注 + 区间压缩与查表）+ `fetch-tiles.ts` 底图瓦片取数（`npm run tiles`）+ `build-map.ts` CLI（同端点重试抓取、原始数据与侧车 meta 入库、`--from-raw` 离线复跑、`--start-at-toll`、`--network`、`--classes` 选道路类别、`--clip-bbox` 从大样本裁小图）；**抓取按模式分派查询**（路网必须用 `buildNetworkQuery`——曾误用链式查询导致"抓不到匝道"，还被误判成镜像数据版本问题）；`--from-raw` 也会把原始数据落到 `maps/raw/`（否则地图里有 `rawSha256` 却找不到对应原始文件）
 - `maps/` — 派生地图（入库）：`<name>.json`（中心线 + world + 校验统计 + 收费站桩号）、`raw/<name>.osm.json`（原始 Overpass 响应）、`raw/<name>.meta.json`（取数过程信息；**不进地图文件**，否则"重新生成逐字节相同"不成立）；`js/env/maps/<name>.gen.ts` 为机械转换产物（勿手改）
 - `scenarios/` — 场景用例（入库）；新增场景需登记 `scenarios/index.json` 才会出现在浏览器场景下拉；`runs/` — 运行归档（gitignore）
 - `js/test/` — node:test 单元测试（`.test.ts`，编译后运行到 `dist/`）
@@ -118,6 +123,34 @@ LiDAR 单线 2D：±60° FOV、2° 分辨率、61 条射线、最大 125m。核�
 ### 控制（js/algo/control.ts）
 
 Pure Pursuit：δ = atan2(2·L·sin α, ld)，预瞄距离 = clamp(0.4×speed, 10m, 20m)。油门目标 = 轨迹终点速度；**终点速度 ≈0（停车/紧急剖面）→ 油门 0**（0.15 怠速下限只对正值目标保留——否则"停车"变成 6.375m/s 恒速爬行，批量 A/B 回归根因）。
+
+### 真实地图底图（瓦片；纯表现层）
+
+- **定位**：只给人看，**不参与感知/规划/控制、不进归档**。开关在 toolbar「底图」/ `B` 键（`ui/state.ts` 的 `basemapVisible`，默认关）。
+- **产物分工**：`maps/<name>.tiles.json` **入库**（几百字节、可 diff：来源/署名/范围/每张 sha256/`worldOrigin`）；
+  `maps/tiles/<provider>/<z>/<x>/<y>.png` **gitignore 缓存**。理由：瓦片是别人的数据 + 外部世界快照
+  （许可上不该再分发进仓库、二进制进 git 会永久增重、且本项目所在机器连不上官方站），
+  而"清单入库"仍能回答"我们用的是哪一批"。新克隆没有缓存是**常态** → 必须优雅降级。
+- **取数**：`npm run tiles -- --map <name>`（可重复执行：已缓存的瓦片按 sha 复用，只补缺的；
+  带可识别 UA + 每张间隔 250~500ms 限速）。**默认 z=17**：仿真 4px/m、相机视距 250m，z=17（0.92~1.19 m/px）
+  够用；z=18 张数 ×4 而仿真路面自己画了车道线，收益低。
+- **地理配准（两个字段别搞混）**：
+  - `geometry.origin` = **投影原点**的 `[lat, lon]`（mapgen 内部用的那个）；
+  - `geometry.originWorld` = **世界坐标 (0,0) 的 `[lat, lon]`**。地图点列做过"平移到 [margin,...]"的世界归一化
+    → 世界 (0,0) ≠ 投影原点（实测差几百米~几公里）。**底图/瓦片/任何"世界坐标 ↔ 经纬度"换算都要用 `originWorld`。**
+  - 两个字段都是 `[lat, lon]`、7 位小数（≈1cm）。**曾经**路网地图把"米"写进 `origin` 且恒为 `[0,0]`（同一字段两种含义），
+    精度也只有 4 位（≈11m，配准会整体偏）——`js/test/mapgen/georef.test.ts` 现在把这类错误钉死。
+- **摆放与朝向**（`env/renderer/basemap.ts`）：每张瓦片取**四个角**各自投影（局部系是等距的 → 瓦片仍是轴对齐矩形，
+  用中心+宽高即可精确表示，不必假设瓦片是正方形）；平面 y = `BASEMAP_Y`（-0.05：地面 -0.1、网格 0、路面 0.01 之间）。
+  **`rotation.x = +π/2`** 才让"图片上方朝北"（世界 +z）；代价是法线朝下 → 必须 `side: DoubleSide`
+  （渲染层其它平面用 -π/2 是因为它们先做过 `Vector2(x, -y)` 镜像，别混）。纹理要设 `SRGBColorSpace` + mipmap + anisotropy，
+  换地图必须 `dispose()`（否则 VRAM 泄漏）。
+- **量纲**：瓦片是 Web Mercator，其"米"不是米（纬度 φ 处比例因子 1/cos φ，北京 39.9° → **1.30**，
+  同样的 z 赤道 2.39 m/px、北京 1.83 m/px）。所有换算走 `js/shared/geo.ts`，
+  `geo.test.ts` 专门断言这条 30% 的坑。**别把瓦片像素当米。**
+- **冲突处理**：瓦片上画的道路与仿真路面**边缘不会重合**（宽度/描边风格不同 + 平滑带来米级位移）→ 默认把底图
+  **压暗**（`color` 乘法 ≈0.55）当上下文，仿真路面仍是视觉主体。
+- **署名**：清单里的 `attribution` 必须在界面上显示（OSM ODbL / 各提供方要求）。
 
 ### 地图来源与开环/路网道路（`env/mapDefinitions.ts` + `env/track.ts`）
 

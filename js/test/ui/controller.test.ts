@@ -20,6 +20,7 @@ function makeCtl() {
     onCorridorVisible: () => {},
     onFrenetTicksVisible: () => {},
     onLidarVisible: () => {},
+    onBasemapVisible: () => {},
     onFollowCam: (on) => calls.follow.push(on),
     onRoutePickPhase: () => {},
   }, () => 'NONE');

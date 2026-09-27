@@ -29,6 +29,7 @@ import {
   type LatLon, type Vec2M,
 } from './osm.js';
 import { chainAttrs as attrsOfWay, spansFromPointAttrs, attrCoverage, type AttrSpan } from './attrs.js';
+import { localMetersToLatLon } from '../shared/geo.js';
 import { buildTopology, largestComponent, topologyStats, type Topology } from './network.js';
 import { buildGraphFromEdges, buildNetworkRoute } from '../algo/routePlanner.js';
 
@@ -207,6 +208,8 @@ function leadingInt(s: string | undefined): number | null {
 
 /** 定点到 4 位小数（0.1mm）——保证重新生成逐字节相同 */
 const r4 = (v: number): number => Math.round(v * 1e4) / 1e4;
+/** 经纬度专用精度：4 位小数 ≈ 11m，对地理配准（底图/瓦片）太粗 → 用 7 位（≈1cm） */
+const r7 = (v: number): number => Math.round(v * 1e7) / 1e7;
 
 interface TollGate { sM: number; lM: number; osmId: number; kind: 'node' | 'way' }
 
@@ -436,7 +439,13 @@ async function main(): Promise<void> {
     world: { wM: r4(worldW), hM: r4(worldH), marginM: WORLD_MARGIN_M },
     geometry: {
       stepM: r4(args.stepM),
-      origin: [r4(origin.lat), r4(origin.lon)],
+      origin: [r7(origin.lat), r7(origin.lon)],
+      // **世界坐标系的 (0,0) 在哪**：地图点列做过"平移到 [margin,...]"的世界归一化，
+      // 所以世界 (0,0) ≠ 投影原点。底图/瓦片/任何"世界坐标 ↔ 经纬度"换算都要用这个。
+      originWorld: (() => {
+        const ll = localMetersToLatLon(-worldDx, -worldDy, origin);
+        return [r7(ll.lat), r7(ll.lon)];
+      })(),
       points: road.map(p => [r4(p.x), r4(p.y)]),
     },
     road: {
@@ -532,7 +541,10 @@ function buildNetworkMap(
     console.log(`裁剪到 ${bb.join(',')} → way ${all.length}`);
   }
   if (all.length === 0) throw new Error(`bbox/裁剪框内没有 ${args.classes.join(' / ')}`);
-  const rawTopo = buildTopology(all);
+  // 投影原点：**必须与 buildTopology 的缺省一致**（第一个有几何的 way 的首点），
+  // 否则地图里记的原点与实际投影原点不符 → 任何地理配准都会整体偏。
+  const projOrigin = all.filter(w => w.geometry.length >= 2)[0]?.geometry[0] ?? { lat: 0, lon: 0 };
+  const rawTopo = buildTopology(all, projOrigin);
   const comp = largestComponent(rawTopo);
   const st0 = topologyStats(comp);
   console.log(`路网：way ${all.length} → 节点 ${st0.nodes} / 边 ${st0.edges}`
@@ -644,7 +656,17 @@ function buildNetworkMap(
       osmBaseTimestamp: json?.osm3s?.timestamp_osm_base ?? null,
     },
     world: { wM: r4(worldW), hM: r4(worldH), marginM: WORLD_MARGIN_M },
-    geometry: { stepM: r4(args.stepM), origin: [r4(comp.nodes[0]?.x ?? 0), r4(comp.nodes[0]?.y ?? 0)] },
+    // 【曾是 bug】这里原来写的是 `[nodes[0].x, nodes[0].y]`（**米**，而且那个点就是投影原点 → 恒为 [0,0]），
+    // 与链式地图同一字段的 `[lat, lon]` 语义冲突。本字段只有一种含义：**[lat, lon]**。
+    geometry: {
+      stepM: r4(args.stepM),
+      origin: [r7(projOrigin.lat), r7(projOrigin.lon)],
+      // 世界 (0,0) 的经纬度（路网同样做过世界平移，见上面的 dx/dy）
+      originWorld: (() => {
+        const ll = localMetersToLatLon(-dx, -dy, projOrigin);
+        return [r7(ll.lat), r7(ll.lon)];
+      })(),
+    },
     road: { laneCount, laneWidthM, halfWidthM: r4(laneCount * laneWidthM / 2), maxspeedKph, oneway: true },
     network: {
       nodes: nodes.map(n => [r4(n.x), r4(n.y)]),

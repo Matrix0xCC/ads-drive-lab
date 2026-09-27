@@ -4,3 +4,6 @@ runs/
 
 # IDE（JetBrains）本机配置，不入库
 .idea/
+
+# 底图瓦片缓存（第三方数据 + 外部世界快照：**不入库**，清单 maps/*.tiles.json 入库）
+maps/tiles/

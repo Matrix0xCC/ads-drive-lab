@@ -81,7 +81,7 @@ export interface UiDeps {
 
 export function setupUI(deps: UiDeps): {
   tick(dt: number): void; isCorridorVisible(): boolean; isFrenetTicksVisible(): boolean;
-  isLidarVisible(): boolean; isPaused(): boolean; isFollowCamEnabled(): boolean;
+  isLidarVisible(): boolean; isBasemapVisible(): boolean; isPaused(): boolean; isFollowCamEnabled(): boolean;
 } {
   const { canvas, camera, controls } = deps;
 
@@ -94,6 +94,9 @@ export function setupUI(deps: UiDeps): {
   }
   function renderLidarButton(visible: boolean) {
     renderToggleButton('btn-lidar', visible);
+  }
+  function renderBasemapButton(visible: boolean) {
+    renderToggleButton('btn-basemap', visible);
   }
   function renderCorridorButton(visible: boolean) {
     renderToggleButton('btn-corridor', visible);
@@ -127,6 +130,7 @@ export function setupUI(deps: UiDeps): {
     onCorridorVisible: (v) => { renderCorridorButton(v); deps.replay.showCorridor = v; deps.replay.requestRedraw(); },
     onFrenetTicksVisible: (v) => { renderFrenetTicksButton(v); deps.replay.showFrenetTicks = v; deps.replay.requestRedraw(); },
     onLidarVisible: (v) => { renderLidarButton(v); deps.replay.showLidar = v; deps.replay.requestRedraw(); },
+    onBasemapVisible: (v) => { renderBasemapButton(v); },
     onFollowCam: (on) => { renderFollowCamButton(on); },
     onRoutePickPhase: (ph) => renderToggleButton('btn-route', ph !== 'idle'),
     onSpeedUnit: (unit) => { display.speedUnit = unit; },
@@ -173,6 +177,9 @@ export function setupUI(deps: UiDeps): {
   });
   document.getElementById('btn-frenet-ticks')?.addEventListener('click', () => {
     controller.dispatch({ type: 'TOGGLE_FRENET_TICKS' });
+  });
+  document.getElementById('btn-basemap')?.addEventListener('click', () => {
+    controller.dispatch({ type: 'TOGGLE_BASEMAP' });
   });
   document.getElementById('btn-lidar')?.addEventListener('click', () => {
     controller.dispatch({ type: 'TOGGLE_LIDAR' });
@@ -242,6 +249,9 @@ export function setupUI(deps: UiDeps): {
       case 'l': case 'L':
         controller.dispatch({ type: 'TOGGLE_LIDAR' });
         break;
+      case 'b': case 'B':                       // B = Basemap（底图）
+        controller.dispatch({ type: 'TOGGLE_BASEMAP' });
+        break;
       case 'f': case 'F':
         controller.dispatch({ type: 'TOGGLE_FOLLOW_CAM' });
         break;
@@ -275,6 +285,9 @@ export function setupUI(deps: UiDeps): {
       return controller.state.frenetTicksVisible;
     },
     /** LiDAR 射线显隐（回放模式同样生效） */
+    isBasemapVisible(): boolean {
+      return controller.state.basemapVisible;
+    },
     isLidarVisible(): boolean {
       return controller.state.lidarVisible;
     },

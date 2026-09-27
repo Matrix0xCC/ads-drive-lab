@@ -32,6 +32,8 @@ export interface UiState {
   frenetTicksVisible: boolean;
   /** LiDAR 射线显示（默认开） */
   lidarVisible: boolean;
+  /** 真实地图底图（纯表现层；无缓存时静默降级） */
+  basemapVisible: boolean;
   /** 相机跟随车辆（toolbar / F 键）。默认随地图：长条大世界（OSM 高速）默认开，
    *  小世界（径向赛道，整图取景）默认关——见 SCENARIO_CHANGED 的 followCamDefault */
   followCam: boolean;
@@ -54,6 +56,7 @@ export type UiEvent =
   | { type: 'TOGGLE_CORRIDOR' }
   | { type: 'TOGGLE_FRENET_TICKS' }
   | { type: 'TOGGLE_LIDAR' }
+  | { type: 'TOGGLE_BASEMAP' }
   | { type: 'TOGGLE_FOLLOW_CAM' };
 
 export const INITIAL_UI_STATE: UiState = {
@@ -72,6 +75,7 @@ export const INITIAL_UI_STATE: UiState = {
   frenetTicksVisible: true,
   /** LiDAR 射线（默认开） */
   lidarVisible: true,
+  basemapVisible: false,
   /** 相机跟随（默认关：启动地图是径向小世界，整图取景不需要跟随） */
   followCam: false,
 };
@@ -128,6 +132,8 @@ export function reduce(state: UiState, e: UiEvent): UiState {
       return { ...state, frenetTicksVisible: !state.frenetTicksVisible };
     case 'TOGGLE_LIDAR':
       return { ...state, lidarVisible: !state.lidarVisible };
+    case 'TOGGLE_BASEMAP':
+      return { ...state, basemapVisible: !state.basemapVisible };
     case 'TOGGLE_FOLLOW_CAM':
       return { ...state, followCam: !state.followCam };
   }
