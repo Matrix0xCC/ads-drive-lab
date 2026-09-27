@@ -30,7 +30,11 @@ import { createCar, stepPhysics, checkBounds } from '../env/car.js';
 import { MapDefinition } from '../env/mapDefinitions.js';
 import { TrafficConfig } from '../shared/types/interfaces/traffic.js';
 import { localize, LocalizationConfig } from '../env/localization.js';
-import { sense, MAX_SENSOR_DIST, SCAN_RAY_COUNT } from '../algo/perception.js';
+import { sense, MAX_SENSOR_DIST } from '../algo/perception.js';
+import { DEFAULT_SENSOR_RIG, rigRayCount } from '../shared/sensors.js';
+
+/** 本帧雷达的射线总数（由传感器套件决定；多向之后不再是常量 61） */
+const RIG_RAY_COUNT = rigRayCount(DEFAULT_SENSOR_RIG);
 import { plan, getPlannerState } from '../algo/plan/index.js';
 import { resetClosing } from '../algo/plan/closing.js';
 import { control } from '../algo/control.js';
@@ -59,8 +63,8 @@ export interface WorldConfig {
 export type RouteState = 'NONE' | 'ACTIVE' | 'ARRIVED';
 
 function emptyScan(): LidarScan {
-  const d = new Array(SCAN_RAY_COUNT).fill(MAX_SENSOR_DIST) as Px[];
-  const a = new Array(SCAN_RAY_COUNT).fill(rad(0)) as Radians[];
+  const d = new Array(RIG_RAY_COUNT).fill(MAX_SENSOR_DIST) as Px[];
+  const a = new Array(RIG_RAY_COUNT).fill(rad(0)) as Radians[];
   return { angles: a, distances: d, rawDistances: d, confidences: [], timestamp: 0 };
 }
 

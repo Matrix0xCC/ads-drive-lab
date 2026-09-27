@@ -43,6 +43,13 @@ export interface LidarScan {
    *  会把相邻车道/侧后方的命中当限速源（实测：旁边超车就把巡航目标钉到 17.5m/s）。 */
   hitS?: number[];
   hitL?: number[];
+  /** 每条射线来自哪个传感器（下标；多向套件的融合要用）。**不进归档**（可由 rig 重建） */
+  sensorOf?: number[];
+  /** 每条射线的**传感器量程**（px）：超过它就是该传感器的**盲区**（未知），不是"空"。
+   *  与 `distances`（只回答"有没有障碍"）分开，供 S4 的"已知自由/未知"记账用。 */
+  sensorMax?: number[];
+  /** 本帧用了几个传感器 */
+  sensorCount?: number;
   timestamp: number;
 }
 
@@ -78,11 +85,13 @@ export function createWorldSnapshot(
 
 export function createLidarScan(
   angles: Radians[], distances: Px[], rawDistances: Px[], confidences: number[],
-  hitS?: number[], hitL?: number[],
+  hitS?: number[], hitL?: number[], sensorOf?: number[], sensorMax?: number[], sensorCount?: number,
 ): LidarScan {
   return {
     angles: [...angles], distances: [...distances], rawDistances: [...rawDistances], confidences: [...confidences],
     hitS: hitS ? [...hitS] : undefined, hitL: hitL ? [...hitL] : undefined,
+    sensorOf: sensorOf ? [...sensorOf] : undefined,
+    sensorMax: sensorMax ? [...sensorMax] : undefined, sensorCount,
     timestamp: performance.now(),
   };
 }

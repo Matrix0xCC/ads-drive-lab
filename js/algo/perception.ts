@@ -327,7 +327,7 @@ export function sense(snapshot: WorldSnapshot, rig: SensorSpec[] = DEFAULT_SENSO
   // ── 3. 扫描主循环 ──
   const carX = car.x as number, carY = car.y as number;
   const carAngle = car.angle as number;
-  const maxDist = rigMaxRange(rig) as number;
+  const maxDist = rigMaxRange(rig) as number;          // rig 级（背景减除参考线等仍按最大量程）
 
   // 按传感器套件铺射线（默认 rig = 单个前向 → 与历史逐位一致）
   const rayPlan: { sen: SensorSpec; offset: number }[] = [];
@@ -337,6 +337,8 @@ export function sense(snapshot: WorldSnapshot, rig: SensorSpec[] = DEFAULT_SENSO
     }
   }
 
+  const sensorOf: number[] = new Array(rayPlan.length).fill(0);
+  const sensorMax: number[] = new Array(rayPlan.length).fill(maxDist as number);
   const hitS: number[] = new Array(rayPlan.length).fill(NaN);
   const hitL: number[] = new Array(rayPlan.length).fill(NaN);
   let ri = 0;
@@ -344,14 +346,18 @@ export function sense(snapshot: WorldSnapshot, rig: SensorSpec[] = DEFAULT_SENSO
   for (const ray of rayPlan) {
     const { sen, offset } = ray;
     const i = ri++;
+    sensorOf[i] = rig.indexOf(sen);
+    sensorMax[i] = sen.maxRange as number;      // 本射线的传感器量程（之外是**盲区**，不是"空"）
     // 射线世界方向 = 车头朝向 + 传感器安装朝向 + 扇面偏移角；原点 = 车体原点 + 位姿（旋转到世界系）
     const worldAngle = carAngle + sen.pose.yaw + offset;
     const dx = Math.cos(worldAngle), dy = Math.sin(worldAngle);
     const ox = carX + Math.cos(carAngle) * (sen.pose.x as number) - Math.sin(carAngle) * (sen.pose.y as number);
     const oy = carY + Math.sin(carAngle) * (sen.pose.x as number) + Math.cos(carAngle) * (sen.pose.y as number);
 
-    // 对全部线段求交，取最近距离
-    let minDist = maxDist;
+    // 对全部线段求交，取最近距离。**哨兵用本传感器量程**：角雷达 30m 外是**盲区**而非"空"，
+    // 用 rig 最大量程会让"看不见"伪装成"看到 125m 的空旷"（S4 之前也要保持诚实）。
+    const senMax = sen.maxRange as number;
+    let minDist = senMax;
     let hitBoundary = false;
     let hitVehicle = false;
     for (const seg of allSegments) {
@@ -367,9 +373,9 @@ export function sense(snapshot: WorldSnapshot, rig: SensorSpec[] = DEFAULT_SENSO
     let hitFrenet: { absL: number; l: number; s: number } | null = null;
     let filteredDist = minDist;
 
-    if (minDist < maxDist) {
+    if (minDist < senMax) {
       // 有命中 → Frenet 投影判断
-      const hit = hitFrenetAbsL(ox, oy, worldAngle, minDist, bgRef, maxDist);
+      const hit = hitFrenetAbsL(ox, oy, worldAngle, minDist, bgRef, senMax);
       hitFrenet = hit;
       if (hit !== null) {
         const absL = hit.absL;
@@ -389,7 +395,8 @@ export function sense(snapshot: WorldSnapshot, rig: SensorSpec[] = DEFAULT_SENSO
           confidence = 1;
         } else if (hitBoundary || atMapEnd) {
           // 命中的就是 HD Map 的路缘/端帽 → 一定是背景（不依赖 |l| 投影比值，见 Segment.boundary）
-          filteredDist = maxDist;
+          filteredDist = maxDist;   // "没有障碍"的哨兵用 **rig 级**：`distances` 只回答
+                                    // "前方有没有东西"，不回答"我的传感器能看多远"（后者见 sensorMax）
           confidence = 0;
         } else if (absL > clLocal) {
           // 障碍物命中但贴得比 0.8×半宽还靠外 → 模糊带（可能是路缘/地图误差，低置信）
@@ -429,5 +436,5 @@ export function sense(snapshot: WorldSnapshot, rig: SensorSpec[] = DEFAULT_SENSO
     filteredHits: confidences.filter(c => c > 0).length,
   };
 
-  return createLidarScan(angles, distances, rawDistances, confidences, hitS, hitL);
+  return createLidarScan(angles, distances, rawDistances, confidences, hitS, hitL, sensorOf, sensorMax, rig.length);
 }

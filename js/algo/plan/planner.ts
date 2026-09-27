@@ -436,6 +436,9 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
     bestCost: pathLayer.best.cost,
     bestTargetL: pathLayer.best.targetL as number,
     speedTarget: targetV,
+    /** **路径层之前**的巡航目标（vCap）：由地图限速 + "本车道 + 前方"的最近命中决定（见 plan/inlane.ts）。
+     *  与 `speedTarget` 的区别：后者还会被路径几何（横向机动/紧间隙/停车线）压低。 */
+    cruiseV: vCap,
     speedMode: speedLayer.mode,
     mapSpeedLimitMps: (track.speedLimitMps as number | undefined) ?? null,
     laneOffsetU: laneOffset as number,

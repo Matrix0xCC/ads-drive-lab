@@ -275,6 +275,7 @@ export function replayPlanningDebug(
       ? (vizCands.find(c => c.targetL === corridorViz!.bestTargetL)?.cost ?? 0)
       : (archBest?.cost ?? 0),
     bestTargetL: vizCands ? corridorViz!.bestTargetL : (archBest?.targetL ?? 0),
+    cruiseV: 0,          // 回放不重算路径层前的巡航目标（S1① 的口径），只展示最终目标
     speedTarget: archBest?.targetV ?? 0,
     speedMode: planRec?.trajectory?.type ?? '—',
     remainingDist: routeLenU === null ? 0 : Math.max(0, routeLenU - s),

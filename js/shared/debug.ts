@@ -56,8 +56,10 @@ export interface PlanningDebug {
   }[];
   bestCost: number;
   bestTargetL: number;
-  /** 巡航速度目标（仿真单位） */
+  /** 巡航速度目标（仿真单位；**已被路径几何压低**过） */
   speedTarget: number;
+  /** **路径层之前**的巡航目标（地图限速 + 本车道前方最近命中，见 plan/inlane.ts） */
+  cruiseV: number;
   /** 速度层模式：cruise | stop | emergency */
   speedMode: string;
   /** 地图限速（仿真单位/s；null = 该地图未声明）——让"地图语义在起作用"可见 */

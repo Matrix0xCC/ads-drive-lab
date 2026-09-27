@@ -8,6 +8,7 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createLidarRayPool } from './rayPool.js';
+import { DEFAULT_SENSOR_RIG, rigRayCount } from '../../shared/sensors.js';
 
 // ═══════════════════════════════════════════════════
 // 【世界坐标的右手系约定】为什么要有这个常数
@@ -196,7 +197,9 @@ export function initScene(
   setWorldExtent(scene, worldW, worldH);
 
   // LiDAR 射线池（预创建 + 每帧原地改顶点；**必须关视锥剔除**，见 rayPool.ts 头注释）
-  const MAX_RAYS = 61;
+  // 射线池容量按**传感器套件**（多向之后不再是 61）。池子预创建、每帧原地改顶点，
+  // 所以容量必须 ≥ 本帧射线数（见 rayPool.ts 的 frustumCulled 坑）。
+  const MAX_RAYS = rigRayCount(DEFAULT_SENSOR_RIG);
   const { lines: lidarLines, parent: lidarParent } = createLidarRayPool(MAX_RAYS);
   scene.add(lidarParent);
 
