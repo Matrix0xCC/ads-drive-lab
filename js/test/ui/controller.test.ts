@@ -25,6 +25,7 @@ function makeCtl() {
     onRoutePickPhase: () => {},
     onRouteInfo: () => {},
     onNotice: () => {},
+    onMeasureMode: () => {},
   }, () => 'NONE');
   return { ctl, calls };
 }

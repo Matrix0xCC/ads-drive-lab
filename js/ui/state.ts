@@ -41,6 +41,8 @@ export interface UiState {
   routeInfo: { source: RouteSource; summary: string };
   /** 世界变化的一次性说明（切地点清除了路线 / 场景带来了什么）；空串 = 不显示 */
   notice: string;
+  /** 量距模式：左键拖动拉出一把带刻度的尺（与"设路线"互斥） */
+  measureMode: boolean;
 }
 
 /** 路线来源：无 / 场景自带 / 用户手工点选。让"为什么在跑、为什么静止"可读。 */
@@ -65,6 +67,7 @@ export type UiEvent =
   | { type: 'TOGGLE_LIDAR' }
   | { type: 'TOGGLE_BASEMAP' }
   | { type: 'TOGGLE_FOLLOW_CAM' }
+  | { type: 'TOGGLE_MEASURE' }
   | { type: 'ROUTE_INFO'; source: RouteSource; summary: string }
   | { type: 'NOTICE'; text: string };
 
@@ -82,6 +85,7 @@ export const INITIAL_UI_STATE: UiState = {
   corridorVisible: false,
   routeInfo: { source: 'none', summary: '无路线（车辆静止）' },
   notice: '',
+  measureMode: false,
   /** Frenet 刻度（默认开） */
   frenetTicksVisible: true,
   /** LiDAR 射线（默认开） */
@@ -104,7 +108,8 @@ export function reduce(state: UiState, e: UiEvent): UiState {
       // 显式路线模式（T / toolbar）：进入 → 等起点；再按一次或 Esc → 退出
       if (state.mode !== 'LIVE') return state;   // 回放中不给实时世界设路线
       return state.routePick === 'idle'
-        ? { ...state, routePick: 'picking-start', pickStartIdx: null }
+        // 与量距互斥：两者都吃左键，同时开必然抢手势（量距的守卫在前，路线会"按了没反应"）
+        ? { ...state, routePick: 'picking-start', pickStartIdx: null, measureMode: false }
         : { ...state, routePick: 'idle', pickStartIdx: null };
     case 'PICK_POINT':
       if (state.mode !== 'LIVE') return state;
@@ -145,6 +150,9 @@ export function reduce(state: UiState, e: UiEvent): UiState {
       return { ...state, lidarVisible: !state.lidarVisible };
     case 'TOGGLE_BASEMAP':
       return { ...state, basemapVisible: !state.basemapVisible };
+    case 'TOGGLE_MEASURE':
+      // 量距与"设路线"互斥（两者都吃左键，同时开必然抢手势）
+      return { ...state, measureMode: !state.measureMode, routePick: 'idle', pickStartIdx: null };
     case 'ROUTE_INFO':
       return state.routeInfo.source === e.source && state.routeInfo.summary === e.summary
         ? state : { ...state, routeInfo: { source: e.source, summary: e.summary } };

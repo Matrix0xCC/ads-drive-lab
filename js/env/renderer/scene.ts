@@ -3,7 +3,7 @@
 // 【坐标系映射】canvas(x,y) → Three.js(x, 0, z)
 //   2D 地面平面是 xz，垂直轴是 y（Three.js 默认坐标系）
 //
-// 【相机】透视相机 + OrbitControls（右键旋转 / 滚轮缩放 / 中键平移）
+// 【相机】透视相机 + OrbitControls（**左键旋转** / 滚轮缩放 / 右键平移——未覆盖 mouseButtons，用默认映射）
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
@@ -173,7 +173,8 @@ export function initScene(
   // far 放开到 2 万：OSM 长条图（~1.8km）整图取景时相机距离可达数千
   const camera = new THREE.PerspectiveCamera(45, viewW / viewH, 10, 20000);
 
-  // 轨道控制器：右键旋转、滚轮缩放、中键平移
+  // 轨道控制器：**左键旋转**、滚轮缩放、右键平移（未覆盖 mouseButtons → OrbitControls 默认映射；
+  // 注意"左键拖动 = 转视角"，所以量距/设路线这类吃左键的功能必须做成**模式**）
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableDamping = true;          // 惯性衰减
   controls.dampingFactor = 0.08;

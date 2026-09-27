@@ -59,6 +59,7 @@ export function wireInteractions(deps: UiDeps, ctl: UiController): void {
     preview.visible = true;
   }
   canvas.addEventListener('pointermove', (e: PointerEvent) => {
+    if (ctl.state.measureMode) { showPreview(null); return; }   // 量距模式：左键归尺子，不弹吸附预览
     if (ctl.state.routePick === 'idle') { showPreview(null); return; }
     showPreview(pickRouteIdx(e.clientX, e.clientY));
   });
@@ -66,6 +67,7 @@ export function wireInteractions(deps: UiDeps, ctl: UiController): void {
 
   // ── 左键点击 → 物体检查 / 路线拾取 ──
   canvas.addEventListener('click', (e: MouseEvent) => {
+    if (ctl.state.measureMode) return;   // 量距模式：左键拖动是"拉尺子"，不该顺带选中物体/设路线点
     // 路线模式：左键一律用于拾取（不弹物体 tooltip）
     if (ctl.state.routePick !== 'idle') {
       const idx = pickRouteIdx(e.clientX, e.clientY);

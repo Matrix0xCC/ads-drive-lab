@@ -19,6 +19,8 @@ import { panDelta } from './cameraKeys.js';
 import { UiController } from './controller.js';
 import type { RouteSource } from './state.js';
 import { wireToolbar } from './toolbar.js';
+import { setupMeasure } from './measure.js';
+import { metersPerPixel, niceScaleBar } from '../env/renderer/scale.js';
 import { wireRunPicker, setRunPickerOpen } from './runList.js';
 import { wireInteractions } from './interactions.js';
 import { setupReplayPanel } from './replayPanel.js';
@@ -97,6 +99,7 @@ export function setupUI(deps: UiDeps): {
   setNotice(text: string): void;
 } {
   const { canvas, camera, controls } = deps;
+  const measure = setupMeasure({ canvas, camera, scene: deps.scene, controls });
 
   /** 画布左缘 toolbar：开关类按钮用 active 类表示"开"（不再改文案，保持两字标签） */
   function renderToggleButton(id: string, on: boolean) {
@@ -157,6 +160,11 @@ export function setupUI(deps: UiDeps): {
       const el = document.getElementById('world-notice');
       if (el) el.textContent = text;
     },
+    onMeasureMode: (on) => {
+      renderToggleButton('btn-measure', on);
+      measure.setActive(on);
+      if (!on) measure.reset();          // 退出模式即清掉上次的尺子（避免留下一条看不懂的线）
+    },
     onSpeedUnit: (unit) => { display.speedUnit = unit; },
   }, () => deps.engine.routeState);
 
@@ -212,6 +220,9 @@ export function setupUI(deps: UiDeps): {
     controller.dispatch({ type: 'TOGGLE_ROUTE_SET' });
   });
   // 路线行：手工设点（与 toolbar「路线」/ T 同一动作）与清除（清掉后车辆保持静止）
+  document.getElementById('btn-measure')?.addEventListener('click', () => {
+    controller.dispatch({ type: 'TOGGLE_MEASURE' });
+  });
   document.getElementById('btn-route-pick')?.addEventListener('click', () => {
     controller.dispatch({ type: 'TOGGLE_ROUTE_SET' });
   });
@@ -280,6 +291,27 @@ export function setupUI(deps: UiDeps): {
     }
   }
 
+  /* 底部比例尺 = 相机状态的投影：随缩放更新，变化才写 DOM。
+     用**横向**尺度（屏幕水平方向在目标点深度处的米数）——纵向会被俯仰的透视压缩扭曲，
+     地图类比例尺一律用横向（见 env/renderer/scale.ts 文件头）。 */
+  const scaleEls = {
+    fill: document.getElementById('scale-bar-fill'),
+    label: document.getElementById('scale-bar-label'),
+  };
+  let lastScaleLabel = '';
+  let lastScalePx = -1;
+  function renderScaleBar(): void {
+    const h = canvas.clientHeight;
+    if (!h) return;
+    const { widthPx, label } = niceScaleBar(metersPerPixel(camera, controls.target, h));
+    const px = Math.round(widthPx);
+    // 数值与**条宽**都要比：数值没变但相机缩放了 → 条宽必须跟着变，否则"20 m"会画成旧宽度（比例就错了）
+    if (label === lastScaleLabel && px === lastScalePx) return;
+    lastScaleLabel = label; lastScalePx = px;
+    if (scaleEls.fill) scaleEls.fill.style.width = `${px}px`;
+    if (scaleEls.label) scaleEls.label.textContent = label;
+  }
+
   // ── WASD 相机平移：按下集合由 window 维护，实际位移在 tick 里按 dt 应用 ──
   const heldKeys = new Set<string>();
   window.addEventListener('keydown', (e) => {
@@ -313,10 +345,14 @@ export function setupUI(deps: UiDeps): {
       case 'Escape':
         if (st.runPickerOpen) controller.dispatch({ type: 'CLOSE_RUN_PICKER' });
         else if (st.mode === 'REPLAY') exitReplay();
+        else if (st.measureMode) controller.dispatch({ type: 'TOGGLE_MEASURE' });
         else controller.dispatch({ type: 'CANCEL' });
         break;
       case 'r': case 'R':
         resetCamera();
+        break;
+      case 'm': case 'M':                       // M = Measure（量距）
+        controller.dispatch({ type: 'TOGGLE_MEASURE' });
         break;
       case 'n': case 'N':                       // N = 正北（navigation 习惯）
         snapViewToBearing(0);
@@ -368,6 +404,8 @@ export function setupUI(deps: UiDeps): {
       moveCameraByKeys(dt);  // WASD 平移相机（主循环每帧调用；controls.update 在其后应用）
       stepViewSnap(camera, controls, dt * 1000);   // 罗盘的平滑转动（dt 秒 → 毫秒）
       renderCompass();                             // 圆环旋转/方位文字/2D-3D 高亮（变化才写 DOM）
+      renderScaleBar();                            // 底部比例尺（随缩放；变化才写 DOM）
+      measure.update();                            // 量距读数跟随尺子中点（相机移动/缩放时也要跟）
     },
     /** 走廊可视化是否生效（main 的渲染订阅用）：开关打开且处于实时模式——
      *  回放不跑规划器，debug.planning.viz 是上一帧实时数据，画出来会是陈旧走廊。 */

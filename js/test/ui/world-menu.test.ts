@@ -67,3 +67,47 @@ describe('世界菜单：两条关键行为规则（源码契约）', () => {
     assert.match(toolbarSrc, /scenarioSelect\.value = ''/, '场景下拉失败要回滚');
   });
 });
+
+// ─────────────────────────────────────────────────────────────
+// 比例尺（底部常驻）+ 量距（可拖动的尺）
+// ─────────────────────────────────────────────────────────────
+describe('比例尺与量距：契约', () => {
+  it('DOM 元素齐全（JS 取元素是静默的 ?.，改名会无声失效）', () => {
+    for (const id of ['scale-bar', 'scale-bar-fill', 'scale-bar-label', 'measure-readout', 'btn-measure']) {
+      assert.ok(html.includes(`id="${id}"`), `index.html 缺少 #${id}`);
+    }
+  });
+
+  it('量距与设路线互斥（都吃左键；一边开、另一边按了没反应会让人困惑）', () => {
+    const measuring = reduce(INITIAL_UI_STATE, { type: 'TOGGLE_MEASURE' });
+    assert.strictEqual(measuring.measureMode, true);
+    // 开量距会退出路线拾取
+    const picking = reduce(INITIAL_UI_STATE, { type: 'TOGGLE_ROUTE_SET' });
+    assert.strictEqual(picking.routePick, 'picking-start');
+    const both = reduce(picking, { type: 'TOGGLE_MEASURE' });
+    assert.strictEqual(both.measureMode, true);
+    assert.strictEqual(both.routePick, 'idle', '开量距必须退出路线拾取');
+    const back = reduce(both, { type: 'TOGGLE_ROUTE_SET' });
+    assert.strictEqual(back.measureMode, false, '开始设路线必须退出量距');
+  });
+
+  it('量距模式内的左键不吃给物体拾取/路线点选（否则拖一次会顺带选中东西）', () => {
+    const src = fs.readFileSync(path.resolve('js/ui/interactions.ts'), 'utf8');
+    assert.match(src, /ctl\.state\.measureMode\) return;/, 'click 处理要先判量距模式');
+    assert.match(src, /ctl\.state\.measureMode\) \{ showPreview\(null\); return; \}/, '悬停预览也要让位');
+  });
+
+  it('快捷键与退出：M 开量距、Esc 优先退出量距', () => {
+    const ui = fs.readFileSync(path.resolve('js/ui/index.ts'), 'utf8');
+    assert.match(ui, /case 'm': case 'M':/, '缺少 M 键');
+    assert.match(ui, /st\.measureMode\) controller\.dispatch\(\{ type: 'TOGGLE_MEASURE' \}\)/,
+      'Esc 应先退出量距，再考虑取消路线');
+  });
+
+  it('比例尺用**横向**尺度（纵向会被俯仰的透视压缩扭曲）', () => {
+    const scale = fs.readFileSync(path.resolve('js/env/renderer/scale.ts'), 'utf8');
+    assert.match(scale, /用\*\*屏幕水平方向\*\*在\*\*目标点深度\*\*处的尺度/, '要在文件头写明为什么用横向');
+    // 公式：2·d·tan(fov/2)/viewH / unitsPerMeter（与俯仰角无关）
+    assert.match(scale, /2 \* d \* Math\.tan\(\(camera\.fov \* Math\.PI \/ 180\) \/ 2\) \/ viewH/);
+  });
+});

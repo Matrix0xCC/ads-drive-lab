@@ -93,6 +93,26 @@
     #hud-mini .state-normal { color: #44ff44; font-weight: bold; }
     #hud-mini .state-avoid  { color: #ff4444; font-weight: bold; }
 
+    /* ── 比例尺（画布底部居中，常驻）：条 + 两端端帽 + 数值；随缩放自动更新 ── */
+    #scale-bar {
+      position: absolute; left: 50%; bottom: 10px; transform: translateX(-50%);
+      z-index: 12; pointer-events: none; text-align: center;
+      font-family: monospace; font-size: 11px; color: #eee;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.9);
+    }
+    #scale-bar-fill {
+      height: 7px; border: 1px solid #eee; border-top: none;   /* 只留左右下三边 → 像比例尺的端帽 */
+      box-sizing: border-box; margin: 0 auto;
+    }
+    #scale-bar-label { margin-top: 1px; }
+    /* ── 量距读数（跟随尺子中点） ── */
+    #measure-readout {
+      position: absolute; transform: translate(-50%, -160%);
+      background: rgba(0,0,0,0.78); color: #ffe27a; border: 1px solid #6a5a20; border-radius: 4px;
+      padding: 2px 6px; font-family: monospace; font-size: 11px; white-space: nowrap;
+      pointer-events: none; z-index: 25;
+    }
+
     /* ── 罗盘（画布左下，导航软件式）：随相机方位实时旋转 + 2D/3D 俯仰快捷 ──
        圆环上的 N/E/S/W 是**可点的按钮**（转到该方向）；字母随圆环移动但文字保持正立
        （圆环 rotate(-bearing)，字母各自 rotate(+bearing) 抵消）。 */
@@ -297,6 +317,9 @@
         <button class="tool-btn" id="btn-route" title="设路线：左键点起点→终点（T；Esc 取消）">
           <span class="tool-icon">&#10010;</span><span class="tool-label">路线</span>
         </button>
+        <button class="tool-btn" id="btn-measure" title="量距：左键在地图上拖动拉出一把带刻度的尺，显示直线距离与方位（M；Esc 退出）">
+          <span class="tool-icon">&#8596;</span><span class="tool-label">量距</span>
+        </button>
       </div>
 
       <!-- 精简遥测：速度（点击切 km/h ↔ m/s）+ 状态 -->
@@ -306,6 +329,14 @@
         <!-- 底图署名：OSM ODbL / 各瓦片提供方要求**可见**署名；仅在底图打开时显示 -->
         <div id="hud-basemap-attribution" style="display:none"></div>
       </div>
+
+      <!-- 比例尺（底部居中，常驻）：随缩放自动更新；量距时用同一套视觉语言 -->
+      <div id="scale-bar" title="比例尺：随缩放自动更新">
+        <div id="scale-bar-fill"></div>
+        <div id="scale-bar-label">—</div>
+      </div>
+      <!-- 量距读数：跟随尺子中点（未量距时隐藏） -->
+      <div id="measure-readout" style="display:none"></div>
 
       <!-- 罗盘（左下）：点圆环上的 N/E/S/W 转到该方向；点圆心回到正北；2D=垂直俯视、3D=斜视 -->
       <div id="compass">

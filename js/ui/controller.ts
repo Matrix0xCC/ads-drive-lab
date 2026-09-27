@@ -24,6 +24,7 @@ export interface UiEffects {
   onRoutePickPhase(phase: RoutePickPhase): void;
   onRouteInfo(info: { source: RouteSource; summary: string }): void;
   onNotice(text: string): void;
+  onMeasureMode(on: boolean): void;
 }
 
 export class UiController {
@@ -58,6 +59,7 @@ export class UiController {
     if (next.routePick !== prev.routePick) this.effects.onRoutePickPhase(next.routePick);
     if (next.routeInfo !== prev.routeInfo) this.effects.onRouteInfo(next.routeInfo);
     if (next.notice !== prev.notice) this.effects.onNotice(next.notice);
+    if (next.measureMode !== prev.measureMode) this.effects.onMeasureMode(next.measureMode);
     this.effects.onHint(deriveHint(next, this.getRouteState()));
   }
 
@@ -77,6 +79,7 @@ export class UiController {
     this.effects.onRoutePickPhase(this._state.routePick);
     this.effects.onRouteInfo(this._state.routeInfo);
     this.effects.onNotice(this._state.notice);
+    this.effects.onMeasureMode(this._state.measureMode);
     this.effects.onHint(deriveHint(this._state, this.getRouteState()));
   }
 }
