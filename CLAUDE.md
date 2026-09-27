@@ -136,7 +136,7 @@ Pure Pursuit：δ = atan2(2·L·sin α, ld)，预瞄距离 = clamp(0.4×speed, 1
 - **LiDAR 射线池**（`env/renderer/rayPool.ts`，61 条 Line 预创建 + 每帧原地改顶点）：
   **必须 `frustumCulled = false`**——Three.js 的包围球只在第一次用到时算一次，而池子是用**全 0 顶点**创建的
   → 包围球退化成"世界原点的一个点"且永不重算 → 开着剔除时射线随相机平移/缩放**时而出现时而消失**
-  （径向图整图取景时原点常在视野里，所以旧版不易察see；OSM 长条/路网图相机跟着车跑出几公里后必现）。
+  （径向图整图取景时原点常在视野里，所以旧版不易察觉；OSM 长条/路网图相机跟着车跑出几公里后必现）。
   单独成模块是为了让这条约束被 `js/test/renderer/ray-pool.test.ts` 钉住（含"包围球不自动重算"的演示用例）
 - **Frenet 刻度**（`env/renderer/geometry.ts` 的 `buildFrenetTicksGroup`，独立开关 + G 键，默认开）：
   沿弧长每 10m 一条横线、每 50m 一条亮线 + `s=50m` 数字标签（canvas Sprite）；
