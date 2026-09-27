@@ -185,6 +185,9 @@ Pure Pursuit：δ = atan2(2·L·sin α, ld)，预瞄距离 = clamp(0.4×speed, 1
     只是统一按"北在上"取景；另有既有行为不变：`followCar` 仍按用户调整过的相对位姿跟随。
 - **冲突处理**：瓦片上画的道路与仿真路面**边缘不会重合**（宽度/描边风格不同 + 平滑带来米级位移）→ 默认把底图
   **压暗**（`color` 乘法 ≈0.55）当上下文，仿真路面仍是视觉主体。
+- **世界网格让位**：底图**真的显示**时隐藏 `GridHelper`（网格是"黑底"下的空间参照，真实地图自己有路网/地物
+  参照，叠在一起就是地图上一层多余的黑线）；用户开了底图但这张地图没有瓦片时**保留**网格。
+  判据抽成纯函数 `scene.ts:gridVisibleWhen(showBasemap, hasBasemap)` 并由 `world-convention.test.ts` 钉住。
 - **署名**：清单里的 `attribution` 必须**可见**（OSM ODbL / 各提供方要求）——实现为画布左下 HUD 的
   `#hud-basemap-attribution`，只在底图打开且有署名时显示（`main.ts:renderBasemapAttribution`）。
 - **查底图必须用"地图产物 key"**（`MAP_PRESETS` 的键 / 场景里的 `scenario.map`），**不是 `MapDefinition.name`**——

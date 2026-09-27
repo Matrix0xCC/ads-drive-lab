@@ -109,6 +109,21 @@ export const FOLLOW_WORLD_THRESHOLD = 800;
 /** 重设世界范围：地面与网格随地图尺寸重建（世界尺寸不再是一个全局常量）。 */
 let _ground: THREE.Mesh | null = null;
 let _grid: THREE.GridHelper | null = null;
+/** 世界网格是否显示（有底图时让位；见 `gridVisibleWhen`）——声明放这里，别放在函数后面（TDZ） */
+let _gridVisible = true;
+/**
+ * 世界网格是否显示。
+ * **底图打开时要隐藏网格**：网格是给"黑底"提供空间参照的调试辅助，而真实地图自己就有路网与
+ * 地物参照；叠在一起只会让地图上多出一层黑线（用户实测反馈"地图上面的黑色网格线要去掉”）。
+ */
+export function gridVisibleWhen(showBasemap: boolean, hasBasemap: boolean): boolean {
+  return !(showBasemap && hasBasemap);
+}
+export function setGridVisible(v: boolean): void {
+  _gridVisible = v;
+  if (_grid) _grid.visible = v;
+}
+
 export function setWorldExtent(scene: THREE.Scene, worldW: number, worldH: number): void {
   if (_ground) { scene.remove(_ground); _ground.geometry.dispose(); _ground = null; }
   if (_grid) { scene.remove(_grid); (_grid as unknown as { geometry?: { dispose(): void } }).geometry?.dispose?.(); _grid = null; }
@@ -125,6 +140,7 @@ export function setWorldExtent(scene: THREE.Scene, worldW: number, worldH: numbe
   _ground.renderOrder = -2;
   scene.add(_ground);
   _grid = new THREE.GridHelper(Math.max(2000, Math.max(worldW, worldH) * 2), 40, 0x333333, 0x222222);
+  _grid.visible = _gridVisible;                    // 保持当前的网格可见性（底图打开时网格要让位）
   _grid.position.set(cx, 0, cz);
   scene.add(_grid);
 }

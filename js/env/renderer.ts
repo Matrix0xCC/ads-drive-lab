@@ -13,7 +13,7 @@
 
 import * as THREE from 'three';
 import { WorldSnapshot, LidarScan, Trajectory, Route, GPSReading } from '../shared/types.js';
-import { initScene, frameCamera, frameSmart, followCar, setWorldExtent, FOLLOW_WORLD_THRESHOLD } from './renderer/scene.js';
+import { initScene, frameCamera, frameSmart, followCar, setWorldExtent, setGridVisible, gridVisibleWhen, FOLLOW_WORLD_THRESHOLD } from './renderer/scene.js';
 import { buildTrackGroup, buildObstacleGroup, buildCarGroup, buildFrenetTicksGroup } from './renderer/geometry.js';
 import { loadBasemap, type BasemapHandle } from './renderer/basemap.js';
 import { updateLidar, updateTrajectoryLine, updateRouteLine, updateGPSRing, updateObstacleMarkers, updateCorridorViz, resetOverlayCache } from './renderer/overlays.js';
@@ -110,6 +110,8 @@ export function updateScene(
 ) {
   // 底图可见性（每帧同步；瓦片未就绪时组里只有占位平面，不影响任何东西）
   if (_basemap) _basemap.setVisible(showBasemap);
+  // 有底图时隐藏世界网格（网格是"黑底"下的调试参照；叠在真实地图上就是一层多余的黑线）
+  setGridVisible(gridVisibleWhen(showBasemap, _basemap !== null));
   const { car, track, obstacles } = snapshot;
 
   // 懒创建静态几何体

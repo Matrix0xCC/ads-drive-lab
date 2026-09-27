@@ -14,7 +14,7 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
 import * as THREE from 'three';
-import { WORLD_Z_SIGN, simToWorldZ, worldZToSim } from '../../env/renderer/scene.js';
+import { WORLD_Z_SIGN, simToWorldZ, worldZToSim, gridVisibleWhen } from '../../env/renderer/scene.js';
 
 // 四种组合的实测结论（本测试逐条钉住）：
 //   sign=+1 + 相机北侧 → 东在右、北在下   = 整幅上下颠倒（旧代码）
@@ -82,5 +82,14 @@ describe('渲染层世界约定：右手系（北 = −Z）', () => {
     const w = obj.getWorldPosition(new THREE.Vector3());
     assert.ok(Math.abs(w.x - 10) < 1e-9, '东向不变');
     assert.ok(Math.abs(w.z - (-250)) < 1e-9, `北 250m 应落到世界 z=-250，实际 ${w.z}`);
+  });
+});
+
+describe('世界网格：有底图时让位', () => {
+  it('底图真的显示时隐藏网格；其余情况保留（黑底下网格是空间参照）', () => {
+    assert.strictEqual(gridVisibleWhen(true, true), false, '底图显示 → 网格必须隐藏（否则地图上叠一层黑线）');
+    assert.strictEqual(gridVisibleWhen(true, false), true, '用户开了底图但这张地图没有瓦片 → 网格要保留');
+    assert.strictEqual(gridVisibleWhen(false, true), true, '底图关掉 → 网格恢复');
+    assert.strictEqual(gridVisibleWhen(false, false), true);
   });
 });
