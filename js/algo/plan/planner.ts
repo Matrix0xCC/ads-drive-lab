@@ -31,6 +31,7 @@ import { solvePathLayer, lateralSpeedCap, PATH_STEPS, PATH_HORIZON, TIGHT_SPEED,
 import type { PathLayerResult } from './paths.js';
 import { updateLead, FOLLOW_ENABLED } from './closing.js';
 import { solveSpeedLayer, STObstacle } from './speed.js';
+import { inLaneGapAhead } from './inlane.js';
 import { nextTight, INITIAL_TIGHT, TightMemory } from './tight.js';
 import { refCurvatureAt } from './margin.js';
 import { corridorBandPolygons, corridorBandObserved, corridorObservedLimitS, corridorPinchSegments, corridorCrossSectionSegments, coverageFromScan, bandBoundary as unobservedBoundarySegments } from './corridor.js';
@@ -248,7 +249,13 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
   }
 
   // ─── 4. 纵向巡航目标（单值）───
-  const minObsDist = Math.min(...lidarScan.distances);
+  // 【口径】只看"**本车道 + 前方**"的最近命中（见 plan/inlane.ts 的推导）。
+  // 旧写法是 `min(全部射线距离)/2`：相邻车道/侧后方的命中也会限速 —— 旁边一辆车超车就把巡航目标
+  // 钉到 17.5m/s（用户实测截图）。感知没给 hitS/hitL 时（老归档、合成扫描）退回旧口径，保证兼容。
+  const laneCenters = (track.laneCenters ?? null) as number[] | null;
+  const laneGapAhead = inLaneGapAhead(lidarScan, fl.s as number, fl.l as number,
+    laneCenters ?? undefined, (track.laneWidth ?? m(3.75)) as number);
+  const minObsDist = laneGapAhead !== null ? laneGapAhead : Math.min(...lidarScan.distances);
   let targetV = Math.min(mps(35) as number, Math.max(mps(17.5) as number, minObsDist / 2));
   // 地图限速（OSM maxspeed → vCap）：**语义来自地图**，与"前方障碍限速"取最小。
   // 位置必须在 17.5m/s 下限**之后**——地图限速是硬上限，低限速图（60km/h=16.7m/s）

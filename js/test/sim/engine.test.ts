@@ -56,10 +56,15 @@ describe('SimEngine 路线模式', () => {
     // 2026-09-25 再次更新（未观测区口径 = 'speed' 见-即-停限速，见 paths.ts UNKNOWN_HANDLING）：
     //   弯道遮挡处可见距离变短 → 限速生效（人工核验：进度 107.8m 不变、末速 26.50m/s、
     //   轨迹有限、状态 ACTIVE、位置差 1m 量级）后重取。
-    assert.strictEqual(e.car.x, 1046.8882377338923);
-    assert.strictEqual(e.car.y, 702.2694954419853);
-    assert.strictEqual(e.car.angle, 2.9329273335407517);
-    assert.strictEqual(e.car.speed, 106.015045465087);
+    // 2026-09-27 更新（S1①：巡航目标改为"**本车道 + 前方**的最近命中"，见 plan/inlane.ts）：
+    //   旧口径 `min(全部射线)/2` 会把**相邻车道**的命中也算进限速源；本场景自车横向 l≈1.57m、
+    //   车道中心 1.88m，旧口径下"骑线/模糊带"的命中会压低巡航目标。新口径后末速
+    //   26.50 → **27.48m/s**（更快，方向正确：不再为车道外的东西减速），位置差 0.4m 量级。
+    //   批量验证：径向场景零碰撞零复位（见提交说明）。
+    assert.strictEqual(e.car.x, 1045.356814503711);
+    assert.strictEqual(e.car.y, 702.6037384970815);
+    assert.strictEqual(e.car.angle, 2.9363973561115473);
+    assert.strictEqual(e.car.speed, 109.91851616308308);
   });
 });
 

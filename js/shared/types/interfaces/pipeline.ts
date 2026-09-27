@@ -38,6 +38,11 @@ export interface LidarScan {
   distances: Px[];
   rawDistances: Px[];
   confidences: number[];
+  /** 每条射线的**真障碍**命中点 Frenet 位置（px；无命中/命中路缘时 = NaN）。
+   *  规划层用它判断"这个命中在不在我这条车道、在不在我前方"——旧的 `min(distances)` 口径
+   *  会把相邻车道/侧后方的命中当限速源（实测：旁边超车就把巡航目标钉到 17.5m/s）。 */
+  hitS?: number[];
+  hitL?: number[];
   timestamp: number;
 }
 
@@ -71,8 +76,15 @@ export function createWorldSnapshot(
   return { car, track, obstacles, route: route ?? null, traffic, timestamp: performance.now() };
 }
 
-export function createLidarScan(angles: Radians[], distances: Px[], rawDistances: Px[], confidences: number[]): LidarScan {
-  return { angles: [...angles], distances: [...distances], rawDistances: [...rawDistances], confidences: [...confidences], timestamp: performance.now() };
+export function createLidarScan(
+  angles: Radians[], distances: Px[], rawDistances: Px[], confidences: number[],
+  hitS?: number[], hitL?: number[],
+): LidarScan {
+  return {
+    angles: [...angles], distances: [...distances], rawDistances: [...rawDistances], confidences: [...confidences],
+    hitS: hitS ? [...hitS] : undefined, hitL: hitL ? [...hitL] : undefined,
+    timestamp: performance.now(),
+  };
 }
 
 export function createControlCommand(steerAngle: Radians, throttle: DimLess): ControlCommand {

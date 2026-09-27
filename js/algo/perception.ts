@@ -55,6 +55,7 @@
 import { WorldSnapshot, LidarScan, TrackGeometry, Point2D, AttrSpan, attrsAtS, createLidarScan, obstacleToSegments, FrenetReference, Route } from '../shared/types.js';
 import { Radians, Px, SIM_UNITS_PER_METER, m, rad, px, normalizeAngle } from '../shared/dimensions.js';
 import { buildFrenetReference, cartesianToFrenet } from './plan/frenet.js';
+import { SensorSpec, DEFAULT_SENSOR_RIG, FRONT_SENSOR, rigMaxRange, sensorRayCount } from '../shared/sensors.js';
 import { TRACK_HALF_WIDTH, ribbonPolygon, ribbonPolygonVar, halfWidthsAlongPoints, taperedHalfWidthAt } from '../env/track.js';
 import { debug } from '../shared/debug.js';
 
@@ -63,16 +64,18 @@ import { debug } from '../shared/debug.js';
 // ═══════════════════════════════════════════════════
 
 /** 水平视场角：±60°（共 120°），对标 SICK LMS 系列 */
-const SCAN_FOV = Math.PI * 2 / 3;
+// 【单一真值】视场/分辨率/量程都来自传感器套件（js/shared/sensors.ts）；这两个导出保留给既有调用方，
+// 值由**默认 rig** 派生（与历史逐位一致，见 sensors.test.ts）
+const SCAN_FOV = FRONT_SENSOR.fov;
 
 /** 角分辨率：2°（≈ 0.0349 rad），每条射线间距约 12px @ 350px 距离 */
 const SCAN_RESOLUTION = 2 * Math.PI / 180;
 
 /** 最大探测距离 125m */
-export const MAX_SENSOR_DIST: Px = m(125);
+export const MAX_SENSOR_DIST: Px = FRONT_SENSOR.maxRange;
 
 /** 射线总数 ≈ 61 */
-export const SCAN_RAY_COUNT = Math.floor(SCAN_FOV / SCAN_RESOLUTION) + 1;
+export const SCAN_RAY_COUNT = sensorRayCount(FRONT_SENSOR);
 
 // ═══════════════════════════════════════════════════
 // 背景减除阈值
@@ -253,14 +256,15 @@ function hitFrenetAbsL(
   carX: number, carY: number,
   rayAngle: number, dist: number,
   ref: FrenetReference,
-): { absL: number; s: number } | null {
-  const maxDist = MAX_SENSOR_DIST as number;
+  maxDist: number,
+): { absL: number; l: number; s: number } | null {
   if (dist >= maxDist - 1) return null;  // 未命中 → 无投影
 
   const hitX = carX + Math.cos(rayAngle) * dist;
   const hitY = carY + Math.sin(rayAngle) * dist;
   const fl = cartesianToFrenet(px(hitX), px(hitY), ref);
-  return { absL: Math.abs(fl.l as number), s: fl.s as number };
+  // 同时给出**带符号**的 l：规划层要靠它判断"这个命中在不在我这条车道"
+  return { absL: Math.abs(fl.l as number), l: fl.l as number, s: fl.s as number };
 }
 
 // ═══════════════════════════════════════════════════
@@ -282,7 +286,7 @@ function hitFrenetAbsL(
  *   - rawDistances: 过滤前（渲染层），含边界命中
  *   - confidences:  每条射线的置信度
  */
-export function sense(snapshot: WorldSnapshot): LidarScan {
+export function sense(snapshot: WorldSnapshot, rig: SensorSpec[] = DEFAULT_SENSOR_RIG): LidarScan {
   const { car, track, obstacles } = snapshot;
   const angles: Radians[] = [], distances: Px[] = [], rawDistances: Px[] = [], confidences: number[] = [];
 
@@ -323,19 +327,35 @@ export function sense(snapshot: WorldSnapshot): LidarScan {
   // ── 3. 扫描主循环 ──
   const carX = car.x as number, carY = car.y as number;
   const carAngle = car.angle as number;
-  const maxDist = MAX_SENSOR_DIST as number;
+  const maxDist = rigMaxRange(rig) as number;
 
-  for (let offset = -SCAN_FOV / 2; offset <= SCAN_FOV / 2; offset += SCAN_RESOLUTION) {
-    // 射线世界方向 = 车头朝向 + 偏移角
-    const worldAngle = carAngle + offset;
+  // 按传感器套件铺射线（默认 rig = 单个前向 → 与历史逐位一致）
+  const rayPlan: { sen: SensorSpec; offset: number }[] = [];
+  for (const sen of rig) {
+    for (let offset = -sen.fov / 2; offset <= sen.fov / 2 + 1e-9; offset += sen.resolution) {
+      rayPlan.push({ sen, offset });
+    }
+  }
+
+  const hitS: number[] = new Array(rayPlan.length).fill(NaN);
+  const hitL: number[] = new Array(rayPlan.length).fill(NaN);
+  let ri = 0;
+
+  for (const ray of rayPlan) {
+    const { sen, offset } = ray;
+    const i = ri++;
+    // 射线世界方向 = 车头朝向 + 传感器安装朝向 + 扇面偏移角；原点 = 车体原点 + 位姿（旋转到世界系）
+    const worldAngle = carAngle + sen.pose.yaw + offset;
     const dx = Math.cos(worldAngle), dy = Math.sin(worldAngle);
+    const ox = carX + Math.cos(carAngle) * (sen.pose.x as number) - Math.sin(carAngle) * (sen.pose.y as number);
+    const oy = carY + Math.sin(carAngle) * (sen.pose.x as number) + Math.cos(carAngle) * (sen.pose.y as number);
 
     // 对全部线段求交，取最近距离
     let minDist = maxDist;
     let hitBoundary = false;
     let hitVehicle = false;
     for (const seg of allSegments) {
-      const t = raySegmentIntersect(carX, carY, dx, dy, seg.x1, seg.y1, seg.x2, seg.y2);
+      const t = raySegmentIntersect(ox, oy, dx, dy, seg.x1, seg.y1, seg.x2, seg.y2);
       if (t !== null && t < minDist) { minDist = t; hitBoundary = seg.boundary; hitVehicle = seg.vehicle === true; }
     }
 
@@ -344,11 +364,13 @@ export function sense(snapshot: WorldSnapshot): LidarScan {
 
     // ── 4. 背景减除 ──
     let confidence = 1;           // 默认：无命中 → 空旷 → 高置信
+    let hitFrenet: { absL: number; l: number; s: number } | null = null;
     let filteredDist = minDist;
 
     if (minDist < maxDist) {
       // 有命中 → Frenet 投影判断
-      const hit = hitFrenetAbsL(carX, carY, worldAngle, minDist, bgRef);
+      const hit = hitFrenetAbsL(ox, oy, worldAngle, minDist, bgRef, maxDist);
+      hitFrenet = hit;
       if (hit !== null) {
         const absL = hit.absL;
         // 该命中点所在路段的半宽 → 逐段阈值（宽路仍是地图级值 → 行为零变化）
@@ -380,6 +402,12 @@ export function sense(snapshot: WorldSnapshot): LidarScan {
       }
     }
 
+    // 【S1① 用】真障碍命中（不是路缘/端帽）→ 记下 Frenet 位置：规划层据此判断
+    // "在我这条车道、且在我前方"。旧口径是"全视野最近射线"，会把相邻车道（甚至侧后方）的车当限速源。
+    if (filteredDist < maxDist && hitFrenet !== null) {
+      hitS[i] = hitFrenet.s; hitL[i] = hitFrenet.l;
+    }
+
     confidences.push(confidence);
     angles.push(normalizeAngle(rad(worldAngle)));   // 归一化到 [-π,π]，下游无需再处理环绕
     distances.push(px(filteredDist));
@@ -401,5 +429,5 @@ export function sense(snapshot: WorldSnapshot): LidarScan {
     filteredHits: confidences.filter(c => c > 0).length,
   };
 
-  return createLidarScan(angles, distances, rawDistances, confidences);
+  return createLidarScan(angles, distances, rawDistances, confidences, hitS, hitL);
 }
