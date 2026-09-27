@@ -6,7 +6,7 @@ import { SIM_W, SIM_H, FIXED_DT, SimEngine } from './sim/engine.js';
 import { Scenario, parseScenario, buildScenarioWorld, defaultScenario } from './sim/scenario.js';
 import { ARCHIVE_TOPICS, recordFrom } from './sim/records.js';
 import { assembleBundle } from './headless/bundle.js';
-import { initScene, updateScene, resetSceneCache, frameSmart, followCar, setWorldExtent, applyBasemap } from './env/renderer.js';
+import { initScene, updateScene, resetSceneCache, frameSmart, followCar, setWorldExtent, applyBasemap, getBasemapAttribution } from './env/renderer.js';
 import { MAP_PRESETS, DEFAULT_MAP } from './env/mapDefinitions.js';
 import { setupUI, populateMapDropdown } from './ui/index.js';
 import { ReplayController } from './replay.js';
@@ -47,6 +47,17 @@ for (const topic of ARCHIVE_TOPICS) {
 
 let currentScenario: Scenario | null = null;
 
+/** 底图署名（许可义务）：只在底图打开且确实有署名时显示。
+ *  放在 applyScenario **之前**（虽然函数声明会提升，但放前面能避免"变量在下面声明"的 TDZ 陷阱）。 */
+function renderBasemapAttribution(): void {
+  const el = document.getElementById('hud-basemap-attribution');
+  if (!el) return;
+  const attr = getBasemapAttribution();
+  const show = attr !== '' && ui.isBasemapVisible();
+  el.style.display = show ? 'block' : 'none';
+  if (show) el.textContent = attr;
+}
+
 function applyScenario(json: unknown): string | null {
   let scenario: Scenario;
   let built: ReturnType<typeof buildScenarioWorld>;
@@ -66,12 +77,8 @@ function applyScenario(json: unknown): string | null {
   // 世界尺寸随地图（OSM 长条图 900×1840m ≫ 默认 450×200m）：地面/网格重建 + 智能取景
   setWorldExtent(scene, engine.worldW, engine.worldH);
   // 底图（真实地图瓦片）：**异步、可失败**——没有瓦片缓存时静默降级为无底图，不影响仿真。
-  // 署名是许可义务（OSM ODbL）：拿到后写进 HUD，并随底图开关显示/隐藏。
-  basemapAttribution = '';
-  void applyBasemap(scene, engine.mapDef.name, ui.isBasemapVisible()).then(attr => {
-    basemapAttribution = attr ?? '';
-    renderBasemapAttribution();
-  });
+  // 署名（许可义务）由 renderer 的底图句柄提供，每帧读取 → 异步加载完成后自动出现在 HUD。
+  void applyBasemap(scene, engine.mapDef.name);
   frameSmart(camera, controls, canvas.clientWidth || W, canvas.clientHeight || H,
     engine.worldW, engine.worldH, engine.car.x as number, engine.car.y as number);
   frames.length = 0;   // 归档从本次场景加载起重新收集
@@ -140,16 +147,6 @@ engine.bus.subscribe('control:state', ({ snapshot, lidarScan, trajectory, state 
     ui.isCorridorVisible() ? (debug.planning?.viz ?? null) : null, ui.isFrenetTicksVisible(),
     ui.isLidarVisible(), ui.isPaused(), ui.isBasemapVisible());
 });
-
-// 底图署名（许可义务）：只在底图打开且有署名时显示
-let basemapAttribution = '';
-function renderBasemapAttribution(): void {
-  const el = document.getElementById('hud-basemap-attribution');
-  if (!el) return;
-  const show = basemapAttribution !== '' && ui.isBasemapVisible();
-  el.style.display = show ? 'block' : 'none';
-  if (show) el.textContent = basemapAttribution;
-}
 
 // ==================== 主循环（固定步长累积器） ====================
 //

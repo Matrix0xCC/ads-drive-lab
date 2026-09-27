@@ -68,9 +68,11 @@ let _basemapVisible = false;
  * 按地图换底图（异步）。瓦片缓存是 gitignore 的 → **没有清单就静默降级为"无底图"**，
  * 绝不阻塞或影响仿真。换地图时释放上一张的纹理（否则 VRAM 泄漏）。
  */
-export async function applyBasemap(scene: THREE.Scene, mapName: string, visible: boolean): Promise<string | null> {
-  _basemapVisible = visible;
-  if (_basemapKey === mapName && _basemap) { _basemap.setVisible(visible); return _basemap.attribution; }
+export async function applyBasemap(scene: THREE.Scene, mapName: string): Promise<string | null> {
+  // **不接受 visible 参数**：可见性由每帧 `updateScene(..., showBasemap)` 同步（单一来源）。
+  // 这样调用点（main.applyScenario）就不必去读 UI 状态——那会踩 TDZ：
+  // applyScenario 在顶层被调用，而 `const ui = setupUI(...)` 在它之后才初始化（实测崩过）。
+  if (_basemapKey === mapName && _basemap) { _basemap.setVisible(_basemapVisible); return _basemap.attribution; }
   if (_basemap) { scene.remove(_basemap.group); _basemap.dispose(); _basemap = null; }
   _basemapKey = mapName;
   const handle = await loadBasemap(mapName);
@@ -84,6 +86,13 @@ export async function applyBasemap(scene: THREE.Scene, mapName: string, visible:
 
 /** 底图是否可用（供 UI 提示；未加载完返回 false） */
 export function basemapAvailable(): boolean { return _basemap !== null; }
+
+/**
+ * 底图署名（许可义务；OSM ODbL 要求可见）。**唯一来源是底图句柄**——
+ * 不要在 main.ts 里再加一份"缓存署名"的模块级变量：那既会与句柄状态不同步，
+ * 又极易踩 TDZ（实测：`let x = ''` 写在 applyScenario 之后，而 applyScenario 在顶层就调用 → 启动即崩）。
+ */
+export function getBasemapAttribution(): string { return _basemap?.attribution ?? ''; }
 
 // ═══════════════════════════════════════════════════
 // 每帧更新编排
