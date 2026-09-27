@@ -52,10 +52,10 @@
 //   20 Hz 运行 = 每秒 50 万次求交。每次求交只有几十次浮点运算，
 //   对现代浏览器 < 1ms。
 
-import { WorldSnapshot, LidarScan, TrackGeometry, createLidarScan, obstacleToSegments, FrenetReference } from '../shared/types.js';
+import { WorldSnapshot, LidarScan, TrackGeometry, Point2D, createLidarScan, obstacleToSegments, FrenetReference, Route } from '../shared/types.js';
 import { Radians, Px, m, rad, px, normalizeAngle } from '../shared/dimensions.js';
 import { buildFrenetReference, cartesianToFrenet } from './plan/frenet.js';
-import { TRACK_HALF_WIDTH } from '../env/track.js';
+import { TRACK_HALF_WIDTH, ribbonPolygon } from '../env/track.js';
 import { debug } from '../shared/debug.js';
 
 // ═══════════════════════════════════════════════════
@@ -147,12 +147,67 @@ function raySegmentIntersect(
  * （batch-hairpin-s4 浏览器实测，回归测试见 test/algo/perception-ref.test.ts）。
  */
 let _bgFrenetRef: FrenetReference | null = null;
-let _bgRefTrack: TrackGeometry | null = null;
+/** 缓存键 = 实际用作参考线的那份点列（赛道中心线 **或** 路线） */
+let _bgRefKey: Point2D[] | null = null;
 
-function getBackgroundFrenetRef(track: TrackGeometry): FrenetReference {
-  if (!_bgFrenetRef || _bgRefTrack !== track) {
-    _bgFrenetRef = buildFrenetReference(track.centerPoints, track.closed ?? true);
-    _bgRefTrack = track;
+// ═══════════════════════════════════════════════════
+// 边界线段缓存（射线求交用；按 track/route 对象身份失效）
+// ═══════════════════════════════════════════════════
+
+interface BoundedSeg { x1: number; y1: number; x2: number; y2: number; minX: number; minY: number; maxX: number; maxY: number }
+let _bdSegs: BoundedSeg[] = [];
+let _bdTrack: TrackGeometry | null = null;
+let _bdRoute: unknown = null;
+
+/**
+ * 供射线求交的"道路边界"线段（世界坐标，带包围盒供每帧粗筛）。
+ *
+ * 【为什么路网要单独处理】径向/开环地图的边界就是 inner/outer 多边形；**路网地图的
+ * `outerBoundary` 是空的**（可行驶域由"到最近链的距离"判定，不是一个多边形）。照抄的话
+ * 路网上**没有任何可撞的边界**：实测 60/60 条射线全部飞到 125m 上限——界面上就是那圈
+ * 穿透路缘的扇形，而且**墙/护栏不再遮挡**（射线穿过去能打到后面的东西）。
+ *
+ * 【为什么只取"路线"那一条 ribbon】不能把全部 24 条链的 ribbon 都当边界：路口处**别的链的
+ * 端帽**会横在自车前方，且它们相对路线参考线的 |l| 很小 → 会被判成**高置信障碍物**
+ * （幻影障碍 → 规划器假停车）。语义上正确的说法是"LiDAR 只该被**我要走的那条路**的路缘挡住"。
+ * 无路线时退回最长链（与 planner 的回退一致）。
+ */
+function getBoundarySegments(track: TrackGeometry, route?: Route | null): BoundedSeg[] {
+  const rw = route?.waypoints;
+  if (_bdTrack === track && _bdRoute === (rw ?? null)) return _bdSegs;
+  const polys: { x: Px; y: Px }[][] = [];
+  if (track.chains && track.chains.length > 0) {
+    const halfW = (track.halfWidth ?? TRACK_HALF_WIDTH) as number;
+    const src = rw && rw.length >= 2 ? rw : track.centerPoints;
+    polys.push(ribbonPolygon(src, halfW));
+  } else {
+    polys.push(track.innerBoundary, track.outerBoundary);
+  }
+  const out: BoundedSeg[] = [];
+  for (const poly of polys) {
+    for (let i = 0; i + 1 < poly.length; i++) {
+      const x1 = poly[i].x as number, y1 = poly[i].y as number;
+      const x2 = poly[i + 1].x as number, y2 = poly[i + 1].y as number;
+      out.push({ x1, y1, x2, y2, minX: Math.min(x1, x2), minY: Math.min(y1, y2), maxX: Math.max(x1, x2), maxY: Math.max(y1, y2) });
+    }
+  }
+  _bdSegs = out; _bdTrack = track; _bdRoute = rw ?? null;
+  return out;
+}
+
+/**
+ * 背景减除用的参考线：**路网地图必须用"我要走的那条路"（路线）**。
+ *
+ * 路网地图的 `centerPoints` 只是"最长链"（无路线时的回退），它可能**不是自车所在的链**——
+ * 用它算 |l| 会把路线 ribbon 的路缘判成高置信障碍物（实测 phantom_hit 870 帧），可能假停车。
+ * 径向/开环地图不受影响（它们的 centerPoints 就是那条路）。缓存按点列**对象身份**失效（P6 教训）。
+ */
+function getBackgroundFrenetRef(track: TrackGeometry, route?: Route | null): FrenetReference {
+  const rw = track.chains && route?.waypoints && route.waypoints.length >= 2 ? route.waypoints : null;
+  const key = (rw ?? track.centerPoints) as Point2D[];
+  if (!_bgFrenetRef || _bgRefKey !== key) {
+    _bgFrenetRef = buildFrenetReference(key, rw ? false : (track.closed ?? true));
+    _bgRefKey = key;
   }
   return _bgFrenetRef;
 }
@@ -209,20 +264,19 @@ export function sense(snapshot: WorldSnapshot): LidarScan {
 
   // ── 1. 收集所有待检测线段 ──
   const allSegments: Segment[] = [];
-  // 赛道边界（内外各约 200 段 Catmull-Rom 逼近线段）
-  for (const boundary of [track.innerBoundary, track.outerBoundary]) {
-    for (let i = 0; i < boundary.length - 1; i++) {
-      allSegments.push({
-        x1: boundary[i].x as number, y1: boundary[i].y as number,
-        x2: boundary[i + 1].x as number, y2: boundary[i + 1].y as number,
-      });
-    }
+  // 道路边界（径向/开环 = 内外多边形；路网 = 路线 ribbon，见 getBoundarySegments）。
+  // 用包围盒粗筛掉 125m 之外的段——射线最长 125m，过滤是**等价变换**，不动结果只省算力。
+  const RANGE = MAX_SENSOR_DIST as number;
+  const cx0 = car.x as number, cy0 = car.y as number;
+  for (const b of getBoundarySegments(track, snapshot.route)) {
+    if (cx0 < b.minX - RANGE || cx0 > b.maxX + RANGE || cy0 < b.minY - RANGE || cy0 > b.maxY + RANGE) continue;
+    allSegments.push({ x1: b.x1, y1: b.y1, x2: b.x2, y2: b.y2 });
   }
   // 障碍物矩形 → 4 条线段/个
   for (const obs of obstacles) allSegments.push(...obstacleToSegments(obs));
 
   // ── 2. HD Map 参考线（懒缓存）──
-  const bgRef = getBackgroundFrenetRef(track);
+  const bgRef = getBackgroundFrenetRef(track, snapshot.route);
   // 本帧的分级阈值（按道路半宽比例；见文件头 CONF_*_RATIO 的说明）
   const halfWidthU = (track.halfWidth ?? TRACK_HALF_WIDTH) as number;
   const confHigh = halfWidthU * CONF_HIGH_RATIO;

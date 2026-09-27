@@ -163,7 +163,7 @@ export class SimEngine {
     this.bus.subscribe('tick', ({ dt }: { dt: number }) => {
       this._perceptionTimer += dt;
       if (this._perceptionTimer >= 1 / PERCEPTION_HZ) {
-        const snapshot = createWorldSnapshot(this.car, this.track, this.obstacles);
+        const snapshot = createWorldSnapshot(this.car, this.track, this.obstacles, this.route);
         this.latestLidarScan = sense(snapshot);
         this.bus.publish('perception:result', {
           snapshot, scan: this.latestLidarScan,
@@ -178,7 +178,7 @@ export class SimEngine {
     this.bus.subscribe('tick', ({ dt }: { dt: number }) => {
       this._planningTimer += dt;
       if (this._planningTimer >= 1 / PLANNING_HZ) {
-        const snapshot = createWorldSnapshot(this.car, this.track, this.obstacles);
+        const snapshot = createWorldSnapshot(this.car, this.track, this.obstacles, this.route);
         this.latestTrajectory = plan(snapshot, this.latestLidarScan, this.route ?? undefined);
         if (debug.planning?.planMs !== undefined) this.planMsSamples.push(debug.planning.planMs);
         const state = getPlannerState();
@@ -234,7 +234,7 @@ export class SimEngine {
       } else {
         this.car.speed = pxps(0);
       }
-      const snapshot = createWorldSnapshot(this.car, this.track, this.obstacles);
+      const snapshot = createWorldSnapshot(this.car, this.track, this.obstacles, this.route);
       this.bus.publish('control:state', {
         snapshot, lidarScan: this.latestLidarScan, trajectory: this.latestTrajectory,
         state: getPlannerState(), control: debug.control ? { ...debug.control } : null,

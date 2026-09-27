@@ -4,6 +4,7 @@
 
 import { Radians, Px, DimLess } from '../../../shared/dimensions.js';
 import { CarState, TrackGeometry, Obstacle } from './geometry.js';
+import type { Route } from './planning.js';
 
 /**
  * WorldSnapshot — 环境在每个感知周期打包给算法的"世界快照"
@@ -16,6 +17,8 @@ export interface WorldSnapshot {
   track: TrackGeometry;
   obstacles: Obstacle[];
   timestamp: number;
+  /** 当前路线（可选）：**路网地图的"道路"是路线**——感知要按它取路缘边界（见 perception.ts） */
+  route?: Route | null;
 }
 
 /**
@@ -58,8 +61,10 @@ export interface ControlCommand {
 // 工厂函数
 // ═══════════════════════════════════════════════════
 
-export function createWorldSnapshot(car: CarState, track: TrackGeometry, obstacles: Obstacle[]): WorldSnapshot {
-  return { car, track, obstacles, timestamp: performance.now() };
+export function createWorldSnapshot(
+  car: CarState, track: TrackGeometry, obstacles: Obstacle[], route?: Route | null,
+): WorldSnapshot {
+  return { car, track, obstacles, route: route ?? null, timestamp: performance.now() };
 }
 
 export function createLidarScan(angles: Radians[], distances: Px[], rawDistances: Px[], confidences: number[]): LidarScan {

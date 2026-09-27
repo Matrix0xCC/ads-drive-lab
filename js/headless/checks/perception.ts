@@ -16,6 +16,8 @@ import { m } from '../../shared/dimensions.js';
 
 const FOV = Math.PI * 2 / 3;           // ±60°
 const CONF_FILTER = 0.5;
+/** 幻影检查的门槛：只认高置信命中（0.5 = 边缘模糊，见 ④ 的注释） */
+const CONF_HIGH_ONLY = 1;
 const ANGLE_TOLERANCE = 0.035;         // 约 2°（障碍半角外扩容差）
 
 /** 点到矩形（OBB）的距离（内部为 0） */
@@ -36,8 +38,11 @@ export function runPerceptionChecks(det: Detector, rec: FrameRecord): void {
     const tolerance = det.cfg.phantomTolerance as number;
 
     // ④ 幻影命中
+    //    只把**高置信**命中（confidence=1，即 |l| < 0.6×半宽）当作"声称看到障碍"。
+    //    0.5 = 边缘模糊带（0.6~0.8×半宽），语义上就是"可能只是路缘"——把它算进来会在
+    //    路网/开环地图上把**路缘命中**报成幻影（实测 870 帧；还叠加了 |l| 的最近邻投影误差）。
     for (let i = 0; i < angles.length; i++) {
-      if ((confidences[i] ?? 0) < CONF_FILTER) continue;
+      if ((confidences[i] ?? 0) < CONF_HIGH_ONLY) continue;
       const d = distances[i];
       if (d >= (MAX_SENSOR_DIST as number) - 1) continue;
       const hx = car.x + Math.cos(angles[i]) * d;
