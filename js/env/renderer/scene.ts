@@ -7,6 +7,7 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { createLidarRayPool } from './rayPool.js';
 
 /**
  * 取景：让世界完整落在视口内（相机不裁切赛道）。
@@ -138,19 +139,9 @@ export function initScene(
   // 深色地面 + 网格（按世界尺寸；地图切换时用 setWorldExtent 重建）
   setWorldExtent(scene, worldW, worldH);
 
-  // LiDAR 射线池 —— 预创建 61 条 Line
+  // LiDAR 射线池（预创建 + 每帧原地改顶点；**必须关视锥剔除**，见 rayPool.ts 头注释）
   const MAX_RAYS = 61;
-  const lidarLines: THREE.Line[] = [];
-  const lidarParent = new THREE.Group();
-  for (let i = 0; i < MAX_RAYS; i++) {
-    const geom = new THREE.BufferGeometry();
-    geom.setAttribute('position', new THREE.BufferAttribute(new Float32Array(6), 3));
-    const mat = new THREE.LineBasicMaterial({ color: 0x00ff00, transparent: true, opacity: 0.25 });
-    const line = new THREE.Line(geom, mat);
-    line.visible = false;
-    lidarParent.add(line);
-    lidarLines.push(line);
-  }
+  const { lines: lidarLines, parent: lidarParent } = createLidarRayPool(MAX_RAYS);
   scene.add(lidarParent);
 
   return { renderer, scene, camera, controls, lidarLines };
