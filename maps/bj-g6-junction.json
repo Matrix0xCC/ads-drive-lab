@@ -7579,7 +7579,9 @@
       "edges": 12,
       "linksUsed": 5,
       "lengthM": 3496.1394,
-      "usesRamp": true
+      "usesRamp": true,
+      "alternativeDetourM": null,
+      "alternativeEdge": null
     },
     "hasCycle": false,
     "warnings": [

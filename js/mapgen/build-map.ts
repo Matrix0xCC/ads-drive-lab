@@ -61,6 +61,10 @@ interface Args {
   tollSpan: boolean; startAtToll: boolean; reverse: boolean;
   /** 路网模式：产出多链 + 节点/边图（可路由），而非"选一条车行道" */
   network: boolean;
+  /** 路网包含的道路类别（OSM highway 值） */
+  classes: string[];
+  /** 从原始响应里**裁剪**出一小块（S,W,N,E，经纬度）：同一个大样本可反复裁小图，不必重抓 */
+  clipBbox?: [number, number, number, number];
   /** Overpass 端点（缺省主站；换端点会换数据版本，见 fetchOverpass 注释） */
   endpoint: string;
   fromRaw?: string; writeRaw: boolean; outDir: string;
@@ -69,7 +73,7 @@ interface Args {
 function parseArgs(argv: string[]): Args {
   const a: Args = { name: 'osm-map', minLengthM: 1500, stepM: 3, smoothM: 30, tollSpan: false,
     startAtToll: false, reverse: false, network: false, endpoint: PRIMARY_ENDPOINT,
-    writeRaw: true, outDir: 'maps' };
+    classes: ['motorway', 'motorway_link'], writeRaw: true, outDir: 'maps' };
   for (let i = 0; i < argv.length; i++) {
     const k = argv[i];
     if (k === '--name') a.name = argv[++i];
@@ -86,6 +90,12 @@ function parseArgs(argv: string[]): Args {
     else if (k === '--start-at-toll') a.startAtToll = true;
     else if (k === '--network') a.network = true;
     else if (k === '--endpoint') a.endpoint = argv[++i];
+    else if (k === '--classes') a.classes = argv[++i].split(',').map(s => s.trim()).filter(Boolean);
+    else if (k === '--clip-bbox') {
+      const v = argv[++i].split(',').map(Number);
+      if (v.length !== 4 || v.some(n => !Number.isFinite(n))) throw new Error('--clip-bbox 需要 S,W,N,E 四个数字');
+      a.clipBbox = [v[0], v[1], v[2], v[3]];
+    }
     else if (k === '--reverse') a.reverse = true;
     else if (k === '--from-raw') a.fromRaw = argv[++i];
     else if (k === '--no-raw') a.writeRaw = false;
@@ -100,16 +110,17 @@ function parseArgs(argv: string[]): Args {
   return a;
 }
 
-function buildNetworkQuery(bbox: [number, number, number, number]): string {
+function buildNetworkQuery(bbox: [number, number, number, number], classes: string[]): string {
   const [s, w, n, e] = bbox;
-  // motorway（主线）+ motorway_link（匝道）：路网的"路口"正是两者相接处。
-  // **用显式 union 而不是 `~"^(motorway|motorway_link)$"`**：实测该正则在 Overpass 上
-  // 只匹配到 motorway（匝道 0 条，原始响应里可验证），显式等值查询才可靠。
-  return `[out:json][timeout:180];(
-way["highway"="motorway"](${s},${w},${n},${e});
-way["highway"="motorway_link"](${s},${w},${n},${e});
-node["barrier"="toll_booth"](${s},${w},${n},${e});
-);out tags geom;`;
+  // 路网的"路口"正是主线与匝道相接处。每类一条显式等值查询：
+  // 不用 `~"^(a|b)$"`（实测该正则在 Overpass 上只匹配到第一类，显式等值才可靠）。
+  const parts = classes.map(c => `way["highway"="${c}"](${s},${w},${n},${e});`).join('\n');
+  return `[out:json][timeout:180];(\n${parts}\n);out tags geom;`;
+}
+
+/** 点是否在 (S,W,N,E) 经纬度框内 */
+function inBbox(lat: number, lon: number, bb: [number, number, number, number]): boolean {
+  return lat >= bb[0] && lat <= bb[2] && lon >= bb[1] && lon <= bb[3];
 }
 
 function buildQuery(bbox: [number, number, number, number]): string {
@@ -213,8 +224,11 @@ async function main(): Promise<void> {
     via = `file:${args.fromRaw}`;
     console.log(`离线复跑：${args.fromRaw}`);
   } else {
-    const query = buildQuery(args.bbox!);
-    console.log(`抓取 Overpass… bbox=${args.bbox!.join(',')}`);
+    // 【按模式分派查询】曾经这里无条件用 `buildQuery`（链式：只抓 motorway + toll 节点），
+    // 于是路网模式**永远抓不到匝道**——表现为"这个 bbox 没有 motorway_link"，很容易误判成
+    // 数据问题/镜像版本问题（当时确实误判了）。路网必须用 buildNetworkQuery。
+    const query = args.network ? buildNetworkQuery(args.bbox!, args.classes) : buildQuery(args.bbox!);
+    console.log(`抓取 Overpass… bbox=${args.bbox!.join(',')}${args.network ? ` classes=${args.classes.join('|')}` : ''}`);
     const got = await fetchOverpass(query, args.endpoint);
     json = got.json;
     via = got.via;
@@ -223,7 +237,16 @@ async function main(): Promise<void> {
   }
   // 规范化原始文本：入库的字节 = 计算 sha256 的字节（离线复跑才可能逐字节一致）
   const rawText = args.fromRaw ? fs.readFileSync(args.fromRaw, 'utf8') : JSON.stringify(json, null, 1) + '\n';
-  if (!args.fromRaw && args.writeRaw) {
+  if (args.fromRaw) {
+    // 【离线复跑也要落原始数据】地图的 rawSha256 指向原始响应；若只生成地图不落原始数据，
+    // 仓库里就出现"地图有 sha 但找不到对应原始文件"的溯源缺口（实测踩过：
+    // --from-raw /tmp/x.json 生成后，产物契约测试直接 ENOENT）。
+    fs.mkdirSync(path.dirname(rawPath), { recursive: true });
+    if (path.resolve(args.fromRaw) !== path.resolve(rawPath)) {
+      fs.copyFileSync(args.fromRaw, rawPath);
+      console.log(`原始数据入库（从 ${args.fromRaw} 复制）：${rawPath}`);
+    }
+  } else if (args.writeRaw) {
     fs.mkdirSync(path.dirname(rawPath), { recursive: true });
     fs.writeFileSync(rawPath, rawText);
     console.log(`原始数据入库：${rawPath}`);
@@ -454,8 +477,16 @@ function buildNetworkMap(
   args: Args, json: any, via: string, rawSha: string, rawText: string,
   mapPath: string, _pass: (x: number) => number,
 ): void {
-  const all = parseOverpass(json).filter(w => /^(motorway|motorway_link)$/.test(w.tags.highway ?? ''));
-  if (all.length === 0) throw new Error('bbox 内没有 motorway / motorway_link');
+  const cls = new Set(args.classes);
+  let all = parseOverpass(json).filter(w => cls.has(w.tags.highway ?? ''));
+  if (args.clipBbox) {
+    // 裁剪：保留"任意外观顶点落在裁剪框内"的 way（与 Overpass 的 bbox 语义一致）。
+    // 用途：一次抓大范围、反复裁小图，避免重复压 Overpass。
+    const bb = args.clipBbox;
+    all = all.filter(w => w.geometry.some(p => inBbox(p.lat, p.lon, bb)));
+    console.log(`裁剪到 ${bb.join(',')} → way ${all.length}`);
+  }
+  if (all.length === 0) throw new Error(`bbox/裁剪框内没有 ${args.classes.join(' / ')}`);
   const rawTopo = buildTopology(all);
   const comp = largestComponent(rawTopo);
   const st0 = topologyStats(comp);
@@ -492,10 +523,13 @@ function buildNetworkMap(
   }));
 
   // 道路属性：主线车道数取众数、限速取最小（保守）
-  const mw = all.filter(w => w.tags.highway === 'motorway');
+  const mainClasses = new Set(args.classes.filter(c => !c.endsWith('_link')));
+  const mw = all.filter(w => mainClasses.has(w.tags.highway ?? ''));
   const laneCount = mode(mw.map(w => leadingInt(w.tags.lanes)).filter((v): v is number => v !== null && v > 0)) ?? 3;
   const laneWidthM = 3.75;
-  const maxspeedKph = mode(mw.map(w => leadingInt(w.tags.maxspeed)).filter((v): v is number => v !== null && v > 0)) ?? 120;
+  // 路网里限速**取最小**（保守）：一次任务可能横跨限速不同的主干道，用众数会给出偏高的上限
+  const speeds = mw.map(w => leadingInt(w.tags.maxspeed)).filter((v): v is number => v !== null && v > 0);
+  const maxspeedKph = speeds.length > 0 ? Math.min(...speeds) : 120;
 
   // 路线抽样（验收证据）：取两个相距最远的死端/端点，跑真 Dijkstra，看是否经过匝道
   const deg = new Array(nodes.length).fill(0);
@@ -505,33 +539,53 @@ function buildNetworkMap(
   if (ends.length >= 2) {
     const graph = buildGraphFromEdges(nodes.length, edges);
     const chPts = chains.map(ch => ch.map(p => ({ x: p.x as any, y: p.y as any })));
-    // 单向路网：不是任意两个死端都可达（可能逆着单行方向）→ 按"距离从远到近"试若干对，
-    // 取第一条可路由的（确定性：候选按确定顺序生成）
-    const cands: [number, number, number][] = [];
-    for (const i of ends) for (const j of ends) {
-      if (i >= j) continue;
-      cands.push([i, j, Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y)]);
+    /** 某条路线"最划算的替代走法"要多走多少米（null = 无替代）；同时给最短路的长度 */
+    const analyse = (from: number, to: number) => {
+      const r = buildNetworkRoute(graph, edges, chPts, from, to);
+      if (!r) return null;
+      const baseLen = pathLengthM(r.waypoints as Vec2M[]);
+      let bestDetour = Infinity, bestEdge = -1;
+      for (const ei of r.edgeSeq) {
+        const alt = edges.filter((_, i2) => i2 !== ei);
+        const r2 = buildNetworkRoute(buildGraphFromEdges(nodes.length, alt), alt, chPts, from, to);
+        if (!r2) continue;
+        const d = pathLengthM(r2.waypoints as Vec2M[]) - baseLen;
+        if (d < bestDetour) { bestDetour = d; bestEdge = ei; }
+      }
+      return { r, baseLen, detour: Number.isFinite(bestDetour) ? bestDetour : null, detourEdge: bestEdge };
+    };
+    // 【选一对"能演示选择"的起终点】在所有死端对里，取"替代走法多走最多"的那条
+    // （且最短路 ≤ 5km，免得任务太长）——树状路网里所有 detour 都是 null，指标自动退化为"无替代"。
+    // 死端按 id 升序取前 24 个（确定性），两两组合 = 276 对；每对再试两个方向。
+    const cand = ends.slice(0, 24);
+    let best: { a: number; b: number; an: NonNullable<ReturnType<typeof analyse>> } | null = null;
+    for (let x = 0; x < cand.length; x++) {
+      for (let y = x + 1; y < cand.length; y++) {
+        for (const [i, j] of [[cand[x], cand[y]], [cand[y], cand[x]]] as [number, number][]) {
+          const an = analyse(i, j);
+          if (!an || an.baseLen > 5000) continue;
+          const score = an.detour ?? -1;
+          if (!best || score > (best.an.detour ?? -1)
+            || (score === (best.an.detour ?? -1) && an.baseLen > best.an.baseLen)) {
+            best = { a: i, b: j, an };
+          }
+        }
+      }
     }
-    cands.sort((x, y) => y[2] - x[2]);
-    let r: ReturnType<typeof buildNetworkRoute> = null;
-    let a0 = -1, b0 = -1;
-    for (const [i, j] of cands) {
-      // 单向路网：正向不通就试反向；**记录真正走通的那个方向**（否则复算不可达）
-      r = buildNetworkRoute(graph, edges, chPts, i, j);
-      if (r) { a0 = i; b0 = j; break; }
-      r = buildNetworkRoute(graph, edges, chPts, j, i);
-      if (r) { a0 = j; b0 = i; break; }
-    }
-    if (r) {
-      const used = r.chainSeq.map(ci => edges[ci].highway);
-      const links = used.filter(h => h === 'motorway_link').length;
+    if (best) {
+      const { r, baseLen, detour, detourEdge } = best.an;
+      const links = r.chainSeq.map(ci => edges[ci].highway).filter(h => h.endsWith('_link')).length;
       routeInfo = {
-        available: true, fromNode: a0, toNode: b0, edges: r.chainSeq.length,
-        linksUsed: links, lengthM: r4(pathLengthM(r.waypoints as Vec2M[])),
-        usesRamp: links > 0,
+        available: true, fromNode: best.a, toNode: best.b, edges: r.chainSeq.length,
+        linksUsed: links, lengthM: r4(baseLen), usesRamp: links > 0,
+        /** 替代走法（绕开最短路上最"省"的一条边）多走的距离；null = 无替代（树状路网） */
+        alternativeDetourM: detour === null ? null : r4(detour),
+        alternativeEdge: detour === null ? null : detourEdge,
       };
-      console.log(`路线抽样：节点 ${a0}→${b0}｜${r.chainSeq.length} 条边 / ${(pathLengthM(r.waypoints as Vec2M[]) / 1000).toFixed(2)}km`
-        + `｜匝道 ${links} 段${links > 0 ? '（✓ 路线经过匝道）' : '（⚠ 未经过匝道）'}`);
+      console.log(`路线抽样：节点 ${best.a}→${best.b}｜${r.chainSeq.length} 条边 / ${(baseLen / 1000).toFixed(2)}km｜匝道 ${links} 段`
+        + (detour === null
+          ? '｜无替代走法（树状路网）'
+          : `｜**有替代走法**：绕开最短路上的一段（${edges[detourEdge].highway}）要多走 ${detour.toFixed(0)}m`));
     }
   }
 
@@ -604,7 +658,8 @@ ${edges.map(e => `    { from: ${e.from}, to: ${e.to}, chain: ${e.chain}, lengthM
   fs.writeFileSync(path.join(args.outDir, 'raw', `${args.name}.meta.json`), JSON.stringify({
     name: args.name, mode: 'network', via,
     fetchedAt: args.fromRaw ? null : new Date().toISOString(),
-    bbox: args.bbox ?? null, query: args.bbox ? buildNetworkQuery(args.bbox) : '(离线复跑)',
+    bbox: args.bbox ?? null, classes: args.classes, clipBbox: args.clipBbox ?? null,
+    query: args.bbox ? buildNetworkQuery(args.bbox, args.classes) : '(离线复跑)',
     rawSource: args.fromRaw ?? null, rawSha256: rawSha,
   }, null, 2) + '\n');
   console.log(`\n写出 ${mapPath}`);

@@ -3,8 +3,18 @@
   "mode": "network",
   "via": "file:maps/raw/bj-g6-junction.osm.json",
   "fetchedAt": null,
-  "bbox": null,
-  "query": "(离线复跑)",
+  "bbox": [
+    39.952,
+    116.352,
+    39.985,
+    116.398
+  ],
+  "classes": [
+    "motorway",
+    "motorway_link"
+  ],
+  "clipBbox": null,
+  "query": "[out:json][timeout:180];(\nway[\"highway\"=\"motorway\"](39.952,116.352,39.985,116.398);\nway[\"highway\"=\"motorway_link\"](39.952,116.352,39.985,116.398);\n);out tags geom;",
   "rawSource": "maps/raw/bj-g6-junction.osm.json",
   "rawSha256": "77a4c5a52635f961a24bed7d92af2c1c06cc376f67779694fdc50bb66789ad39"
 }

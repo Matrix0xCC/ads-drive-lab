@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "name": "bj-3rd-ring-route",
+  "map": "bj-3rd-ring",
+  "seed": 5,
+  "duration": 240,
+  "car": { "speed": 20 },
+  "obstacles": { "mode": "random", "count": 2 },
+  "route": { "fromNode": 2, "toNode": 93 }
+}

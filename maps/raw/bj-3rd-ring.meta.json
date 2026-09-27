@@ -1,0 +1,22 @@
+{
+  "name": "bj-3rd-ring",
+  "mode": "network",
+  "via": "file:/tmp/liuliqiao.json",
+  "fetchedAt": null,
+  "bbox": null,
+  "classes": [
+    "motorway",
+    "motorway_link",
+    "trunk",
+    "trunk_link"
+  ],
+  "clipBbox": [
+    39.868,
+    116.298,
+    39.89,
+    116.332
+  ],
+  "query": "(离线复跑)",
+  "rawSource": "/tmp/liuliqiao.json",
+  "rawSha256": "e53a69f307871e1a9048547e00aafb36e4738895818f1cb5854044fe3a9bb63e"
+}

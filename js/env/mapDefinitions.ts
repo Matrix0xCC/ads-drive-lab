@@ -12,6 +12,7 @@ import { Point2D } from '../shared/types.js';
 import { Px, m } from '../shared/dimensions.js';
 import { BJ_G4_DUJIAKAN } from './maps/bj-g4-dujiakan.gen.js';
 import { BJ_G6_JUNCTION } from './maps/bj-g6-junction.gen.js';
+import { BJ_3RD_RING } from './maps/bj-3rd-ring.gen.js';
 
 /** 地图定义 */
 export interface MapDefinition {
@@ -82,8 +83,11 @@ export const MAP_PRESETS: Record<string, MapDefinition> = {
   /** 京港澳 G4 杜家坎收费站起 2.0km（真实 OSM，开环，3 车道）——由 mapgen 生成 */
   'bj-g4-dujiakan': BJ_G4_DUJIAKAN,
 
-  /** 京藏 G6/S11 立交路网（真实 OSM，多链 + 节点/边图，8 个路口）——由 mapgen --network 生成 */
+  /** 京藏 G6/S11 立交路网（真实 OSM，多链 + 节点/边图，8 个路口，**树状**：路线唯一） */
   'bj-g6-junction': BJ_G6_JUNCTION,
+
+  /** 北京西三环/六里桥路网（真实 OSM，**有环**：105 节点 / 109 边 / 38 路口）——能演示"绕行选择" */
+  'bj-3rd-ring': BJ_3RD_RING,
 };
 
 export const DEFAULT_MAP = 'oval';

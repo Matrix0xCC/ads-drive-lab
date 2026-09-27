@@ -103,14 +103,16 @@ export function buildNetworkRoute(
   edges: { from: number; to: number; chain: number }[],
   chains: Point2D[][],
   fromNode: number, toNode: number,
-): { waypoints: Point2D[]; chainSeq: number[] } | null {
+): { waypoints: Point2D[]; chainSeq: number[]; edgeSeq: number[] } | null {
   const nodePath = findRoute(graph, fromNode, toNode);
   if (!nodePath || nodePath.length < 2) return null;
   const waypoints: Point2D[] = [];
   const chainSeq: number[] = [];
+  const edgeSeq: number[] = [];
   for (let i = 0; i + 1 < nodePath.length; i++) {
     const a = nodePath[i], b = nodePath[i + 1];
-    const edge = edges.find(e => (e.from === a && e.to === b) || (e.from === b && e.to === a));
+    const ei = edges.findIndex(e => (e.from === a && e.to === b) || (e.from === b && e.to === a));
+    const edge = ei >= 0 ? edges[ei] : undefined;
     if (!edge) return null;
     const geom = chains[edge.chain];
     if (!geom || geom.length < 2) return null;
@@ -121,8 +123,9 @@ export function buildNetworkRoute(
       waypoints.push({ x: p.x, y: p.y });
     }
     chainSeq.push(edge.chain);
+    edgeSeq.push(ei);
   }
-  return waypoints.length >= 2 ? { waypoints, chainSeq } : null;
+  return waypoints.length >= 2 ? { waypoints, chainSeq, edgeSeq } : null;
 }
 
 // ═══════════════════════════════════════════════════

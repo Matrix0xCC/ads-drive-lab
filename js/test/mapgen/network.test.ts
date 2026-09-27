@@ -59,57 +59,91 @@ describe('mapgen/buildTopology（路网拓扑）', () => {
   });
 });
 
-describe('mapgen/入库路网地图契约（bj-g6-junction）', () => {
-  const NAME = 'bj-g6-junction';
-  const map = JSON.parse(fs.readFileSync(path.resolve('maps', `${NAME}.json`), 'utf8'));
-  const nodes = map.network.nodes as [number, number][];
-  const edges = map.network.edges as { from: number; to: number; chain: number; highway: string; lengthM: number }[];
-  const chains = (map.network.chains as [number, number][][])
-    .map(ch => ch.map(([x, y]) => ({ x: px(x), y: px(y) })));
+describe('mapgen/入库路网地图契约', () => {
+  /** 载入入库路网地图（离线；与 maps/<name>.json 严格对应） */
+  function loadNet(name: string) {
+    const map = JSON.parse(fs.readFileSync(path.resolve('maps', `${name}.json`), 'utf8'));
+    const nodes = map.network.nodes as [number, number][];
+    const edges = map.network.edges as { from: number; to: number; chain: number; highway: string; lengthM: number }[];
+    const chains = (map.network.chains as [number, number][][])
+      .map(ch => ch.map(([x, y]) => ({ x: px(x), y: px(y) })));
+    return { map, nodes, edges, chains };
+  }
 
-  it('与入库原始数据一致，且含主线 + 匝道', () => {
-    const sha = createHash('sha256')
-      .update(fs.readFileSync(path.resolve('maps/raw', `${NAME}.osm.json`), 'utf8')).digest('hex');
-    assert.strictEqual(map.source.rawSha256, sha, '地图与原始 OSM 响应不一致');
-    assert.strictEqual(map.kind, 'network');
-    const byH: Record<string, number> = {};
-    for (const e of edges) byH[e.highway] = (byH[e.highway] ?? 0) + 1;
-    assert.ok((byH['motorway'] ?? 0) > 0 && (byH['motorway_link'] ?? 0) > 0,
-      `应同时含主线与匝道，实际 ${JSON.stringify(byH)}`);
+  for (const name of ['bj-g6-junction', 'bj-3rd-ring']) {
+    describe(name, () => {
+      const { map, nodes, edges, chains } = loadNet(name);
+
+      it('与入库原始数据一致，且索引自洽（链首尾 = 节点坐标）', () => {
+        const sha = createHash('sha256')
+          .update(fs.readFileSync(path.resolve('maps/raw', `${name}.osm.json`), 'utf8')).digest('hex');
+        assert.strictEqual(map.source.rawSha256, sha, '地图与原始 OSM 响应不一致');
+        assert.strictEqual(map.kind, 'network');
+        // 容差 2mm：拓扑节点键按 1mm 量化（两个相距 <1mm 的顶点会合并成一个节点，
+        // 而链端点保留各自的原始坐标）——毫米级差异是设计内的，不是错位。
+        const TOL = 2e-3;
+        for (const e of edges) {
+          const ch = chains[e.chain];
+          assert.ok(ch && ch.length >= 2, `边 ${e.chain} 的链缺失`);
+          const a = nodes[e.from], b = nodes[e.to];
+          assert.ok(Math.hypot(ch[0].x - a[0], ch[0].y - a[1]) < TOL, `链 ${e.chain} 首端与节点不吻合`);
+          assert.ok(Math.hypot(ch[ch.length - 1].x - b[0], ch[ch.length - 1].y - b[1]) < TOL, `链 ${e.chain} 末端与节点不吻合`);
+        }
+      });
+
+      it('是真路网：有路口（度≥3），且 hasCycle 与"边数 ≥ 节点数"一致', () => {
+        const deg = new Array(nodes.length).fill(0);
+        for (const e of edges) { deg[e.from]++; deg[e.to]++; }
+        assert.ok(deg.filter(d => d >= 3).length >= 1, '至少一个路口');
+        assert.strictEqual(map.validation.hasCycle, edges.length >= nodes.length);
+        assert.ok(map.validation.lengthM > 1000);
+      });
+
+      it('抽样路线可复算，且"替代走法"指标与归档一致', () => {
+        const graph = buildGraphFromEdges(nodes.length, edges);
+        const sample = map.validation.routeSample as {
+          fromNode: number; toNode: number; linksUsed: number;
+          alternativeDetourM: number | null;
+        };
+        const r = buildNetworkRoute(graph, edges, chains, sample.fromNode, sample.toNode);
+        assert.ok(r, '抽样起终点应可达');
+        assert.strictEqual(r!.chainSeq.filter(ci => edges[ci].highway.endsWith('_link')).length, sample.linksUsed);
+        // 逐段掐掉重路由 → 最小绕行代价（复算必须等于归档值；树状路网恒为 null）
+        const base = r!.waypoints.reduce((acc, p, i) => i === 0 ? 0
+          : acc + Math.hypot(p.x - r!.waypoints[i - 1].x, p.y - r!.waypoints[i - 1].y), 0);
+        let best = Infinity;
+        for (const ei of r!.edgeSeq) {
+          const alt = edges.filter((_, i2) => i2 !== ei);
+          const r2 = buildNetworkRoute(buildGraphFromEdges(nodes.length, alt), alt, chains, sample.fromNode, sample.toNode);
+          if (!r2) continue;
+          const len2 = r2.waypoints.reduce((acc, p, i) => i === 0 ? 0
+            : acc + Math.hypot(p.x - r2.waypoints[i - 1].x, p.y - r2.waypoints[i - 1].y), 0);
+          best = Math.min(best, len2 - base);
+        }
+        // 归档值定点到 0.1mm；复算与归档允许 1cm 级浮点噪声（两者求和顺序不同）
+        if (sample.alternativeDetourM === null) {
+          assert.ok(!Number.isFinite(best), '归档说无替代走法，复算也应无');
+        } else {
+          assert.ok(Number.isFinite(best), '归档说有替代走法，复算也应有');
+          assert.ok(Math.abs(best - sample.alternativeDetourM) < 0.01,
+            `替代走法应可复算：复算 ${best} vs 归档 ${sample.alternativeDetourM}`);
+        }
+      });
+    });
+  }
+
+  it('bj-3rd-ring 是**有环**路网，且抽样路线真有替代走法（"绕行选择"的验收判据）', () => {
+    const { map, nodes, edges } = loadNet('bj-3rd-ring');
+    assert.strictEqual(map.validation.hasCycle, true, '该图应有环（边 ≥ 节点）');
+    const s = map.validation.routeSample as { alternativeDetourM: number | null };
+    assert.ok(s.alternativeDetourM !== null && s.alternativeDetourM > 100,
+      `抽样路线的替代走法应有可观代价（>100m），实际 ${s.alternativeDetourM}`);
+    assert.ok(edges.length > nodes.length);
   });
 
-  it('是**真路网**：有路口（度≥3）而不是一条链', () => {
-    const deg = new Array(nodes.length).fill(0);
-    for (const e of edges) { deg[e.from]++; deg[e.to]++; }
-    assert.ok(deg.filter(d => d >= 3).length >= 1, '至少一个路口');
-    assert.ok(edges.length > 10, `边数应远多于链式地图（实际 ${edges.length}）`);
-    assert.ok(map.validation.lengthM > 1000);
-    // 【信息性】有环（边数 ≥ 节点数）才意味着"存在替代路径可选"；本 bbox 是树（匝道都悬空到
-    // 未抓取的普通道路），故只记录不强制。要造出"可选路径"需取两条高速之间的立交 bbox。
-    assert.strictEqual(map.validation.hasCycle, edges.length >= nodes.length);
-  });
-
-  it('索引自洽：edges[].chain 指向存在的链，链的首尾与节点坐标一致', () => {
-    for (const e of edges) {
-      const ch = chains[e.chain];
-      assert.ok(ch && ch.length >= 2, `边 ${e.chain} 的链缺失`);
-      const a = nodes[e.from], b = nodes[e.to];
-      const dHead = Math.hypot(ch[0].x - a[0], ch[0].y - a[1]);
-      const dTail = Math.hypot(ch[ch.length - 1].x - b[0], ch[ch.length - 1].y - b[1]);
-      assert.ok(dHead < 1e-6 && dTail < 1e-6, `链 ${e.chain} 端点与节点不吻合`);
-    }
-  });
-
-  it('**路由真的会经过匝道**（验收判据：地图让 Dijkstra 做出选择）', () => {
-    const graph = buildGraphFromEdges(nodes.length, edges);
-    const sample = map.validation.routeSample as { fromNode: number; toNode: number; linksUsed: number };
-    const r = buildNetworkRoute(graph, edges, chains, sample.fromNode, sample.toNode);
-    assert.ok(r, '抽样起终点应可达');
-    const links = r!.chainSeq.filter(ci => edges[ci].highway === 'motorway_link').length;
-    assert.ok(links >= 1, `路线应经过匝道，实际 ${links} 段`);
-    assert.strictEqual(links, sample.linksUsed, '记录与复算应一致（确定性）');
-    // 复算两次结果一致
-    const r2 = buildNetworkRoute(graph, edges, chains, sample.fromNode, sample.toNode);
-    assert.deepStrictEqual(r2!.chainSeq, r!.chainSeq);
+  it('bj-g6-junction 是树状路网：没有替代走法（对照）', () => {
+    const { map } = loadNet('bj-g6-junction');
+    const s = map.validation.routeSample as { alternativeDetourM: number | null };
+    assert.strictEqual(s.alternativeDetourM, null, '树状路网里任何一段掐掉都不可达 → 无替代');
   });
 });

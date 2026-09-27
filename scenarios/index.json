@@ -74,6 +74,11 @@
       "name": "bj-g6-junction-route",
       "file": "bj-g6-junction-route.json",
       "map": "bj-g6-junction"
+    },
+    {
+      "name": "bj-3rd-ring-route",
+      "file": "bj-3rd-ring-route.json",
+      "map": "bj-3rd-ring"
     }
   ]
 }
