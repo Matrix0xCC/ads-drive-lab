@@ -26,6 +26,7 @@ function makeCtl() {
     onRouteInfo: () => {},
     onNotice: () => {},
     onMeasureMode: () => {},
+    onTrafficOn: () => {},
   }, () => 'NONE');
   return { ctl, calls };
 }

@@ -62,9 +62,12 @@ describe('main.ts 模块初始化顺序', () => {
 
   /** 模块初始化阶段（分界之前）就被调用的函数名 */
   const initCode = topLevelCodeOnly(src.slice(0, cut));
+  // 注意：`topLevelCodeOnly` 会保留函数**签名**，而签名里就含 `name(` —— 不剔除的话每个函数都会
+  // 被误判成"被调用"（假阳性；实测踩过）。匹配前先把"自己的定义"从待搜文本里去掉。
   const calledAtInit = topLevelFunctions(src.slice(0, cut))
     .map(f => f.name)
-    .filter(name => new RegExp(`\\b${name}\\s*\\(`).test(initCode));
+    .filter(name => new RegExp(`\\b${name}\\s*\\(`)
+      .test(initCode.replace(new RegExp(`function\\s+${name}\\s*\\(`, 'g'), '')));
 
   it('分界之后确实还有模块级声明（否则本测试失去意义）', () => {
     assert.ok(declaredAfter.length > 0, `declaredAfter=${declaredAfter.join(',')}`);

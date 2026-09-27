@@ -111,3 +111,26 @@ describe('比例尺与量距：契约', () => {
     assert.match(scale, /2 \* d \* Math\.tan\(\(camera\.fov \* Math\.PI \/ 180\) \/ 2\) \/ viewH/);
   });
 });
+
+// ─────────────────────────────────────────────────────────────
+// 交通流开关（toolbar「车流」/ V 键）
+// ─────────────────────────────────────────────────────────────
+describe('交通流开关：契约', () => {
+  it('DOM 元素与快捷键都在（JS 取元素是静默的 ?.，改名会无声失效）', () => {
+    assert.ok(html.includes('id="btn-traffic"'), 'index.html 缺少 #btn-traffic');
+    const ui = fs.readFileSync(path.resolve('js/ui/index.ts'), 'utf8');
+    assert.match(ui, /case 'v': case 'V':/, '缺少 V 键（车流）');
+    assert.match(ui, /deps\.actions\.setTraffic\(/, '按钮/快捷键必须走 setTraffic 动作');
+  });
+  it('状态机：TOGGLE_TRAFFIC 默认关、可来回切换', () => {
+    assert.strictEqual(INITIAL_UI_STATE.trafficOn, false, '交通流默认关（历史地图零变化）');
+    const on = reduce(INITIAL_UI_STATE, { type: 'TOGGLE_TRAFFIC' });
+    assert.strictEqual(on.trafficOn, true);
+    assert.strictEqual(reduce(on, { type: 'TOGGLE_TRAFFIC' }).trafficOn, false);
+  });
+  it('先问世界能不能切、成功才改开关状态（否则"按钮亮了但世界没变"）', () => {
+    const ui = fs.readFileSync(path.resolve('js/ui/index.ts'), 'utf8');
+    assert.match(ui, /if \(deps\.actions\.setTraffic\([^)]*\)\) \{\s*\n\s*controller\.dispatch\(\{ type: 'TOGGLE_TRAFFIC' \}\)/,
+      'setTraffic 返回 false 时不该改状态');
+  });
+});

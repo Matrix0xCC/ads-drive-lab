@@ -44,6 +44,8 @@ export interface UiState {
   notice: string;
   /** 量距模式：左键拖动拉出一把带刻度的尺（与"设路线"互斥） */
   measureMode: boolean;
+  /** 交通流开关（默认关；打开会**重载当前场景**并带上车流——运行从头开始） */
+  trafficOn: boolean;
 }
 
 /** 路线来源：无 / 场景自带 / 用户手工点选。让"为什么在跑、为什么静止"可读。 */
@@ -69,6 +71,7 @@ export type UiEvent =
   | { type: 'TOGGLE_BASEMAP' }
   | { type: 'TOGGLE_FOLLOW_CAM' }
   | { type: 'TOGGLE_MEASURE' }
+  | { type: 'TOGGLE_TRAFFIC' }
   | { type: 'ROUTE_INFO'; source: RouteSource; summary: string }
   | { type: 'NOTICE'; text: string };
 
@@ -87,6 +90,7 @@ export const INITIAL_UI_STATE: UiState = {
   routeInfo: { source: 'none', summary: '无路线（车辆静止）' },
   notice: '',
   measureMode: false,
+  trafficOn: false,
   /** Frenet 刻度（默认开） */
   frenetTicksVisible: true,
   /** LiDAR 射线（默认开） */
@@ -149,6 +153,8 @@ export function reduce(state: UiState, e: UiEvent): UiState {
       return { ...state, lidarVisible: !state.lidarVisible };
     case 'TOGGLE_BASEMAP':
       return { ...state, basemapVisible: !state.basemapVisible };
+    case 'TOGGLE_TRAFFIC':
+      return { ...state, trafficOn: !state.trafficOn };
     case 'TOGGLE_MEASURE':
       // 量距与"设路线"互斥（两者都吃左键，同时开必然抢手势）
       return { ...state, measureMode: !state.measureMode, routePick: 'idle', pickStartIdx: null };

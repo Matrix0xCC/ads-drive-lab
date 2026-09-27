@@ -80,6 +80,8 @@ export interface UiDeps {
     currentMapKey(): string;
     /** 清除路线（车辆将保持静止） */
     clearRoute(): void;
+    /** 开关交通流（会**重载当前场景**并带上/去掉车流；返回是否成功） */
+    setTraffic(on: boolean): boolean;
     exportRun(): void;
     setRoute(route: Route, startIdx: number): void;
     setLivePaused(paused: boolean): void;
@@ -160,6 +162,7 @@ export function setupUI(deps: UiDeps): {
       const el = document.getElementById('world-notice');
       if (el) el.textContent = text;
     },
+    onTrafficOn: (on) => { renderToggleButton('btn-traffic', on); },
     onMeasureMode: (on) => {
       renderToggleButton('btn-measure', on);
       measure.setActive(on);
@@ -220,6 +223,12 @@ export function setupUI(deps: UiDeps): {
     controller.dispatch({ type: 'TOGGLE_ROUTE_SET' });
   });
   // 路线行：手工设点（与 toolbar「路线」/ T 同一动作）与清除（清掉后车辆保持静止）
+  document.getElementById('btn-traffic')?.addEventListener('click', () => {
+    // 先问世界能不能切（失败就别改状态，避免"按钮亮了但世界没变"）；成功后再更新开关状态
+    if (deps.actions.setTraffic(!controller.state.trafficOn)) {
+      controller.dispatch({ type: 'TOGGLE_TRAFFIC' });
+    }
+  });
   document.getElementById('btn-measure')?.addEventListener('click', () => {
     controller.dispatch({ type: 'TOGGLE_MEASURE' });
   });
@@ -362,6 +371,11 @@ export function setupUI(deps: UiDeps): {
         break;
       case 'r': case 'R':
         resetCamera();
+        break;
+      case 'v': case 'V':                       // V = Vehicles（交通流）
+        if (deps.actions.setTraffic(!controller.state.trafficOn)) {
+          controller.dispatch({ type: 'TOGGLE_TRAFFIC' });
+        }
         break;
       case 'm': case 'M':                       // M = Measure（量距）
         controller.dispatch({ type: 'TOGGLE_MEASURE' });

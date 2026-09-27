@@ -47,7 +47,12 @@ for (const topic of ARCHIVE_TOPICS) {
 // 浏览器默认场景 = 随机障碍、无路线（右键设路线）；加载 scenarios/ 文件后
 // 带路线的场景自动开跑，且同场景同种子与 headless 逐帧一致。
 
-let currentScenario: Scenario | null = null;
+// 【为什么"当前场景"用 Map 持有】它只在闭包（applyScenario）里被赋值，而 TS 的 CFA 会据此把它
+// 一路收窄成 `null`：`let x`、对象属性、函数体内读取、`as` 双重断言都挡不住（const 还会把"收窄后的
+// 初始值类型"固化下来）→ 于是 `.map` 报 never。`Map.get()` 返回**声明类型**、不参与这类收窄。
+const worldState = new Map<string, Scenario | null>([['scenario', null]]);
+/** 读当前场景（null = 还没加载过） */
+function currentScenario(): Scenario | null { return worldState.get('scenario') ?? null; }
 
 /** 底图署名（许可义务）：只在底图打开且确实有署名时显示。
  *  放在 applyScenario **之前**（虽然函数声明会提升，但放前面能避免"变量在下面声明"的 TDZ 陷阱）。 */
@@ -91,7 +96,7 @@ function applyScenario(json: unknown, out?: WorldAnnounce): string | null {
   if (built.route) {
     engine.setRoute(built.route, built.route.startIndex, { speed: built.worldCfg.carStart?.speed });
   }
-  currentScenario = scenario;
+  worldState.set('scenario', scenario);
   resetSceneCache(scene);
   // 世界尺寸随地图（OSM 长条图 900×1840m ≫ 默认 450×200m）：地面/网格重建 + 智能取景
   setWorldExtent(scene, engine.worldW, engine.worldH);
@@ -115,13 +120,20 @@ function applyScenario(json: unknown, out?: WorldAnnounce): string | null {
   return scenario.name;
 }
 
+/** 当前场景（没有就用当前地图现造一个）——交通流开关要拿它当基底 */
+function currentScenarioOrDefault(): Scenario {
+  const cur = currentScenario();
+  return cur ?? defaultScenario(DEFAULT_MAP);
+}
+
 /** 导出当前运行归档：与 headless 同一套检测/报告（assembleBundle），下载 .run.json */
 function exportRun(): void {
-  if (!currentScenario) return;
+  const cur = currentScenario();          // 读一次并收窄（函数返回值可以正常收窄）
+  if (!cur) return;
   const bundle = assembleBundle({
-    scenario: currentScenario, track: engine.track, obstacles: engine.obstacles,
+    scenario: cur, track: engine.track, obstacles: engine.obstacles,
     route: engine.route, frames, simTime: engine.simTime, planMs: engine.planMsSamples,
-    id: `${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}_${currentScenario.name}_browser`,
+    id: `${new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19)}_${cur.name}_browser`,
     createdAt: new Date().toISOString(),
     gitCommit: null, nodeVersion: 'browser',
   });
@@ -170,11 +182,11 @@ const ui = setupUI({
       return true;
     },
     /** 当前地图的**产物 key**（下拉回滚、"随机场景"都用它；显示名对合成地图是 Oval 之类，不能当 key） */
-    currentMapKey(): string { return currentScenario?.map ?? DEFAULT_MAP; },
+    currentMapKey(): string { return currentScenario()?.map ?? DEFAULT_MAP; },
     /** 换地点：**丢弃当前路线**——路线用节点号/弧长表达，只对原地图有意义（硬套会报错或落错位置） */
     switchMap(name: string): boolean {
       const map = MAP_PRESETS[name] ? name : DEFAULT_MAP;
-      const base = currentScenario ?? defaultScenario(map);
+      const base = currentScenario() ?? defaultScenario(map);
       const hadRoute = base.route !== undefined;
       // 障碍物也是按**弧长 s** 摆的 → 换地点后位置必然变（不会崩，但要说清，免得下次困惑）
       const nObs = base.obstacles?.mode === 'explicit' ? (base.obstacles.list?.length ?? 0) : 0;
@@ -187,6 +199,18 @@ const ui = setupUI({
         + (nObs > 0 ? `；${nObs} 个障碍物按弧长落位，位置已随地点变化` : '');
       ui.setRouteInfo(out.routeInfo.source, out.routeInfo.summary);
       ui.setNotice(out.notice);
+      return true;
+    },
+    /** 开关交通流：**重载当前场景**并带上/去掉车流配置（运行从头开始——交通流属于世界配置） */
+    setTraffic(on: boolean): boolean {
+      const base = currentScenarioOrDefault() as unknown as Record<string, unknown>;
+      const next: Record<string, unknown> = { ...base };
+      if (on) next.traffic = (base.traffic as unknown) ?? { densityPerKm: 8, lanes: 3 };
+      else delete next.traffic;
+      const out = {} as WorldAnnounce;
+      if (!applyScenario(next, out)) return false;
+      ui.setRouteInfo(out.routeInfo.source, out.routeInfo.summary);
+      ui.setNotice(`已${on ? '开启' : '关闭'}交通流${on ? '（密度 8 辆/km/车道；场景已重载，运行从头开始）' : ''}`);
       return true;
     },
     /** 清除路线：车辆随之保持静止（与 headless 的"无 route 不动"一致） */

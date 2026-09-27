@@ -25,6 +25,7 @@ export interface UiEffects {
   onRouteInfo(info: { source: RouteSource; summary: string }): void;
   onNotice(text: string): void;
   onMeasureMode(on: boolean): void;
+  onTrafficOn(on: boolean): void;
 }
 
 export class UiController {
@@ -60,6 +61,7 @@ export class UiController {
     if (next.routeInfo !== prev.routeInfo) this.effects.onRouteInfo(next.routeInfo);
     if (next.notice !== prev.notice) this.effects.onNotice(next.notice);
     if (next.measureMode !== prev.measureMode) this.effects.onMeasureMode(next.measureMode);
+    if (next.trafficOn !== prev.trafficOn) this.effects.onTrafficOn(next.trafficOn);
     this.effects.onHint(deriveHint(next, this.getRouteState()));
   }
 
@@ -80,6 +82,7 @@ export class UiController {
     this.effects.onRouteInfo(this._state.routeInfo);
     this.effects.onNotice(this._state.notice);
     this.effects.onMeasureMode(this._state.measureMode);
+    this.effects.onTrafficOn(this._state.trafficOn);
     this.effects.onHint(deriveHint(this._state, this.getRouteState()));
   }
 }
