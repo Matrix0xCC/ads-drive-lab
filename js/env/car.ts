@@ -29,7 +29,7 @@
 // 且计算量极小（每帧只需几次浮点运算）。
 
 import { CarState, ControlCommand, TrackGeometry, Point2D } from '../shared/types.js';
-import { Radians, Px, PxPerSec, PxPerSec2, DimLess, rad, m, mps, mps2, px, pxps, pxps2, dimless, yawRate, normalizeAngle } from '../shared/dimensions.js';
+import { Radians, Px, PxPerSec, PxPerSec2, DimLess, SIM_UNITS_PER_METER, rad, m, mps, mps2, px, pxps, pxps2, dimless, yawRate, normalizeAngle } from '../shared/dimensions.js';
 
 /** 轴距 3m（与 algo/control.ts 保持一致） */
 const WHEELBASE: Px = m(3.0);
@@ -226,16 +226,23 @@ function distToSegment(px: number, py: number, x1: number, y1: number, x2: numbe
  */
 function isInsideNetwork(cx: number, cy: number, r: number, track: TrackGeometry): boolean {
   const chains = track.chains!;
-  const halfW = (track.halfWidth ?? m(7.5)) as number;
+  const mapHalfW = (track.halfWidth ?? m(7.5)) as number;
   let best = Infinity;
-  for (const ch of chains) {
+  for (let ci = 0; ci < chains.length; ci++) {
+    const ch = chains[ci];
+    // **逐链半宽**：1 车道匝道（半宽 1.875m）与 4 车道主路（7.5m）不是同一条边界。
+    // 缺属性 → 回退地图级标量（径向图与旧地图行为逐位不变）。
+    const attrs = track.chainAttrs?.[ci];
+    const halfW = attrs ? attrs.halfWidthM * SIM_UNITS_PER_METER : mapHalfW;
+    // 复位缓冲按该链宽度缩放（窄匝道不能扣掉固定 0.5m，见 boundsBufferFor）
+    const rLocal = (r - (BOUNDS_BUFFER as number)) + boundsBufferFor(halfW, (r - (BOUNDS_BUFFER as number)));
     for (let i = 0; i + 1 < ch.length; i++) {
       const a = ch[i], b = ch[i + 1];
       best = Math.min(best, distToSegment(cx, cy, a.x as number, a.y as number, b.x as number, b.y as number));
       // 【提前退出条件必须是"已经确定在内"】不能写成 `best <= halfW`：那只要**任一**链段
       // 落在半宽内就下结论，而 24 条链里先遍历到的邻近链会把结果定成越界（实测：车精确在链上、
-      // 距离 0.0m，却连续复位 3400+ 次）。正确判据是"到**最近链**的距离 + 车半径 ≤ 半宽"。
-      if (best + r <= halfW + 1e-9) return true;
+      // 距离 0.0m，却连续复位 3400+ 次）。正确判据是"到**最近链**的距离 + 车半径 ≤ 该链半宽"。
+      if (best + rLocal <= halfW + 1e-9) return true;
     }
   }
   return false;
@@ -265,8 +272,25 @@ function isCarInsideTrack(cx: number, cy: number, r: number, track: TrackGeometr
  *  A/B：1.5m（旧）→ 0.5m 让车能多用两侧各约 1m 路面（复位崖 5.0 → 6.0m）。 */
 export const BOUNDS_BUFFER: Px = m(0.5);
 
+/**
+ * 复位缓冲**按路段宽度缩放**：0.5m 在 7.5m 半宽的路上是 7% 的余量，但在 1.875m 半宽的
+ * 单车道匝道上会吃掉近 60% 的车中心可用空间（3.75m 车道 − 2m 车宽 = ±0.875m，再减 0.5m
+ * 只剩 ±0.375m）——而最近邻投影误差就有几厘米，于是"规划域 = 复位崖 = 比误差还窄"→
+ * 出现"候选路径起点就在走廊外 → 全判碰撞 → 永久停车"的死锁（实测三环场景卡死在匝道入口）。
+ *
+ * 规则：缓冲 = min(0.5m, 40% × 车中心物理余量)。宽路（径向 6.5m 余量）→ 仍是 0.5m（零回归）；
+ * 窄路按比例缩到 ~0.35m，让车有可用的中心行程，同时保持"域边 = 复位崖"这条不变量。
+ */
+export function boundsBufferFor(halfWidthPx: number, carHalfPx: number): number {
+  const free = Math.max(0, halfWidthPx - carHalfPx);
+  return Math.min(BOUNDS_BUFFER as number, 0.4 * free);
+}
+
 export function checkBounds(car: CarState, track: TrackGeometry): boolean {
-  const r = (car.width as number) / 2 + (BOUNDS_BUFFER as number);
+  // 单中心线地图：缓冲按地图半宽缩放（窄图同理，见 boundsBufferFor）
+  const hw = (track.halfWidth ?? m(7.5)) as number;
+  const carHalf = (car.width as number) / 2;
+  const r = carHalf + boundsBufferFor(hw, carHalf);
   if (!isCarInsideTrack(car.x as number, car.y as number, r, track)) {
     resetToTrack(car, track.centerPoints, track.closed ?? true, track.chains);
     return true;

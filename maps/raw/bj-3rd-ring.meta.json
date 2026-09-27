@@ -1,7 +1,7 @@
 {
   "name": "bj-3rd-ring",
   "mode": "network",
-  "via": "file:/tmp/liuliqiao.json",
+  "via": "file:maps/raw/bj-3rd-ring.osm.json",
   "fetchedAt": null,
   "bbox": null,
   "classes": [
@@ -17,6 +17,6 @@
     116.332
   ],
   "query": "(离线复跑)",
-  "rawSource": "/tmp/liuliqiao.json",
+  "rawSource": "maps/raw/bj-3rd-ring.osm.json",
   "rawSha256": "e53a69f307871e1a9048547e00aafb36e4738895818f1cb5854044fe3a9bb63e"
 }

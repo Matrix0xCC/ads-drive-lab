@@ -64,7 +64,7 @@ requestAnimationFrame 主循环 (~60Hz)
 - `js/headless/` — headless CLI（run.ts）、归档（archive.ts）、检测器（detector.ts + checks/）、报告（report.ts）
 - `js/shared/` — 接口契约（types/interfaces/，含归档记录 schema）、量纲系统（dimensions.ts）、rng、debug
 - `js/ui/` — UI 层（`state.ts` 纯状态机 + `controller.ts` 副作用边界 + sidebar/toolbar/hud/inspector/interactions/replayPanel 面板模块）；`js/replay.ts` — 回放控制器；`js/env/renderer/` — Three.js 渲染
-- `js/mapgen/` — **OSM 地图管线**（构建期工具，不进浏览器包）：`osm.ts` 纯几何（way 链合并 / 投影 / 均匀重采样 / **弧长窗口平滑** / 曲率统计 / `projectOntoPath` 地图匹配原语）+ `network.ts` **路网拓扑**（共享顶点处切段 → 节点/边图；`largestComponent`）+ `build-map.ts` CLI（同端点重试抓取、原始数据与侧车 meta 入库、`--from-raw` 离线复跑、`--start-at-toll`、`--network`、`--classes` 选道路类别、`--clip-bbox` 从大样本裁小图）；**抓取按模式分派查询**（路网必须用 `buildNetworkQuery`——曾误用链式查询导致"抓不到匝道"，还被误判成镜像数据版本问题）；`--from-raw` 也会把原始数据落到 `maps/raw/`（否则地图里有 `rawSha256` 却找不到对应原始文件）
+- `js/mapgen/` — **OSM 地图管线**（构建期工具，不进浏览器包）：`osm.ts` 纯几何（way 链合并 / 投影 / 均匀重采样 / **弧长窗口平滑** / 曲率统计 / `projectOntoPath` 地图匹配原语）+ `network.ts` **路网拓扑**（共享顶点处切段 → 节点/边图；`largestComponent`）+ `attrs.ts` **逐段道路属性**（车道数/限速/半宽 + 回退规则 + `osm`/`derived:class` 来源标注 + 区间压缩与查表）+ `build-map.ts` CLI（同端点重试抓取、原始数据与侧车 meta 入库、`--from-raw` 离线复跑、`--start-at-toll`、`--network`、`--classes` 选道路类别、`--clip-bbox` 从大样本裁小图）；**抓取按模式分派查询**（路网必须用 `buildNetworkQuery`——曾误用链式查询导致"抓不到匝道"，还被误判成镜像数据版本问题）；`--from-raw` 也会把原始数据落到 `maps/raw/`（否则地图里有 `rawSha256` 却找不到对应原始文件）
 - `maps/` — 派生地图（入库）：`<name>.json`（中心线 + world + 校验统计 + 收费站桩号）、`raw/<name>.osm.json`（原始 Overpass 响应）、`raw/<name>.meta.json`（取数过程信息；**不进地图文件**，否则"重新生成逐字节相同"不成立）；`js/env/maps/<name>.gen.ts` 为机械转换产物（勿手改）
 - `scenarios/` — 场景用例（入库）；新增场景需登记 `scenarios/index.json` 才会出现在浏览器场景下拉；`runs/` — 运行归档（gitignore）
 - `js/test/` — node:test 单元测试（`.test.ts`，编译后运行到 `dist/`）
@@ -89,6 +89,12 @@ requestAnimationFrame 主循环 (~60Hz)
 - **收敛迭代（stage C）**：`vAssume` 从 `max(当前速度, 慢行档)` 起，每轮用 `margin(vAssume)`/`S(vAssume)` 求路径，再由路径几何反推速度上限 `u`（封死 0 / 紧间隙慢行档 / 横向机动 `lateralSpeedCap` / `vCap`）；几何评估速度下限 = 慢行档（破"停车 → 裕度最大 → 封死 → 永不起步"自锁）
 - **曲率限速（A/B 开关 `CURVATURE_SPEED_LIMIT`，默认关）**：开则按道路曲率限速 `v ≤ √(A_LAT_MAX/κ(s))` 并叠加前视制动可行性（`v² ≤ v_lim² + 2·a_brake·Δs`，取全程最小）。**默认关的原因**：它改变所有地图的速度剖面（径向图半径 80~100m → 限速 17~19m/s），属语义变更需单独 A/B；OSM 高速图（最急 R=141m）关闭时会以 vCap 上限 35m/s 跑完含弯全程。headless 用 `--curvature-limit` 打开
 - **道路半宽随地图**：`solvePathLayer` 收 `trackHalfWidth`（规划域 `L_MAX` 随地图半宽收窄）；感知的 |l| 分级阈值改为**半宽比例**（0.6/0.8，径向图 0.6×7.5=4.5m / 0.8×7.5=6.0m 与历史写死值一致 → 行为零变化）
+- **逐段域与逐段限速（"地图起作用"的第二层）**：`solvePathLayer` 另收 `halfWidthAt(s)` → 走廊**逐站**取域（走廊本来就是逐站求自由补集，接入点天然）；`deriveTargets` 的夹紧用**承诺窗内最小域**（避免进入窄段时目标全被否掉）。
+  - **不变量 1：规划域必须包含车辆当前位置**（`domain = clamp(max(名义域, |l0|+5cm), 名义域, 复位崖)`）。否则"候选路径起点就在走廊外 → 全判碰撞 → 永久停车"：实测三环场景卡死在单车道匝道入口（域 ±0.375m 而 l0=0.41m，最近邻投影与点到线段两种口径差几厘米）。
+  - **不变量 2：域上限 = 复位崖，绝不更宽**（域比崖宽会让规划器把车贴到崖外 → 复位传送；实测放宽到"物理上限"时 oval-s9 立刻多出 1 次复位）。
+  - **复位缓冲按路段宽度缩放**（`car.ts:boundsBufferFor` = min(0.5m, 40%×车中心物理余量)）：固定 0.5m 在 1.875m 半宽的匝道上吃掉近 60% 的中心行程 → 域比投影误差还窄。宽路仍是 0.5m（径向零回归）。
+  - **逐段限速 = 制动可行剖面**：`v_allowed(s0) = min over 前方 s' 的 √(v_lim(s')² + 2·a_brake·(s'−s0))`（与曲率限速同一套道理），采样 = 10m 网格 **+ 每段边界**（限速是台阶下降，必须采到下降沿）。**量纲**：属性是 km/h，必须 `mps(kph/3.6)` 转 px/s——写成 m/s 会让 `min(133.3, 33.3)` 把巡航目标砍成 8.3m/s（实测车全程慢行档）。
+  - 实测效果：G6 立交路线（匝道 60km/h → 主线 120km/h）到达时间 110.7s → **163.1s**；三环（主线 100 → 匝道 50）**124.1s**、最高速 27.7m/s；G4（两段同为 120）**与基线逐位一致**；径向批量逐项零回归。
 - **地图语义进决策（"地图起作用了吗"的可测判据：几何相同、语义不同 → 行为必须不同）**：
   - **地图限速 → vCap**：`track.speedLimitMps`（OSM `maxspeed`）作为巡航速度**硬上限**，取在 17.5m/s 防呆下限**之后**（低限速图 60km/h=16.7m/s 不会被下限抬高）。实测：G4 图最高速 34.9 → **33.27m/s**（=120km/h）
   - **车道语义 → 车道中心**：`laneCentersOf(halfWidth, laneWidth)` 推出车道数与车道中心，名义车道取最靠近路中心者（径向 4 车道 → +1.875m 与历史硬编码**逐位一致**；OSM 3 车道 → 中间车道 `l=0`）。实测：G4 图车的 |l| p50 由 **1.87m → 0.02m**（旧硬编码值在 3 车道路面上是跨车道线的位置）
@@ -114,6 +120,12 @@ Pure Pursuit：δ = atan2(2·L·sin α, ld)，预瞄距离 = clamp(0.4×speed, 1
 - `MapDefinition.kind`：`'radial'`（历史：8 个径向控制点闭环，半宽 7.5m、世界 450×200m）、`'polyline'`（OSM：点列，可开环，半宽按车道数、世界按包围盒）、`'network'`（OSM 路网：多链 + 节点/边图）。地图下拉由 `MAP_PRESETS` **动态填充**（新增地图只需登记 MAP_PRESETS，不必改 index.html）。
 - **路网地图（多链）语义**：`track.chains`（全部可行驶链）+ `netNodes`/`netEdges`（路由图）。可行驶域 = **到最近链的距离 + 车半径 ≤ 半宽**（`car.ts` 的 `isInsideNetwork`；路口处链的并集天然覆盖，端部自动成墙）——不能用多边形表达。`centerPoints` 取最长链，仅作"无路线时的回退参考线"。渲染为每条链一条 ribbon 路面。**越界判定的提前退出条件只能写"已确定在内"**（写成 `best <= halfW` 会让先遍历到的邻近链把结果定成越界——实测车精确在链上却复位 3400+ 帧）。
 - **入库的两张真 OSM 路网**：`bj-g6-junction`（京藏 G6/S11 立交，**树状**：24 边/25 节点，路线唯一）、`bj-3rd-ring`（西三环/六里桥，**有环**：109 边/105 节点/38 路口）。mapgen 的 `routeSample` 会**主动挑一对"能演示选择"的起终点**并量化代价：逐段掐掉最短路上的边再重路由，取最小绕行距离（树状图恒为 `null`）。`bj-3rd-ring` 实测：最短路 2.93km（含 3 段匝道），绕开其中一段匝道要多走 **1159m**。
+- **逐段道路属性（"这段路几车道/限速多少"）**：地图级标量（`halfWidth`/`maxspeedKph`）之上多一层逐段真值。
+  路网地图：`network.chainAttrs[i]`（与 `chains` 对齐）；链式地图：`road.spans[{s0M,s1M,...}]`（中心线是多条 way 合并的，way 边界就是属性可能变化处，G4 实测有 3 车道与 2 车道两段）。
+  运行时有 `TrackGeometry.chainAttrs` / `attrSpans`，路线装配时生成 `Route.attrSpans`；消费方按 s 查 `attrsAtS`。
+  **量纲**：`halfWidthM`/`laneWidthM` 是**米**（渲染宽度、限速用），弧长是 **px**——gen 模块里写成 `m(...)` 会把米转成 px（实测域变 4 倍）。
+  **回退规则必须标注来源**：`lanes` 有 tag 用它，否则 `*_link`→1、`motorway/trunk`→3、其余→2；`maxspeed` 有 tag 用它，否则按等级派生（motorway 120 / trunk 100 / `*_link` = 主线×0.5 夹到 [40,60]）。
+  **真实覆盖率（2026-09-27 实测）**：`lanes` —— motorway/G4 100%、trunk 34%、**匝道 ≈0%**；`maxspeed` —— **几乎为 0**（941 条 way 里 1 条）→ 地图里的限速基本是派生值，`validation.attrCoverage` 会给出真实/派生计数（此前文档把默认 120km/h 说成"OSM 真实限速"是错的）。
 - **路网路线**：场景用 `route: { fromNode, toNode }`；`buildGraphFromEdges` + `buildNetworkRoute`（Dijkstra 出节点序列 → 逐段取链几何并按方向拼接）→ 规划器/感知照常把它当开环参考线用；`waypointIndices` 记途经链序号（归档可查"走了哪几条匝道"）。浏览器 `T`/toolbar 设路线时**吸附到节点**（`pickPoints()`），与 headless 走同一个 `buildNetworkRoute`。检测器的越界判据对路网用**链并集**（`world.track.chains` 进归档），否则路口处会误报。
 - **开环语义**：`closed: false` → `innerBoundary` 为空，`outerBoundary` 是**闭合路面多边形**（左缘→末端帽→右缘→起点帽），并且两端帽沿切线**外延 25m**（否则车出生点正好压在端帽上 → 每帧判越界复位）。`buildRoadGraph`/`sToIndex`/`resetToTrack`/`generateObstacles` 都不再绕接。
 - **世界尺寸不再是全局常量**：`engine.worldW/worldH` 取地图声明；地面/网格用 `setWorldExtent` 随地图重建。

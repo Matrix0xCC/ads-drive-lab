@@ -5,6 +5,12 @@
   "seed": 3,
   "duration": 300,
   "car": { "speed": 20 },
-  "obstacles": { "mode": "random", "count": 2 },
+  "obstacles": {
+    "mode": "explicit",
+    "list": [
+      { "s": 2300, "l": 2.0, "w": 2.5, "len": 4.5 },
+      { "s": 3050, "l": -2.0, "w": 2.5, "len": 4.5 }
+    ]
+  },
   "route": { "fromNode": 24, "toNode": 22 }
 }

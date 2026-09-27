@@ -44,6 +44,40 @@ export interface TrackGeometry {
   netNodes?: Point2D[];
   /** 路网边（节点对 → 链序号） */
   netEdges?: { from: number; to: number; chain: number; lengthM?: number; oneway?: boolean }[];
+  /** 逐链道路属性（与 chains 下标对齐）；缺省 = 全图用地图层标量 */
+  chainAttrs?: RoadAttrs[];
+  /** 参考线上的逐段属性（弧长 px，沿 `centerPoints`）：无路线时规划域/限速就查它 */
+  attrSpans?: AttrSpan[];
+}
+
+/** 逐段道路属性（"这段路几车道、限速多少、多宽"）——**地图起作用**的第二层：
+ *  地图级标量（TrackGeometry.halfWidth/speedLimitMps）是全场默认，本类型是逐段真值。
+ *  米制字段保持米（渲染宽度、限速用）；弧长另用 px（与运行时的 s 一致）。 */
+export interface RoadAttrs {
+  /** OSM highway 值（网络地图逐链有；链式地图的区间也有） */
+  highway: string;
+  laneCount: number;
+  /** 单车道宽（米） */
+  laneWidthM: number;
+  /** 半宽（米）= laneCount × laneWidthM / 2 */
+  halfWidthM: number;
+  maxspeedKph: number;
+}
+
+/** 沿参考线的一段属性 */
+export interface AttrSpan extends RoadAttrs {
+  /** 区间起点弧长（px） */
+  s0: Px;
+  /** 区间终点弧长（px） */
+  s1: Px;
+}
+
+/** 取参考线弧长 s 处的属性（线性查表；超界取首/末段；无表返回 null） */
+export function attrsAtS(spans: AttrSpan[] | undefined, s: number): AttrSpan | null {
+  if (!spans || spans.length === 0) return null;
+  if (s <= (spans[0].s0 as number)) return spans[0];
+  for (const sp of spans) if (s < (sp.s1 as number)) return sp;
+  return spans[spans.length - 1];
 }
 
 /** 障碍物 — 矩形，带位置、尺寸和朝向角 */

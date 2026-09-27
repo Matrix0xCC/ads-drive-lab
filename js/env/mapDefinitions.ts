@@ -42,6 +42,10 @@ export interface MapDefinition {
   chains?: Point2D[][];
   /** network：边表（节点对 → 链）——路由用；`oneway` 缺省视为双向 */
   edges?: { from: number; to: number; chain: number; lengthM?: number; oneway?: boolean }[];
+  /** 逐链道路属性（与 chains 对齐）；缺省 = 全图用地图层标量 */
+  chainAttrs?: { highway: string; laneCount: number; laneWidthM: number; halfWidthM: number; maxspeedKph: number; lanesFrom?: string; maxspeedFrom?: string }[];
+  /** 链式地图的逐段属性区间（弧长米，沿 points）；缺省 = 全图用地图层标量 */
+  attrSpans?: { s0M: number; s1M: number; highway: string; laneCount: number; laneWidthM: number; halfWidthM: number; maxspeedKph: number; lanesFrom?: string; maxspeedFrom?: string }[];
 }
 
 /**

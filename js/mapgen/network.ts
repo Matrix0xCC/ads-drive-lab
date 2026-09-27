@@ -31,6 +31,8 @@ export interface NetEdge {
   /** 是否单向（false = 双向可通行，建图时两个方向都连） */
   oneway: boolean;
   lengthM: number;
+  /** 源 way 的 tags：逐段属性（车道数/限速/宽度）与来源标注都从这里推 */
+  tags: Record<string, string>;
 }
 
 export interface Topology { nodes: NetNode[]; edges: NetEdge[] }
@@ -88,7 +90,7 @@ export function buildTopology(ways: OsmWay[], origin?: LatLon): Topology {
       if (a === b) continue;                        // 自环（退化）跳过
       edges.push({
         from: a, to: b, geom: seg,
-        highway: w.tags.highway ?? '', ref: w.tags.ref ?? '',
+        highway: w.tags.highway ?? '', ref: w.tags.ref ?? '', tags: w.tags,
         oneway: isOneway(w), lengthM: pathLengthM(seg),
       });
     }

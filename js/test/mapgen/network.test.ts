@@ -146,4 +146,44 @@ describe('mapgen/入库路网地图契约', () => {
     const s = map.validation.routeSample as { alternativeDetourM: number | null };
     assert.strictEqual(s.alternativeDetourM, null, '树状路网里任何一段掐掉都不可达 → 无替代');
   });
+
+  it('逐链属性与 chains 对齐、量纲是**米**、半宽自洽（真正防住 px/米搞混）', () => {
+    for (const name of ['bj-g6-junction', 'bj-3rd-ring']) {
+      const { map, chains } = loadNet(name);
+      const attrs = map.network.chainAttrs as {
+        highway: string; laneCount: number; laneWidthM: number; halfWidthM: number;
+        maxspeedKph: number; lanesFrom: string; maxspeedFrom: string;
+      }[];
+      assert.strictEqual(attrs.length, chains.length, `${name}: chainAttrs 与 chains 必须等长`);
+      for (const a of attrs) {
+        assert.ok(a.laneCount >= 1 && a.laneCount <= 8, `${name}: 车道数异常 ${a.laneCount}`);
+        // 米制：半宽 = 车道数 × 车道宽 / 2，且必然远小于 12m（px 会大 4 倍）
+        assert.ok(Math.abs(a.halfWidthM - a.laneCount * a.laneWidthM / 2) < 1e-3,
+          `${name}: 半宽与车道数不自洽 ${a.halfWidthM}`);
+        assert.ok(a.halfWidthM > 1 && a.halfWidthM < 12, `${name}: halfWidthM 应是米（实测 ${a.halfWidthM}）`);
+        assert.ok(a.maxspeedKph >= 20 && a.maxspeedKph <= 130, `${name}: 限速异常 ${a.maxspeedKph}`);
+        assert.ok(['osm', 'derived:class'].includes(a.lanesFrom), `${name}: 来源标注缺失`);
+        assert.ok(['osm', 'derived:class'].includes(a.maxspeedFrom), `${name}: 来源标注缺失`);
+      }
+      // 覆盖率统计必须与实际情况一致（三份北京样本 maxspeed 几乎全无 → 派生为主）
+      const cov = map.validation.attrCoverage as { total: number; lanesFromOsm: number; maxspeedFromOsm: number };
+      assert.strictEqual(cov.total, attrs.length);
+      assert.strictEqual(cov.lanesFromOsm, attrs.filter((a: any) => a.lanesFrom === 'osm').length);
+      assert.strictEqual(cov.maxspeedFromOsm, attrs.filter((a: any) => a.maxspeedFrom === 'osm').length);
+    }
+  });
+
+  it('链式地图的逐段属性区间覆盖整条中心线（G4：3 车道 + 2 车道两段）', () => {
+    const map = JSON.parse(fs.readFileSync(path.resolve('maps', 'bj-g4-dujiakan.json'), 'utf8'));
+    const spans = map.road.spans as { s0M: number; s1M: number; laneCount: number; halfWidthM: number }[];
+    assert.ok(spans.length >= 2, `G4 原始数据里有 2 车道 way → 应至少两段，实际 ${spans.length}`);
+    assert.strictEqual(spans[0].s0M, 0, '区间应从 0 开始');
+    const lenM = map.validation.lengthM as number;
+    assert.ok(Math.abs(spans[spans.length - 1].s1M - lenM) < 5, '区间应覆盖到中心线末端');
+    assert.deepStrictEqual([...new Set(spans.map(s => s.laneCount))].sort(), [2, 3]);
+    for (const sp of spans) {
+      assert.ok(Math.abs(sp.halfWidthM - sp.laneCount * 3.75 / 2) < 1e-3, '半宽与车道数不自洽');
+      assert.ok(sp.halfWidthM < 12, 'halfWidthM 应是米');
+    }
+  });
 });

@@ -8,7 +8,7 @@
 // Frenet 坐标系和五次多项式已移至 algo/plan/（属于算法实现，非共享类型）。
 
 export type {
-  Point2D, TrackGeometry, Obstacle, CarState,
+  Point2D, TrackGeometry, Obstacle, CarState, RoadAttrs, AttrSpan,
   WorldSnapshot, LidarScan, PlanningOutput, ControlCommand,
   FrenetState, FrenetReference,
   TrajectoryPoint, Trajectory,
@@ -18,7 +18,7 @@ export type {
 } from './types/interfaces.js';
 
 export {
-  VEHICLE_MAX_STEER, obstacleToSegments,
+  VEHICLE_MAX_STEER, obstacleToSegments, attrsAtS,
   createWorldSnapshot, createLidarScan, createControlCommand,
   createTrajectory, createRoute, createGPSReading,
 } from './types/interfaces.js';

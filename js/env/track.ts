@@ -14,6 +14,8 @@ import { TrackGeometry, Point2D } from '../shared/types.js';
 import { Px, PxPerSec, m, mps, px } from '../shared/dimensions.js';
 import { Rng } from '../shared/rng.js';
 import { MapDefinition } from './mapDefinitions.js';
+import type { RoadAttrs, AttrSpan } from '../shared/types.js';
+import { SIM_UNITS_PER_METER } from '../shared/dimensions.js';
 
 /** 赛道半宽 7.5m ≈ 4 车道（15m 宽）；**径向历史地图的缺省值**——OSM 地图按车道数自带半宽 */
 export const TRACK_HALF_WIDTH: Px = m(7.5);
@@ -42,6 +44,33 @@ function catmullRom(p0: Vec2, p1: Vec2, p2: Vec2, p3: Vec2, t: number): Vec2 {
  * @param height 画布高度
  * @returns TrackGeometry
  */
+/** 逐段属性：mapgen 的字段 → 运行时（米制字段原样保留，渲染/限速用米） */
+export function toRoadAttrs(a: {
+  highway: string; laneCount: number; laneWidthM: number; halfWidthM: number; maxspeedKph: number;
+}): RoadAttrs {
+  return {
+    highway: a.highway, laneCount: a.laneCount, laneWidthM: a.laneWidthM,
+    halfWidthM: a.halfWidthM, maxspeedKph: a.maxspeedKph,
+  };
+}
+
+/** 链式地图：把「弧长米」的属性区间转成「弧长 px」的运行时间间 */
+export function toAttrSpans(list: {
+  s0M: number; s1M: number; highway: string; laneCount: number; laneWidthM: number;
+  halfWidthM: number; maxspeedKph: number;
+}[]): AttrSpan[] {
+  return list.map(sp => ({
+    ...toRoadAttrs(sp), s0: px(m(sp.s0M) as number), s1: px(m(sp.s1M) as number),
+  }));
+}
+
+/** 折线长度（px） */
+export function polylineLenPx(pts: { x: number; y: number }[]): number {
+  let acc = 0;
+  for (let i = 1; i < pts.length; i++) acc += Math.hypot(pts[i].x - pts[i - 1].x, pts[i].y - pts[i - 1].y);
+  return acc;
+}
+
 export function generateTrack(width: number, height: number, controlRadii?: number[], rng: Rng = Math.random): TrackGeometry {
   const cx = width / 2, cy = height / 2;
 
@@ -167,6 +196,8 @@ export function buildTrack(map: MapDefinition, defaultW: number, defaultH: numbe
       laneCenters: lanes.centers.map(px),
       laneOffset: px(lanes.offset),
       ...(map.maxspeedKph !== undefined ? { speedLimitMps: mps(map.maxspeedKph / 3.6) } : {}),
+      // 链式地图：中心线由多条 way 合并 → 逐段属性沿弧长成区间（车道数/限速/半宽逐段不同）
+      attrSpans: map.attrSpans ? toAttrSpans(map.attrSpans) : undefined,
     };
   }
   if (map.kind === 'network') {
@@ -191,6 +222,11 @@ export function buildTrack(map: MapDefinition, defaultW: number, defaultH: numbe
       chains: map.chains,
       netNodes: map.nodes,
       netEdges: map.edges,
+      chainAttrs: map.chainAttrs?.map(a => toRoadAttrs(a)),
+      // 无路线时的参考线 = 最长链 → 链内属性取该链的一段（区间 [0, 链长]）
+      attrSpans: map.chainAttrs
+        ? [{ ...toRoadAttrs(map.chainAttrs[map.chains.indexOf(longest)]), s0: px(0), s1: px(polylineLenPx(longest)) }]
+        : undefined,
       ...(map.maxspeedKph !== undefined ? { speedLimitMps: mps(map.maxspeedKph / 3.6) } : {}),
     };
   }

@@ -2732,7 +2732,31 @@
     "laneWidthM": 3.75,
     "halfWidthM": 5.625,
     "maxspeedKph": 120,
-    "oneway": true
+    "oneway": true,
+    "spans": [
+      {
+        "s0M": 0,
+        "s1M": 551.685,
+        "highway": "motorway",
+        "laneCount": 3,
+        "laneWidthM": 3.75,
+        "halfWidthM": 5.625,
+        "maxspeedKph": 120,
+        "lanesFrom": "osm",
+        "maxspeedFrom": "derived:class"
+      },
+      {
+        "s0M": 551.685,
+        "s1M": 1999.857,
+        "highway": "motorway",
+        "laneCount": 2,
+        "laneWidthM": 3.75,
+        "halfWidthM": 3.75,
+        "maxspeedKph": 120,
+        "lanesFrom": "osm",
+        "maxspeedFrom": "derived:class"
+      }
+    ]
   },
   "tollgates": [
     {
@@ -2764,6 +2788,11 @@
     "minRadiusM": 141.1472,
     "aLatAtMaxspeed": 7.872,
     "maxspeedFeasibleMps": 22.2265,
+    "attrCoverage": {
+      "total": 2,
+      "lanesFromOsm": 2,
+      "maxspeedFromOsm": 0
+    },
     "warnings": [
       "线形偏弯：κ p95=3.36e-3（R≈297m）",
       "存在急弯：最小半径 ≈ 141m（检查是否原始数据假象）",

@@ -11,7 +11,8 @@
 // 路网只有 200 个节点、约 400 条边，Dijkstra 在 << 1ms 内完成，
 // 不需要启发式函数的额外复杂度和潜在的次优路径。
 
-import { Point2D } from '../shared/types.js';
+import { Point2D, AttrSpan } from '../shared/types.js';
+import { px } from '../shared/dimensions.js';
 
 // ═══════════════════════════════════════════════════
 // 路网类型
@@ -63,6 +64,15 @@ export function buildRoadGraph(centerPoints: Point2D[], closed = true): RoadGrap
  *
  * @param edges oneway=true 只连 from→to；否则双向各一条边（edge 权 = 边长取整）
  */
+/** 折线长度（px）：路线的 s 轴就是它 */
+function polylineLen(pts: Point2D[]): number {
+  let acc = 0;
+  for (let i = 1; i < pts.length; i++) {
+    acc += Math.hypot((pts[i].x as number) - (pts[i - 1].x as number), (pts[i].y as number) - (pts[i - 1].y as number));
+  }
+  return acc;
+}
+
 export function buildGraphFromEdges(
   nodeCount: number,
   edges: { from: number; to: number; chain?: number; lengthM?: number; oneway?: boolean }[],
@@ -103,12 +113,25 @@ export function buildNetworkRoute(
   edges: { from: number; to: number; chain: number }[],
   chains: Point2D[][],
   fromNode: number, toNode: number,
-): { waypoints: Point2D[]; chainSeq: number[]; edgeSeq: number[] } | null {
+  chainAttrs?: { highway: string; laneCount: number; laneWidthM: number; halfWidthM: number; maxspeedKph: number }[],
+): { waypoints: Point2D[]; chainSeq: number[]; edgeSeq: number[]; attrSpans: AttrSpan[] } | null {
   const nodePath = findRoute(graph, fromNode, toNode);
   if (!nodePath || nodePath.length < 2) return null;
   const waypoints: Point2D[] = [];
   const chainSeq: number[] = [];
   const edgeSeq: number[] = [];
+  /** 逐段属性：按"该链在路线上贡献的弧长区间"累积，相邻同属性合并 */
+  const attrSpans: AttrSpan[] = [];
+  const pushSpan = (u: number, a?: { highway: string; laneCount: number; laneWidthM: number; halfWidthM: number; maxspeedKph: number }) => {
+    if (!a) return;
+    const last = attrSpans[attrSpans.length - 1];
+    if (last && last.halfWidthM === a.halfWidthM && last.maxspeedKph === a.maxspeedKph
+      && last.laneCount === a.laneCount && last.highway === a.highway) { last.s1 = px(u); return; }
+    attrSpans.push({
+      highway: a.highway, laneCount: a.laneCount, laneWidthM: a.laneWidthM, halfWidthM: a.halfWidthM,
+      maxspeedKph: a.maxspeedKph, s0: px(last ? (last.s1 as number) : 0), s1: px(u),
+    });
+  };
   for (let i = 0; i + 1 < nodePath.length; i++) {
     const a = nodePath[i], b = nodePath[i + 1];
     const ei = edges.findIndex(e => (e.from === a && e.to === b) || (e.from === b && e.to === a));
@@ -124,8 +147,10 @@ export function buildNetworkRoute(
     }
     chainSeq.push(edge.chain);
     edgeSeq.push(ei);
+    // 该链贡献到路线末端的弧长（waypoints 长度就是路线 s）
+    pushSpan(polylineLen(waypoints), chainAttrs?.[edge.chain]);
   }
-  return waypoints.length >= 2 ? { waypoints, chainSeq, edgeSeq } : null;
+  return waypoints.length >= 2 ? { waypoints, chainSeq, edgeSeq, attrSpans } : null;
 }
 
 // ═══════════════════════════════════════════════════

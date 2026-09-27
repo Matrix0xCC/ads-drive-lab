@@ -7556,6 +7556,224 @@
           427.92
         ]
       ]
+    ],
+    "chainAttrs": [
+      {
+        "highway": "motorway",
+        "laneCount": 3,
+        "laneWidthM": 3.75,
+        "halfWidthM": 5.625,
+        "maxspeedKph": 120,
+        "lanesFrom": "osm",
+        "maxspeedFrom": "derived:class"
+      },
+      {
+        "highway": "motorway",
+        "laneCount": 3,
+        "laneWidthM": 3.75,
+        "halfWidthM": 5.625,
+        "maxspeedKph": 120,
+        "lanesFrom": "osm",
+        "maxspeedFrom": "derived:class"
+      },
+      {
+        "highway": "motorway",
+        "laneCount": 3,
+        "laneWidthM": 3.75,
+        "halfWidthM": 5.625,
+        "maxspeedKph": 120,
+        "lanesFrom": "osm",
+        "maxspeedFrom": "derived:class"
+      },
+      {
+        "highway": "motorway_link",
+        "laneCount": 1,
+        "laneWidthM": 3.75,
+        "halfWidthM": 1.875,
+        "maxspeedKph": 60,
+        "lanesFrom": "derived:class",
+        "maxspeedFrom": "derived:class"
+      },
+      {
+        "highway": "motorway",
+        "laneCount": 3,
+        "laneWidthM": 3.75,
+        "halfWidthM": 5.625,
+        "maxspeedKph": 120,
+        "lanesFrom": "osm",
+        "maxspeedFrom": "derived:class"
+      },
+      {
+        "highway": "motorway",
+        "laneCount": 3,
+        "laneWidthM": 3.75,
+        "halfWidthM": 5.625,
+        "maxspeedKph": 120,
+        "lanesFrom": "osm",
+        "maxspeedFrom": "derived:class"
+      },
+      {
+        "highway": "motorway_link",
+        "laneCount": 1,
+        "laneWidthM": 3.75,
+        "halfWidthM": 1.875,
+        "maxspeedKph": 60,
+        "lanesFrom": "derived:class",
+        "maxspeedFrom": "derived:class"
+      },
+      {
+        "highway": "motorway_link",
+        "laneCount": 1,
+        "laneWidthM": 3.75,
+        "halfWidthM": 1.875,
+        "maxspeedKph": 60,
+        "lanesFrom": "derived:class",
+        "maxspeedFrom": "derived:class"
+      },
+      {
+        "highway": "motorway_link",
+        "laneCount": 1,
+        "laneWidthM": 3.75,
+        "halfWidthM": 1.875,
+        "maxspeedKph": 60,
+        "lanesFrom": "derived:class",
+        "maxspeedFrom": "derived:class"
+      },
+      {
+        "highway": "motorway_link",
+        "laneCount": 1,
+        "laneWidthM": 3.75,
+        "halfWidthM": 1.875,
+        "maxspeedKph": 60,
+        "lanesFrom": "derived:class",
+        "maxspeedFrom": "derived:class"
+      },
+      {
+        "highway": "motorway_link",
+        "laneCount": 1,
+        "laneWidthM": 3.75,
+        "halfWidthM": 1.875,
+        "maxspeedKph": 60,
+        "lanesFrom": "derived:class",
+        "maxspeedFrom": "derived:class"
+      },
+      {
+        "highway": "motorway_link",
+        "laneCount": 1,
+        "laneWidthM": 3.75,
+        "halfWidthM": 1.875,
+        "maxspeedKph": 60,
+        "lanesFrom": "derived:class",
+        "maxspeedFrom": "derived:class"
+      },
+      {
+        "highway": "motorway_link",
+        "laneCount": 1,
+        "laneWidthM": 3.75,
+        "halfWidthM": 1.875,
+        "maxspeedKph": 60,
+        "lanesFrom": "derived:class",
+        "maxspeedFrom": "derived:class"
+      },
+      {
+        "highway": "motorway_link",
+        "laneCount": 1,
+        "laneWidthM": 3.75,
+        "halfWidthM": 1.875,
+        "maxspeedKph": 60,
+        "lanesFrom": "derived:class",
+        "maxspeedFrom": "derived:class"
+      },
+      {
+        "highway": "motorway_link",
+        "laneCount": 1,
+        "laneWidthM": 3.75,
+        "halfWidthM": 1.875,
+        "maxspeedKph": 60,
+        "lanesFrom": "derived:class",
+        "maxspeedFrom": "derived:class"
+      },
+      {
+        "highway": "motorway",
+        "laneCount": 3,
+        "laneWidthM": 3.75,
+        "halfWidthM": 5.625,
+        "maxspeedKph": 120,
+        "lanesFrom": "osm",
+        "maxspeedFrom": "derived:class"
+      },
+      {
+        "highway": "motorway",
+        "laneCount": 3,
+        "laneWidthM": 3.75,
+        "halfWidthM": 5.625,
+        "maxspeedKph": 120,
+        "lanesFrom": "osm",
+        "maxspeedFrom": "derived:class"
+      },
+      {
+        "highway": "motorway",
+        "laneCount": 3,
+        "laneWidthM": 3.75,
+        "halfWidthM": 5.625,
+        "maxspeedKph": 120,
+        "lanesFrom": "osm",
+        "maxspeedFrom": "derived:class"
+      },
+      {
+        "highway": "motorway",
+        "laneCount": 3,
+        "laneWidthM": 3.75,
+        "halfWidthM": 5.625,
+        "maxspeedKph": 120,
+        "lanesFrom": "osm",
+        "maxspeedFrom": "derived:class"
+      },
+      {
+        "highway": "motorway_link",
+        "laneCount": 1,
+        "laneWidthM": 3.75,
+        "halfWidthM": 1.875,
+        "maxspeedKph": 60,
+        "lanesFrom": "derived:class",
+        "maxspeedFrom": "derived:class"
+      },
+      {
+        "highway": "motorway",
+        "laneCount": 3,
+        "laneWidthM": 3.75,
+        "halfWidthM": 5.625,
+        "maxspeedKph": 120,
+        "lanesFrom": "osm",
+        "maxspeedFrom": "derived:class"
+      },
+      {
+        "highway": "motorway",
+        "laneCount": 3,
+        "laneWidthM": 3.75,
+        "halfWidthM": 5.625,
+        "maxspeedKph": 120,
+        "lanesFrom": "osm",
+        "maxspeedFrom": "derived:class"
+      },
+      {
+        "highway": "motorway_link",
+        "laneCount": 1,
+        "laneWidthM": 3.75,
+        "halfWidthM": 1.875,
+        "maxspeedKph": 60,
+        "lanesFrom": "derived:class",
+        "maxspeedFrom": "derived:class"
+      },
+      {
+        "highway": "motorway_link",
+        "laneCount": 1,
+        "laneWidthM": 3.75,
+        "halfWidthM": 1.875,
+        "maxspeedKph": 60,
+        "lanesFrom": "derived:class",
+        "maxspeedFrom": "derived:class"
+      }
     ]
   },
   "validation": {
@@ -7582,6 +7800,11 @@
       "usesRamp": true,
       "alternativeDetourM": null,
       "alternativeEdge": null
+    },
+    "attrCoverage": {
+      "total": 24,
+      "lanesFromOsm": 11,
+      "maxspeedFromOsm": 0
     },
     "hasCycle": false,
     "warnings": [

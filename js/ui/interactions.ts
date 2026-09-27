@@ -110,7 +110,7 @@ export function wireInteractions(deps: UiDeps, ctl: UiController): void {
     const tr = deps.engine.track;
     // 路网地图：节点对 → 边 → 链几何装配（与 headless 走**同一个** buildNetworkRoute）
     if (tr.chains && tr.netNodes && tr.netEdges) {
-      const r = buildNetworkRoute(deps.engine.roadGraph, tr.netEdges, tr.chains, startIdx, idx);
+      const r = buildNetworkRoute(deps.engine.roadGraph, tr.netEdges, tr.chains, startIdx, idx, tr.chainAttrs);
       if (!r) return;                       // 不可达：保持 picking（与旧行为一致）
       let len = 0;
       for (let i = 1; i < r.waypoints.length; i++) {
@@ -119,7 +119,7 @@ export function wireInteractions(deps: UiDeps, ctl: UiController): void {
           (r.waypoints[i].y as number) - (r.waypoints[i - 1].y as number),
         );
       }
-      deps.actions.setRoute(createRoute(r.waypoints, r.chainSeq, startIdx, idx, px(len)), startIdx);
+      deps.actions.setRoute(createRoute(r.waypoints, r.chainSeq, startIdx, idx, px(len), r.attrSpans), startIdx);
       ctl.dispatch({ type: 'ROUTE_SET' });
       return;
     }

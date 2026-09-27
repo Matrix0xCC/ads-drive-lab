@@ -7,7 +7,7 @@
 
 import * as THREE from 'three';
 import { TrackGeometry, Obstacle } from '../../shared/types.js';
-import { Px, m, px } from '../../shared/dimensions.js';
+import { Px, m, px, SIM_UNITS_PER_METER } from '../../shared/dimensions.js';
 import { buildFrenetReference, frenetToCartesian } from '../../algo/plan/frenet.js';
 import { TRACK_HALF_WIDTH, ribbonPolygon } from '../track.js';
 import type { FrenetReference } from '../../shared/types.js';
@@ -26,9 +26,8 @@ export function buildTrackGroup(track: TrackGeometry): THREE.Group {
 
   // ── 路网地图（多链）：每条链画一条路面（ribbon 多边形）+ 中心虚线 + 车道分隔线 ──
   if (track.chains && track.chains.length > 0) {
-    const halfW = (track.halfWidth ?? TRACK_HALF_WIDTH) as number;
+    const mapHalfW = (track.halfWidth ?? TRACK_HALF_WIDTH) as number;
     const laneW = (track.laneWidth ?? m(3.75)) as number;
-    const lanes = Math.max(2, Math.round(2 * halfW / laneW));
     const toV2 = (pts: { x: Px; y: Px }[]) =>
       pts.map(p => new THREE.Vector2(p.x as number, -(p.y as number)));
     const roadMat = new THREE.MeshStandardMaterial({ color: 0x3a3a3a });
@@ -41,15 +40,24 @@ export function buildTrackGroup(track: TrackGeometry): THREE.Group {
         return { x: px((p.x as number) - (dy / len) * lv), y: px((p.y as number) + (dx / len) * lv) };
       });
 
-    for (const ch of track.chains) {
+    for (let ci = 0; ci < track.chains.length; ci++) {
+      const ch = track.chains[ci];
       if (ch.length < 2) continue;
+      // **逐链宽度**：属性给的是车道数×车道宽，路面按它画（1 车道匝道明显更窄）
+      const attrs = track.chainAttrs?.[ci];
+      const halfW = attrs ? attrs.halfWidthM * SIM_UNITS_PER_METER : mapHalfW;
+      const lanes = attrs ? Math.max(1, attrs.laneCount) : Math.max(2, Math.round(2 * mapHalfW / laneW));
       const poly = ribbonPolygon(ch, halfW);
       const pts = toV2(poly);
       const shape = new THREE.Shape(THREE.ShapeUtils.isClockWise(pts) ? pts.reverse() : pts);
       const mesh = new THREE.Mesh(new THREE.ShapeGeometry(shape), roadMat);
       mesh.rotation.x = -Math.PI / 2;
       mesh.position.y = 0.01;
-      mesh.userData = { type: 'track', label: '道路', width: (2 * halfW) / 4, height: 0, length: '路网' };
+      mesh.userData = {
+        type: 'track',
+        label: attrs ? `道路 ${attrs.highway}（${attrs.laneCount} 车道，限速 ${attrs.maxspeedKph}km/h）` : '道路',
+        width: (2 * halfW) / 4, height: 0, length: '路网',
+      };
       group.add(mesh);
       // 中心虚线
       const c3 = ch.map(p => new THREE.Vector3(p.x as number, 0.02, p.y as number));

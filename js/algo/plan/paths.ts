@@ -29,6 +29,7 @@ import type { Corridor } from './corridor.js';
 import { marginFor } from './margin.js';
 import { MAX_SENSOR_DIST } from '../perception.js';
 import { TRACK_HALF_WIDTH } from '../../env/track.js';
+import { boundsBufferFor } from '../../env/car.js';
 import { BOUNDS_BUFFER } from '../../env/car.js';
 
 export const PATH_HORIZON: Px = m(120);
@@ -129,6 +130,9 @@ export function solvePathLayer(o: {
   ref: FrenetReference; l0: Px; dl0: DimLess; s0: number; v0: number;
   /** 道路半宽（px）；缺省 TRACK_HALF_WIDTH（径向图）。OSM 图按车道数更窄 → 规划域随之收窄 */
   trackHalfWidth?: Px;
+  /** 半宽随 s 变化（逐段属性：1 车道匝道 ≠ 4 车道主路）。给了则规划域**逐站**取，
+   *  规划域边始终贴着该段的路缘（而非全图一个值）。 */
+  halfWidthAt?: (s: number) => number;
   carX: number; carY: number; lidarScan: LidarScan;
   carWidth: Px; collisionRadius: Px; laneOffset: Px;
   prevTargetL: number | null;
@@ -144,8 +148,28 @@ export function solvePathLayer(o: {
   // 为判据验收：A/B 实测 0 次且到达率 7/10 → 8/10（见 ISSUE_HISTORY 的域加宽记录）。
   // A/B 开关：改回 m(0.6) 即旧行为（域边比复位崖内缩 0.6m）。
   const halfWidthU = (o.trackHalfWidth ?? TRACK_HALF_WIDTH) as number;
-  const L_MAX = halfWidthU
-    - ((o.carWidth as number) / 2 + (BOUNDS_BUFFER as number)) - (DOMAIN_OVERSHOOT_RESERVE as number);
+  const carHalfU = (o.carWidth as number) / 2 + (BOUNDS_BUFFER as number);
+  /**
+   * 【规划域必须包含车辆当前横向位置】否则会出现"候选路径的起点就在走廊外 → 全被判碰撞 →
+   * 永久停车"的死锁。实测：单车道匝道（半宽 1.875m）上域只有 ±0.375m，而车实测 l0=0.41m
+   * （最近邻投影与点到线段两种口径差几厘米）→ 三环场景卡死在匝道入口。
+   *
+   * 因此域 = clamp(max(名义域, |l0| + 5cm), 名义域, 物理上限)，物理上限 = 半宽 − 车半宽
+   * （**不含**复位缓冲 → 不会因为放宽域而把车送到复位崖外）。
+   * 宽路上 max 取名义域、上限更大 → 逐位不变（径向图零回归）。
+   */
+  // 上限 = **复位崖**（checkBounds 同一口径：半宽 − 车半宽 − 缩放后的复位缓冲），
+  // 绝不比崖更宽——域比崖宽会让规划器把车贴到崖外（P8 贴边棘轮 / 复位传送）。
+  const cliffOf = (halfU: number) => halfU - ((o.carWidth as number) / 2 + boundsBufferFor(halfU, (o.carWidth as number) / 2));
+  const domainOf = (halfU: number) => {
+    const nominal = cliffOf(halfU) - (DOMAIN_OVERSHOOT_RESERVE as number);
+    return Math.min(Math.max(nominal, Math.abs(o.l0 as number) + (m(0.05) as number)), cliffOf(halfU));
+  };
+  const L_MAX = domainOf(halfWidthU);
+  /** 逐站规划域（与 checkBounds 同一口径：半宽 − 车半宽 − 复位缓冲 − 过冲预留） */
+  const lMaxAt = o.halfWidthAt
+    ? (s: number) => domainOf((o.halfWidthAt as (s: number) => number)(s))
+    : undefined;
   const lo = o.laneOffset as number;
 
   // ── 障碍命中点采集（笛卡尔 → 走廊膨胀）──
@@ -204,7 +228,7 @@ export function solvePathLayer(o: {
   const mkCorridor = (extra: number, steps = Math.round(corridorHorizon / stepU), useCoverage = true) => buildCorridor({
     ref: o.ref, s0: o.s0, hits, hitSegs,
     inflate: halfW + extra, inflateLow: halfW + extra + (m(2.0) as number),
-    lMax: L_MAX, horizon: corridorHorizon, steps,
+    lMax: L_MAX, lMaxAt, horizon: corridorHorizon, steps,
     windowRel: COMMIT_WINDOW as number,
     coverage: useCoverage ? coverage : undefined,
   });
@@ -217,8 +241,17 @@ export function solvePathLayer(o: {
 
   // 候选由走廊瓶颈处派生（间隙中心必被覆盖——旧版固定档位打不中缝隙中心，
   // 障碍贴一侧时被迫贴走廊边缘，oval-s2 类越界复位由此而来）
+  // 候选目标夹紧用**承诺窗内的最小域**：若只看 s0 的宽域，进入窄段时目标可能全被走廊否掉
+  // （走廊逐站判越界）→ 会退化成不必要的停车。
+  let lMaxCommit = L_MAX;
+  if (lMaxAt) {
+    const stepU2 = m(5) as number;
+    for (let d = 0; d <= (COMMIT_WINDOW as number); d += stepU2) {
+      lMaxCommit = Math.min(lMaxCommit, lMaxAt(o.s0 + d));
+    }
+  }
   const targets = deriveTargets({
-    corridor: physical, laneOffset: lo, l0: o.l0 as number, lMax: L_MAX, maxTargets: 7,
+    corridor: physical, laneOffset: lo, l0: o.l0 as number, lMax: lMaxCommit, maxTargets: 7,
   });
 
   const candidates: PathCandidate[] = [];

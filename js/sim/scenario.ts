@@ -13,7 +13,7 @@
 // 【注意】无 route 时车辆保持静止（与浏览器语义一致），
 // 行驶类场景必须带 route。
 
-import { Obstacle, Point2D, Route, TrackGeometry, createRoute } from '../shared/types.js';
+import { AttrSpan, Obstacle, Point2D, Route, TrackGeometry, createRoute } from '../shared/types.js';
 import { Px, rad, m, mps, px, SIM_UNITS_PER_METER } from '../shared/dimensions.js';
 import { MAP_PRESETS, MapDefinition } from '../env/mapDefinitions.js';
 import { buildTrack, TRACK_HALF_WIDTH } from '../env/track.js';
@@ -166,25 +166,31 @@ export function buildScenarioWorld(scenario: Scenario, width: number, height: nu
   let netWaypoints: Point2D[] | null = null;
   let netStartNode = -1;
   let lastChainSeq: number[] = [];
+  let netAttrSpans: AttrSpan[] | undefined;
   if (isNetwork && scenario.route) {
     if (scenario.route.fromNode === undefined || scenario.route.toNode === undefined) {
       throw new ScenarioError('路网地图的 route 需要 fromNode/toNode');
     }
     const graph = buildGraphFromEdges(track.netNodes!.length, track.netEdges!, track.chains!);
-    const r = buildNetworkRoute(graph, track.netEdges!, track.chains!, scenario.route.fromNode, scenario.route.toNode);
+    const r = buildNetworkRoute(graph, track.netEdges!, track.chains!, scenario.route.fromNode, scenario.route.toNode,
+      track.chainAttrs);
     if (!r) throw new ScenarioError(`路网路线不可达: node ${scenario.route.fromNode} → ${scenario.route.toNode}`);
     netWaypoints = r.waypoints;
     netStartNode = scenario.route.fromNode;
     lastChainSeq = r.chainSeq;
+    netAttrSpans = r.attrSpans;
   }
   const routeStartIdx = !isNetwork && scenario.route
     ? sToIndex(track.centerPoints, m(scenario.route.startS ?? 0) as number, closed)
     : null;
 
+  // 【显式障碍的参考线】路网地图上"道路"就是路线：必须沿**路线**的 s 放置，
+  // 用 track.centerPoints（= 最长链）会把障碍放到另一条路上去。
+  const obsRef = netWaypoints ? buildFrenetReference(netWaypoints, false) : ref;
   let obstacles: Obstacle[];
   if (scenario.obstacles.mode === 'explicit') {
     obstacles = scenario.obstacles.list.map(o => {
-      const cart = frenetToCartesian(m(o.s) as number, m(o.l), ref);
+      const cart = frenetToCartesian(m(o.s) as number, m(o.l), obsRef);
       return {
         x: cart.x, y: cart.y,
         width: m(o.w), height: m(o.len),
@@ -216,7 +222,7 @@ export function buildScenarioWorld(scenario: Scenario, width: number, height: nu
       );
     }
     const np = nodes[Math.min(1, nodes.length - 1)];
-    route = createRoute(nodes, lastChainSeq, netStartNode, scenario.route!.toNode ?? -1, px(totalLen));
+    route = createRoute(nodes, lastChainSeq, netStartNode, scenario.route!.toNode ?? -1, px(totalLen), netAttrSpans);
     carStart = {
       x: nodes[0].x, y: nodes[0].y,
       angle: rad(Math.atan2(
@@ -241,7 +247,27 @@ export function buildScenarioWorld(scenario: Scenario, width: number, height: nu
         (waypoints[i].y as number) - (waypoints[i - 1].y as number),
       );
     }
-    route = createRoute(waypoints, pathIndices, startIdx, goalIdx, px(totalLen));
+    // 逐段属性：路线是中心线的一段 → 把赛道 s 轴的区间切到 [起点,终点] 并整体平移
+    let routeSpans: AttrSpan[] | undefined;
+    if (track.attrSpans && track.attrSpans.length > 0) {
+      let sStart = 0;
+      for (let i = 1; i <= startIdx; i++) {
+        sStart += Math.hypot(
+          (track.centerPoints[i].x as number) - (track.centerPoints[i - 1].x as number),
+          (track.centerPoints[i].y as number) - (track.centerPoints[i - 1].y as number),
+        );
+      }
+      const sGoal = sStart + (totalLen as unknown as number);
+      routeSpans = track.attrSpans
+        .filter(sp => (sp.s1 as number) > sStart && (sp.s0 as number) < sGoal)
+        .map(sp => ({
+          ...sp,
+          s0: px(Math.max(0, (sp.s0 as number) - sStart)),
+          s1: px(Math.min(sGoal - sStart, (sp.s1 as number) - sStart)),
+        }))
+        .filter(sp => (sp.s1 as number) > (sp.s0 as number));
+    }
+    route = createRoute(waypoints, pathIndices, startIdx, goalIdx, px(totalLen), routeSpans);
     // 车放路线起点，朝向第二点（与 engine.setRoute 一致的语义）
     const np = waypoints[Math.min(1, waypoints.length - 1)];
     carStart = {

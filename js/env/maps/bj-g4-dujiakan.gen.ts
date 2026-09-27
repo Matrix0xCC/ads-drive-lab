@@ -14,6 +14,10 @@ export const BJ_G4_DUJIAKAN: MapDefinition = {
   worldH: m(1841.3581),
   laneWidthM: 3.75,
   maxspeedKph: 120,
+  attrSpans: [
+    { s0M: 0, s1M: 551.685, highway: "motorway", laneCount: 3, laneWidthM: 3.75, halfWidthM: 5.625, maxspeedKph: 120, lanesFrom: "osm", maxspeedFrom: "derived:class" },
+    { s0M: 551.685, s1M: 1999.857, highway: "motorway", laneCount: 2, laneWidthM: 3.75, halfWidthM: 3.75, maxspeedKph: 120, lanesFrom: "osm", maxspeedFrom: "derived:class" },
+  ],
   tollgates: [
     { sM: 60, lM: 18.3898, osmId: 1942435555 },
     { sM: 357.7251, lM: 36.1889, osmId: 1942435655 },

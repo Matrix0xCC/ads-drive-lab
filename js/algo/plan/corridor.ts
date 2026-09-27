@@ -106,6 +106,9 @@ export function buildCorridor(o: {
   hitSegs: { ax: number; ay: number; bx: number; by: number; low: boolean }[];
   inflate: number; inflateLow: number;
   lMax: number; horizon: number; steps: number; windowRel: number;
+  /** 可行驶域随 s 变化（逐段道路属性）：1 车道匝道的域比 4 车道主路窄得多。
+   *  给了就**逐站**取域（走廊本来就是逐站求自由补集，接入点天然）；缺省用 lMax 常量。 */
+  lMaxAt?: (s: number) => number;
   /** 传入后：每步的自由段再与"本帧被雷达扫到的子区间"求交（未观测 = 不可通行） */
   coverage?: Coverage;
 }): Corridor {
@@ -137,7 +140,9 @@ export function buildCorridor(o: {
       const r = Math.sqrt(p.infl * p.infl - ds * ds);  // 圆在该 s 处的半宽
       blocked.push({ lmin: p.l1 - r, lmax: p.l2 + r });
     }
-    const free = complement(blocked, o.lMax);
+    // 逐站域：路基变窄处，同一障碍的可通行性不同（匝道上 2.4m 的缝根本不存在）
+    const lMax = o.lMaxAt ? Math.max(0, o.lMaxAt(s)) : o.lMax;
+    const free = complement(blocked, lMax);
     steps.push({ s, free: o.coverage ? clipToObserved(free, s, o.ref, o.coverage) : free });
   }
 

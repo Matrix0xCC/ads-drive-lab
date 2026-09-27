@@ -1,9 +1,9 @@
 // ==================== 数据接口（barrel） ====================
 
 export type {
-  Point2D, TrackGeometry, Obstacle, CarState,
+  Point2D, TrackGeometry, Obstacle, CarState, RoadAttrs, AttrSpan,
 } from './interfaces/geometry.js';
-export { VEHICLE_MAX_STEER, obstacleToSegments } from './interfaces/geometry.js';
+export { VEHICLE_MAX_STEER, obstacleToSegments, attrsAtS } from './interfaces/geometry.js';
 
 export type {
   WorldSnapshot, LidarScan, PlanningOutput, ControlCommand,

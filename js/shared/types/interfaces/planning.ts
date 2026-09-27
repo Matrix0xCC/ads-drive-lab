@@ -3,7 +3,7 @@
 // 规划模块使用的数据类型。
 
 import { Radians, Px, PxPerSec, PxPerSec2, DimLess, PerPx, Seconds } from '../../../shared/dimensions.js';
-import { Point2D } from './geometry.js';
+import { Point2D, AttrSpan } from './geometry.js';
 
 // ═══════════════════════════════════════════════════
 // Frenet 坐标系
@@ -66,6 +66,9 @@ export interface Route {
   startIndex: number;
   goalIndex: number;
   length: Px;
+  /** 路线上逐段的道路属性（弧长 px，沿 `waypoints` 自己的 s 轴）：
+   *  规划域与限速都按它随 s 取值（1 车道匝道 ≠ 4 车道主路）。缺省 = 用地图级标量。 */
+  attrSpans?: AttrSpan[];
 }
 
 /** GPS 定位读数（真值 + 噪声） */
@@ -79,8 +82,9 @@ export interface GPSReading {
 export function createRoute(
   waypoints: Point2D[], indices: number[],
   startIdx: number, goalIdx: number, length: Px,
+  attrSpans?: AttrSpan[],
 ): Route {
-  return { waypoints, waypointIndices: indices, startIndex: startIdx, goalIndex: goalIdx, length };
+  return { waypoints, waypointIndices: indices, startIndex: startIdx, goalIndex: goalIdx, length, attrSpans };
 }
 
 export function createGPSReading(x: Px, y: Px, uncertainty: Px): GPSReading {

@@ -28,6 +28,7 @@ import {
   projectOntoPath, sliceByArcLength, speedCapFromCurvature, lateralAccel, A_LAT_MAX_MPS2,
   type LatLon, type Vec2M,
 } from './osm.js';
+import { chainAttrs as attrsOfWay, spansFromPointAttrs, attrCoverage, type AttrSpan } from './attrs.js';
 import { buildTopology, largestComponent, topologyStats, type Topology } from './network.js';
 import { buildGraphFromEdges, buildNetworkRoute } from '../algo/routePlanner.js';
 
@@ -341,6 +342,7 @@ async function main(): Promise<void> {
   const control = sliceByArcLength(proj, sA, sB);
   // 归一化到**世界坐标**（点列平移使包围盒落在 [margin, ...] 内）：
   // 运行时不需再做 bbox 计算，地图文件本身就是"世界坐标 + 世界尺寸"。
+  let worldDx = 0, worldDy = 0;
   {
     let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
     for (const p of control) {
@@ -348,6 +350,7 @@ async function main(): Promise<void> {
       minY = Math.min(minY, p.y); maxY = Math.max(maxY, p.y);
     }
     const dx = WORLD_MARGIN_M - minX, dy = WORLD_MARGIN_M - minY;
+    worldDx = dx; worldDy = dy;
     for (const p of control) { p.x += dx; p.y += dy; }
     for (const p of proj) { p.x += dx; p.y += dy; }          // 收费站已按 s 参数记录，平移不影响 s
     worldW = maxX - minX + 2 * WORLD_MARGIN_M;
@@ -371,6 +374,37 @@ async function main(): Promise<void> {
   const laneWidthM = 3.75;
   const maxspeedKph = mode(picked.map(w => leadingInt(w.tags.maxspeed))
     .filter((v): v is number => v !== null && v > 0)) ?? 120;
+  // ── 逐段属性（车道数/限速/半宽）──
+  // 链式地图的中心线是**多条 way 合并**的，所以属性沿弧长成区间（way 边界就是属性可能变化处）。
+  // 归属方式：把最终中心线的每个点归到"最近的来源 way"（只在该车行道链内找 → 不会串到对向车道）。
+  // 近似说明：平滑会把点挪动 ~1m，所以区间边界精度约 ±1m；用于规划域/限速足够。
+  const attrSpans: AttrSpan[] = (() => {
+    const src: { x: number; y: number; a: ReturnType<typeof attrsOfWay> }[] = [];
+    for (const w of picked) {
+      for (const p of projectToEnu(w.geometry, origin)) {
+        src.push({ x: p.x + worldDx, y: p.y + worldDy, a: attrsOfWay(w.tags) });
+      }
+    }
+    if (src.length === 0) return [];
+    const sM: number[] = [0];
+    for (let i = 1; i < road.length; i++) {
+      sM.push(sM[i - 1] + Math.hypot(road[i].x - road[i - 1].x, road[i].y - road[i - 1].y));
+    }
+    const attrsOfPt = road.map(p => {
+      let best = Infinity, a = src[0].a;
+      for (const q of src) {
+        const d = (p.x - q.x) ** 2 + (p.y - q.y) ** 2;
+        if (d < best) { best = d; a = q.a; }
+      }
+      return a;
+    });
+    return spansFromPointAttrs(sM, attrsOfPt);
+  })();
+  const coverage = attrCoverage(attrSpans);
+  console.log(`逐段属性：${attrSpans.length} 段（车道数 ${[...new Set(attrSpans.map(s => s.laneCount))].join('/')}`
+    + `｜限速 ${[...new Set(attrSpans.map(s => s.maxspeedKph))].join('/')}km/h`
+    + `｜lanes 真实 ${coverage.lanesFromOsm}/${coverage.total}、maxspeed 真实 ${coverage.maxspeedFromOsm}/${coverage.total}）`);
+
   const maxspeedMps = maxspeedKph / 3.6;
   const warnings: string[] = [];
   if (kappa.p95 > 0.002) warnings.push(`线形偏弯：κ p95=${kappa.p95.toExponential(2)}（R≈${(1 / kappa.p95).toFixed(0)}m）`);
@@ -406,8 +440,14 @@ async function main(): Promise<void> {
       points: road.map(p => [r4(p.x), r4(p.y)]),
     },
     road: {
+      // 地图级标量（= 各段众数，兼容旧读者）；**逐段真值在 spans 里**
       laneCount, laneWidthM, halfWidthM: r4(laneCount * laneWidthM / 2),
       maxspeedKph, oneway: true,
+      spans: attrSpans.map(s => ({
+        s0M: r4(s.s0M), s1M: r4(s.s1M), highway: s.highway,
+        laneCount: s.laneCount, laneWidthM: s.laneWidthM, halfWidthM: r4(s.halfWidthM),
+        maxspeedKph: s.maxspeedKph, lanesFrom: s.lanesFrom, maxspeedFrom: s.maxspeedFrom,
+      })),
     },
     tollgates: gates
       .filter(g => g.sM >= sA && g.sM <= sB)
@@ -418,6 +458,8 @@ async function main(): Promise<void> {
       minRadiusM: Number.isFinite(minRadiusM) ? r4(minRadiusM) : null,
       aLatAtMaxspeed: r4(lateralAccel(kappa.max, maxspeedMps)),
       maxspeedFeasibleMps: Number.isFinite(speedCapFromCurvature(kappa.max)) ? r4(speedCapFromCurvature(kappa.max)) : null,
+      /** 逐段属性的来源统计：回答"多少是真 OSM 数据、多少是按等级派生" */
+      attrCoverage: { total: coverage.total, lanesFromOsm: coverage.lanesFromOsm, maxspeedFromOsm: coverage.maxspeedFromOsm },
       warnings,
     },
   };
@@ -445,6 +487,9 @@ export const ${constName}: MapDefinition = {
   worldH: m(${r4(worldH)}),
   laneWidthM: ${out.road.laneWidthM},
   maxspeedKph: ${out.road.maxspeedKph},
+  attrSpans: [
+${attrSpans.map(s => `    { s0M: ${r4(s.s0M)}, s1M: ${r4(s.s1M)}, highway: ${JSON.stringify(s.highway)}, laneCount: ${s.laneCount}, laneWidthM: ${s.laneWidthM}, halfWidthM: ${r4(s.halfWidthM)}, maxspeedKph: ${s.maxspeedKph}, lanesFrom: ${JSON.stringify(s.lanesFrom)}, maxspeedFrom: ${JSON.stringify(s.maxspeedFrom)} },`).join('\n')}
+  ],
   tollgates: [
 ${out.tollgates.map(g => `    { sM: ${g.sM}, lM: ${g.lM}, osmId: ${g.osmId} },`).join('\n')}
   ],
@@ -605,12 +650,25 @@ function buildNetworkMap(
       nodes: nodes.map(n => [r4(n.x), r4(n.y)]),
       edges,
       chains: chains.map(ch => ch.map(p => [r4(p.x), r4(p.y)])),
+      // 逐链属性（与 chains 下标对齐）：车道数/限速/半宽 + 来源标注
+      chainAttrs: comp.edges.map(e => {
+        const a = attrsOfWay(e.tags);
+        return {
+          highway: a.highway, laneCount: a.laneCount, laneWidthM: a.laneWidthM,
+          halfWidthM: r4(a.halfWidthM), maxspeedKph: a.maxspeedKph,
+          lanesFrom: a.lanesFrom, maxspeedFrom: a.maxspeedFrom,
+        };
+      }),
     },
     validation: {
       lengthM: r4(st0.lengthM), junctions: st0.junctions, deadEnds: st0.deadEnds,
       byHighway: Object.fromEntries(Object.entries(st0.byHighway)
         .map(([k, v]) => [k, { count: v.count, lengthM: r4(v.lengthM) }])),
       routeSample: routeInfo,
+      attrCoverage: (() => {
+        const c = attrCoverage(comp.edges.map(e => attrsOfWay(e.tags)));
+        return { total: c.total, lanesFromOsm: c.lanesFromOsm, maxspeedFromOsm: c.maxspeedFromOsm };
+      })(),
       /** 边数 ≥ 节点数 ⇔ 图里有环 ⇔ 存在**替代路径**（真正的"选路"） */
       hasCycle: comp.edges.length >= nodes.length,
       warnings: [
@@ -650,6 +708,15 @@ ${chains.map(ch => `    [${ch.map(p => `{ x: m(${r4(p.x)}), y: m(${r4(p.y)}) }`)
   edges: [
 ${edges.map(e => `    { from: ${e.from}, to: ${e.to}, chain: ${e.chain}, lengthM: ${e.lengthM}, oneway: ${e.oneway} },`).join('\n')}
   ],
+  // 逐链道路属性（与 chains 下标对齐）
+  chainAttrs: [
+${comp.edges.map(e => {
+  const a = attrsOfWay(e.tags);
+  // 注意：halfWidthM 是**米**（运行时按米消费，见 geometry.ts 的 RoadAttrs），
+  // 不能写成 m(...)——那会转成 px（22.5 而不是 5.625），实测直接让可行驶域变成 4 倍。
+  return `    { highway: ${JSON.stringify(a.highway)}, laneCount: ${a.laneCount}, laneWidthM: ${a.laneWidthM}, halfWidthM: ${r4(a.halfWidthM)}, maxspeedKph: ${a.maxspeedKph}, lanesFrom: ${JSON.stringify(a.lanesFrom)}, maxspeedFrom: ${JSON.stringify(a.maxspeedFrom)} },`;
+}).join('\n')}
+  ],
 };
 `;
   const genPath = path.join(genDir, `${args.name}.gen.ts`);
@@ -664,7 +731,15 @@ ${edges.map(e => `    { from: ${e.from}, to: ${e.to}, chain: ${e.chain}, lengthM
   }, null, 2) + '\n');
   console.log(`\n写出 ${mapPath}`);
   console.log(`  链 ${chains.length} 段 / 节点 ${nodes.length} 个 / 世界 ${worldW.toFixed(0)}×${worldH.toFixed(0)}m`);
-  console.log(`  车道 ${laneCount}×${laneWidthM}m → 半宽 ${(laneCount * laneWidthM / 2).toFixed(2)}m；maxspeed ${maxspeedKph}km/h`);
+  {
+    const attrs = comp.edges.map(e => attrsOfWay(e.tags));
+    const cov = attrCoverage(attrs);
+    const lanes = [...new Set(attrs.map(a => a.laneCount))].sort((x, y) => x - y);
+    const speeds = [...new Set(attrs.map(a => a.maxspeedKph))].sort((x, y) => x - y);
+    console.log(`  地图级（众数）：车道 ${laneCount}×${laneWidthM}m → 半宽 ${(laneCount * laneWidthM / 2).toFixed(2)}m；maxspeed ${maxspeedKph}km/h`);
+    console.log(`  逐链属性：车道数 ${lanes.join('/')}｜限速 ${speeds.join('/')}km/h`
+      + `｜lanes 真实 ${cov.lanesFromOsm}/${cov.total}、maxspeed 真实 ${cov.maxspeedFromOsm}/${cov.total}`);
+  }
   console.log(`  生成模块：${genPath}`);
 }
 

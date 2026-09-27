@@ -16,12 +16,13 @@
 //   7. 合成 l(s(t)) → Trajectory；状态机 + 兼容类型标签
 
 import {
-  WorldSnapshot, LidarScan, Route, FrenetReference, TrackGeometry,
-  Trajectory, TrajectoryPoint, createTrajectory,
+  WorldSnapshot, LidarScan, Route, FrenetReference, TrackGeometry, AttrSpan,
+  Trajectory, TrajectoryPoint, createTrajectory, attrsAtS,
 } from '../../shared/types.js';
 import {
-  Px, m, mps, mps2, px, pxps, secs, dimless, perpx,
+  Px, PxPerSec, SIM_UNITS_PER_METER, m, mps, mps2, px, pxps, secs, dimless, perpx,
 } from '../../shared/dimensions.js';
+import { TRACK_HALF_WIDTH } from '../../env/track.js';
 import { buildFrenetReference, cartesianToFrenet, frenetToCartesian } from './frenet.js';
 import { PlanState, nextState } from './states.js';
 import { debug } from '../../shared/debug.js';
@@ -136,6 +137,59 @@ let _tight: TightMemory = INITIAL_TIGHT;
  * 【口径】κ 用 `refCurvatureAt`（±2.5m 三点外接圆），对 3m 采样稳健。
  * 【注意】本项目车辆是运动学模型（无侧向附着极限），该限速**只作用于规划器**。
  */
+/** 当前参考线上的逐段属性（有路线用路线的，否则用赛道的） */
+function attrSpans(track: TrackGeometry, route?: Route): AttrSpan[] | undefined {
+  return route?.attrSpans ?? track.attrSpans;
+}
+
+/** 半宽随 s（px）：逐段属性存在时给出查表函数，否则 undefined（用常量） */
+function halfWidthAtFn(track: TrackGeometry, route?: Route): ((s: number) => number) | undefined {
+  const spans = attrSpans(track, route);
+  if (!spans || spans.length === 0) return undefined;
+  const fallback = (track.halfWidth as number) ?? TRACK_HALF_WIDTH;
+  return (s: number) => {
+    const a = attrsAtS(spans, s);
+    return a ? a.halfWidthM * SIM_UNITS_PER_METER : fallback;
+  };
+}
+
+/**
+ * 逐段限速的**制动可行**上限（**px/s**，与规划器其余部分同一量纲）：地图限速沿路变化，
+ * 必须在到达"更低限速段"之前就把速度降下来。判据：`v² ≤ v_lim(s')² + 2·a_brake·(s'−s0)`
+ * 对前方所有 s' 成立（`ds` 用 px、`a_brake` 用 px/s²、`v` 用 px/s，量纲自洽）。
+ *
+ * 【量纲坑】逐段属性里的限速是 km/h（人读），必须 ×SIM_UNITS_PER_METER 转成 px/s 再比较；
+ * 实测写成 m/s 时 `min(133.3, 33.3)` 会把巡航目标砍成 33.3px/s = 8.3m/s，车全程慢行档。
+ *
+ * 采样：固定 10m 网格 **加上每一段的边界**——限速是台阶式下降，网格采样可能整个跨过台阶起点，
+ * 必须把边界本身作为约束点采到（取 Δs 最小的那个下降沿）。
+ * 无逐段属性时退化成"常量上限"（只看 s0，不看前方）——与旧行为逐位一致。
+ */
+function speedLimitCap(
+  spans: AttrSpan[] | undefined, fallbackMps: PxPerSec | undefined,
+  s0: number, horizon: number,
+): number | undefined {
+  const aBrake = A_BRAKE as number;
+  const kphToPxPerSec = (kph: number) => mps(kph / 3.6) as number;
+  let cap = Infinity;
+  const consider = (sAbs: number, vPx: number) => {
+    const ds = sAbs - s0;
+    if (ds < 0 || ds > horizon || !Number.isFinite(vPx)) return;
+    cap = Math.min(cap, Math.sqrt(vPx * vPx + 2 * aBrake * ds));
+  };
+  if (spans && spans.length > 0) {
+    const STEP = m(10) as number;
+    for (let ds = 0; ds <= horizon; ds += STEP) {
+      const a = attrsAtS(spans, s0 + ds);
+      consider(s0 + ds, a ? kphToPxPerSec(a.maxspeedKph) : (fallbackMps !== undefined ? (fallbackMps as number) : Infinity));
+    }
+    for (const sp of spans) consider(sp.s0 as number, kphToPxPerSec(sp.maxspeedKph));
+  } else if (fallbackMps !== undefined) {
+    consider(s0, fallbackMps as number);
+  }
+  return Number.isFinite(cap) ? cap : undefined;
+}
+
 function curvatureSpeedCap(ref: FrenetReference, s0: number, horizon: number): number {
   const aBrake = A_BRAKE as number;
   const STEP = m(10) as number;
@@ -200,8 +254,13 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
   // 地图限速（OSM maxspeed → vCap）：**语义来自地图**，与"前方障碍限速"取最小。
   // 位置必须在 17.5m/s 下限**之后**——地图限速是硬上限，低限速图（60km/h=16.7m/s）
   // 不应被"防呆下限"抬上去。
-  const vMapLimit = track.speedLimitMps;
-  if (vMapLimit !== undefined) targetV = Math.min(targetV, vMapLimit as number);
+  // 【逐段限速 + 制动可行剖面】地图限速现在是"沿路逐段"的（`attrSpans`）：匝道 40~60km/h、
+  // 主路 100~120km/h。不是简单地"取当前段的限速"，而是**提前减速**：
+  //   v_allowed(s0) = min over 前方各点 s' 的 √(v_lim(s')² + 2·a_brake·(s'−s0))
+  // 否则车会在限速台阶处"到了才发现要减速"——规划速度合理但车刹不住（与曲率限速同一套道理）。
+  // 没有逐段属性时退化成"常量硬上限"，与旧行为逐位一致。
+  const vLimit = speedLimitCap(attrSpans(track, route), track.speedLimitMps, fl.s as number, PATH_HORIZON as number);
+  if (vLimit !== undefined) targetV = Math.min(targetV, vLimit);
   if (routeActive && remainingDist < DECEL_ZONE) {
     targetV *= Math.max(0.1, remainingDist / DECEL_ZONE);
   }
@@ -240,6 +299,7 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
       laneOffset, prevTargetL: _prevBestTargetL,
       sEnd: routeActive ? (frenetRef.totalS as number) : undefined,
       trackHalfWidth: snapshot.track.halfWidth,     // 规划域随地图半宽（OSM 3 车道比径向图窄）
+      halfWidthAt: halfWidthAtFn(track, route),     // 逐段：匝道窄、主路宽
     });
     rounds += 1;
     const a = pathLayer.best.targetL as number;
