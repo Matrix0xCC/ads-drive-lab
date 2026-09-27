@@ -84,6 +84,12 @@ requestAnimationFrame 主循环 (~60Hz)
 5. **单位系统** — 所有物理量配置用 `m()` / `mps()` / `mps2()` 书写（`SIM_UNITS_PER_METER = 4`，改比例尺只需改这一个常量），不要硬编码 px 值
 6. **UI 状态单一来源** — 所有 UI 行为经 `ui/state.ts` 的纯函数 reduce 驱动，DOM 只是状态的渲染投影；`ui/controller.ts` 是"状态变化 → 副作用"的唯一边界；main 只通过 `UiDeps.actions` 改世界。布局：左侧菜单栏（分区**常展开**：世界/数据）+ **画布左缘纵向 toolbar**（暂停/视角/**跟随**/走廊/刻度/射线/路线，图标+两字标签，开关类高亮=开）+ 画布右上「信息」面板（详细遥测）+ 右下「调试」面板（Inspect，`infoOpen`/`debugOpen` 可折叠）+ 画布左上速度/状态精简行。快捷键：Space 暂停/回放播放、Esc 取消选点/退出回放、R 视角、F 相机跟随、I 折叠「调试」面板、C 走廊可视化、G Frenet 刻度、L LiDAR 射线、T 设路线、WASD 平移视角
   （画布左缘纵向 toolbar 另有同功能按钮；两者默认：刻度/射线开、走廊关、**相机跟随按地图**——长条大世界（OSM 高速）开、径向小世界关）
+  **`main.ts` 的模块初始化顺序是硬约束**：`const ui = setupUI(...)` 在**顶层调用 `applyScenario` 之后**才初始化，
+  所以"模块初始化阶段就会被调用"的函数（`applyScenario`）**不得引用 `ui`/`replay` 之类后声明的绑定**，
+  否则刷新即崩 `Cannot access 'x' before initialization`（TDZ；TypeScript 不报，实测踩过两次：
+  `basemapAttribution` 与 `ui`）。避免办法是**不要为派生值新增模块级可变状态**（署名改为从底图句柄读；
+  底图可见性由每帧 `updateScene` 同步）。由 `js/test/ui/main-init-order.test.ts` 静态守住
+  （只查"初始化阶段被调用的函数"——回调里用 `ui` 是安全的，不能一刀切）。
 
 ### 规划器（js/algo/plan/）——纵向-横向解耦（spec: docs/superpowers/specs/2026-09-19-decoupled-planner-design.md）
 
