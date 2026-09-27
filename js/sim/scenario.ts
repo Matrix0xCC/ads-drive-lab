@@ -171,6 +171,14 @@ export function buildScenarioWorld(scenario: Scenario, width: number, height: nu
     if (scenario.route.fromNode === undefined || scenario.route.toNode === undefined) {
       throw new ScenarioError('路网地图的 route 需要 fromNode/toNode');
     }
+    // 【合法性】节点序号是**地图专属**的：切换地图时旧场景的 fromNode/toNode 会落空。
+    // 不先检查会在建图内部炸出 `Invalid array length`（不可读；实测踩过）。
+    const nodeCount = track.netNodes!.length;
+    if (scenario.route.fromNode >= nodeCount || scenario.route.toNode >= nodeCount) {
+      throw new ScenarioError(
+        `路网节点序号超出范围: fromNode=${scenario.route.fromNode} toNode=${scenario.route.toNode}`
+        + `（本图共 ${nodeCount} 个节点，合法 0..${nodeCount - 1}）—— 路线声明可能来自别的地图`);
+    }
     const graph = buildGraphFromEdges(track.netNodes!.length, track.netEdges!, track.chains!);
     const r = buildNetworkRoute(graph, track.netEdges!, track.chains!, scenario.route.fromNode, scenario.route.toNode,
       track.chainAttrs);
@@ -240,6 +248,14 @@ export function buildScenarioWorld(scenario: Scenario, width: number, height: nu
       throw new ScenarioError(`路线不可达: startS=${scenario.route.startS} goalS=${scenario.route.goalS}`);
     }
     const waypoints = pathIndices.map(i => track.centerPoints[i]);
+    // 【合法性】弧长同样是**地图专属**的：切换地图后旧场景的 startS/goalS 可能落到本图之外，
+    // 此时 centerPoints[i] 是 undefined，路线会带着坏点继续（长度算成 NaN）。
+    if (waypoints.length < 2 || waypoints.some(p => !p
+      || !Number.isFinite(p.x as number) || !Number.isFinite(p.y as number))) {
+      throw new ScenarioError(
+        `路线不可达: startS=${scenario.route.startS} goalS=${scenario.route.goalS}`
+        + `（本图中心线共 ${track.centerPoints.length} 点）—— 路线声明可能来自别的地图`);
+    }
     let totalLen = 0;
     for (let i = 1; i < waypoints.length; i++) {
       totalLen += Math.hypot(
@@ -283,6 +299,10 @@ export function buildScenarioWorld(scenario: Scenario, width: number, height: nu
     };
   }
 
+  // 【兜底】长度必须是有限值：任何未来的 NaN 都要变成可读错误，而不是静默的坏路线
+  if (route && !Number.isFinite(route.length as unknown as number)) {
+    throw new ScenarioError('路线数据非法（长度为 NaN）');
+  }
   return {
     worldCfg: { map: mapDef, obstacles, seed: scenario.seed, carStart },
     track, route,

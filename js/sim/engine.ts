@@ -121,9 +121,7 @@ export class SimEngine {
       if (cfg.carStart.angle !== undefined) this.car.angle = cfg.carStart.angle;
       if (cfg.carStart.speed !== undefined) this.car.speed = cfg.carStart.speed;
     }
-    this.route = null;
-    this.routeState = 'NONE';
-    this.routeStartIdx = null;
+    this.clearRoute();
     this.latestGPS = null;
     this.simTime = 0;
     this.stepCount = 0;
@@ -133,6 +131,14 @@ export class SimEngine {
   }
 
   /** 与浏览器右键设路线的语义一致：车放到路线起点、朝向第二点 */
+  /** 清空路线：无路线时车辆保持静止（与 headless 语义一致）。
+   *  装配层在"换地图/换场景"时调用——路线的节点号/弧长只对原地图有意义（见 sim/scenario.ts 的校验）。 */
+  clearRoute(): void {
+    this.route = null;
+    this.routeState = 'NONE';
+    this.routeStartIdx = null;
+  }
+
   setRoute(route: Route, startIdx: number, opts?: { speed?: PxPerSec }): void {
     this.route = route;
     this.routeStartIdx = startIdx;

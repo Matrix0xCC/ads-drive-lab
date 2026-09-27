@@ -23,6 +23,8 @@ function makeCtl() {
     onBasemapVisible: () => {},
     onFollowCam: (on) => calls.follow.push(on),
     onRoutePickPhase: () => {},
+    onRouteInfo: () => {},
+    onNotice: () => {},
   }, () => 'NONE');
   return { ctl, calls };
 }

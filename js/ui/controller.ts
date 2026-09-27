@@ -4,7 +4,7 @@
 // 本模块不得 import DOM/three：所有副作用通过 UiEffects 注入，
 // 是"状态集中"与"DOM 只是渲染投影"之间的唯一边界。
 
-import { UiState, UiEvent, UiMode, RoutePickPhase, reduce, deriveHint, INITIAL_UI_STATE } from './state.js';
+import { UiState, UiEvent, UiMode, RoutePickPhase, RouteSource, reduce, deriveHint, INITIAL_UI_STATE } from './state.js';
 import type { RouteState } from '../sim/engine.js';
 import type { SpeedUnit } from '../shared/display.js';
 
@@ -22,6 +22,8 @@ export interface UiEffects {
   onBasemapVisible(visible: boolean): void;
   onFollowCam(on: boolean): void;
   onRoutePickPhase(phase: RoutePickPhase): void;
+  onRouteInfo(info: { source: RouteSource; summary: string }): void;
+  onNotice(text: string): void;
 }
 
 export class UiController {
@@ -54,6 +56,8 @@ export class UiController {
     if (next.basemapVisible !== prev.basemapVisible) this.effects.onBasemapVisible(next.basemapVisible);
     if (next.followCam !== prev.followCam) this.effects.onFollowCam(next.followCam);
     if (next.routePick !== prev.routePick) this.effects.onRoutePickPhase(next.routePick);
+    if (next.routeInfo !== prev.routeInfo) this.effects.onRouteInfo(next.routeInfo);
+    if (next.notice !== prev.notice) this.effects.onNotice(next.notice);
     this.effects.onHint(deriveHint(next, this.getRouteState()));
   }
 
@@ -71,6 +75,8 @@ export class UiController {
     this.effects.onBasemapVisible(this._state.basemapVisible);
     this.effects.onFollowCam(this._state.followCam);
     this.effects.onRoutePickPhase(this._state.routePick);
+    this.effects.onRouteInfo(this._state.routeInfo);
+    this.effects.onNotice(this._state.notice);
     this.effects.onHint(deriveHint(this._state, this.getRouteState()));
   }
 }

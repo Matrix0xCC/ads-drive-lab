@@ -30,7 +30,11 @@ export function wireToolbar(
   if (mapSelect) {
     mapSelect.addEventListener('change', () => {
       exitReplayIfActive();
-      deps.actions.switchMap(mapSelect.value);
+      // 换地点会**清除路线**（路线用节点号/弧长表达，只对原地图有意义）——由 main 的 switchMap 负责并提示
+      if (!deps.actions.switchMap(mapSelect.value)) {
+        mapSelect.value = deps.actions.currentMapKey();   // 失败：回滚下拉，避免"下拉与世界不一致"
+        return;
+      }
       ctl.dispatch({ type: 'SCENARIO_CHANGED', name: `browser-${mapSelect.value}`, followCamDefault: bigWorld() });
     });
   }
@@ -54,8 +58,11 @@ export function wireToolbar(
       const file = scenarioSelect.value;
       exitReplayIfActive();
       if (!file) {
-        deps.actions.loadDefaultScenario(deps.engine.mapDef.name);
-        ctl.dispatch({ type: 'SCENARIO_CHANGED', name: '随机场景', followCamDefault: bigWorld() });
+        // 注意用 **key**（下拉的值）而不是 mapDef.name：合成地图的 name 是显示名（Oval / Tech Circuit），
+        // 拿它当 key 会被 parseScenario 拒绝（实测踩过——"随机场景"在径向图上直接弹错误框）
+        if (deps.actions.loadDefaultScenario(deps.actions.currentMapKey())) {
+          ctl.dispatch({ type: 'SCENARIO_CHANGED', name: '随机场景', followCamDefault: bigWorld() });
+        }
         return;
       }
       try {
@@ -63,6 +70,7 @@ export function wireToolbar(
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const name = deps.actions.loadScenario(await res.json());
         if (name) ctl.dispatch({ type: 'SCENARIO_CHANGED', name, followCamDefault: bigWorld() });
+        else scenarioSelect.value = '';                    // 失败：回滚下拉（别停在"看起来已加载"）
       } catch (e) {
         alert(`场景加载失败: ${(e as Error).message}`);
       }

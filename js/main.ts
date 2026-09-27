@@ -8,6 +8,8 @@ import { ARCHIVE_TOPICS, recordFrom } from './sim/records.js';
 import { assembleBundle } from './headless/bundle.js';
 import { initScene, updateScene, resetSceneCache, frameSmart, followCar, setWorldExtent, applyBasemap, getBasemapAttribution } from './env/renderer.js';
 import { MAP_PRESETS, DEFAULT_MAP } from './env/mapDefinitions.js';
+import { SIM_UNITS_PER_METER } from './shared/dimensions.js';
+import type { RouteSource } from './ui/state.js';
 import { setupUI, populateMapDropdown } from './ui/index.js';
 import { ReplayController } from './replay.js';
 
@@ -58,7 +60,24 @@ function renderBasemapAttribution(): void {
   if (show) el.textContent = attr;
 }
 
-function applyScenario(json: unknown): string | null {
+/** 一次世界变化的"对外说明"：路线来源与摘要 + 给用户看的一行提示。
+ *  由运行期的 actions 转交给界面（**applyScenario 自己不能碰 `ui`**——它在模块初始化阶段就会被调用，
+ *  而 `const ui` 那时还没初始化，会踩 TDZ，见 js/test/ui/main-init-order.test.ts）。 */
+export interface WorldAnnounce {
+  routeInfo: { source: RouteSource; summary: string };
+  notice: string;
+}
+
+/** 路线摘要（给人读的一行）：声明里的"节点/弧长" + 实际长度 */
+function routeSummary(scenario: Scenario, lenPx: number | null): { source: RouteSource; summary: string } {
+  const r = scenario.route;
+  if (!r || lenPx === null || !Number.isFinite(lenPx)) return { source: 'none', summary: '无路线（车辆静止）' };
+  const km = (lenPx / SIM_UNITS_PER_METER / 1000).toFixed(2);
+  const what = r.fromNode !== undefined ? `节点 ${r.fromNode}→${r.toNode}` : `S=${r.startS}→${r.goalS}m`;
+  return { source: 'scenario', summary: `场景自带 · ${what} · ${km}km` };
+}
+
+function applyScenario(json: unknown, out?: WorldAnnounce): string | null {
   let scenario: Scenario;
   let built: ReturnType<typeof buildScenarioWorld>;
   try {
@@ -86,6 +105,11 @@ function applyScenario(json: unknown): string | null {
   frames.length = 0;   // 归档从本次场景加载起重新收集
   document.getElementById('hud-map')!.textContent = engine.mapDef.name;
   document.getElementById('hud-scenario')!.textContent = `${scenario.name}（种子 ${scenario.seed}）`;
+  if (out) {
+    out.routeInfo = routeSummary(scenario, built.route ? (built.route.length as unknown as number) : null);
+    out.notice = `已加载场景「${scenario.name}」：地点 → ${engine.mapDef.name}`
+      + (built.route ? `、路线 → ${out.routeInfo.summary.replace('场景自带 · ', '')}` : '（无路线：车辆静止）');
+  }
   const mapSelect = document.getElementById('map-dropdown') as HTMLSelectElement | null;
   if (mapSelect) mapSelect.value = scenario.map;
   return scenario.name;
@@ -129,15 +153,53 @@ const ui = setupUI({
     get routeState() { return engine.routeState; },
   },
   actions: {
-    loadScenario(json: unknown) { return applyScenario(json); },
-    loadDefaultScenario(map: string) { applyScenario(defaultScenario(map)); },
-    switchMap(name: string) {
+    loadScenario(json: unknown) {
+      const out = {} as WorldAnnounce;
+      const name = applyScenario(json, out);
+      if (!name) return null;
+      ui.setRouteInfo(out.routeInfo.source, out.routeInfo.summary);
+      ui.setNotice(out.notice);
+      return name;
+    },
+    loadDefaultScenario(map: string): boolean {
+      const out = {} as WorldAnnounce;
+      const name = applyScenario(defaultScenario(map), out);
+      if (!name) return false;
+      ui.setRouteInfo(out.routeInfo.source, out.routeInfo.summary);
+      ui.setNotice(out.notice);
+      return true;
+    },
+    /** 当前地图的**产物 key**（下拉回滚、"随机场景"都用它；显示名对合成地图是 Oval 之类，不能当 key） */
+    currentMapKey(): string { return currentScenario?.map ?? DEFAULT_MAP; },
+    /** 换地点：**丢弃当前路线**——路线用节点号/弧长表达，只对原地图有意义（硬套会报错或落错位置） */
+    switchMap(name: string): boolean {
       const map = MAP_PRESETS[name] ? name : DEFAULT_MAP;
       const base = currentScenario ?? defaultScenario(map);
-      applyScenario({ ...base, map });
+      const hadRoute = base.route !== undefined;
+      const { route: _dropped, ...rest } = base;          // 关键：不把旧路线的声明带过去
+      const out = {} as WorldAnnounce;
+      if (!applyScenario({ ...rest, map }, out)) return false;
+      out.routeInfo = { source: 'none', summary: '无路线（车辆静止）' };
+      out.notice = `已切换到「${engine.mapDef.name}」`
+        + (hadRoute ? '；原路线属于上一张地图，已清除 —— 要跑就点「手工设点」或选一个带路线的场景' : '');
+      ui.setRouteInfo(out.routeInfo.source, out.routeInfo.summary);
+      ui.setNotice(out.notice);
+      return true;
+    },
+    /** 清除路线：车辆随之保持静止（与 headless 的"无 route 不动"一致） */
+    clearRoute() {
+      engine.clearRoute();
+      ui.setRouteInfo('none', '无路线（车辆静止）');
+      ui.setNotice('已清除路线：车辆将保持静止（要恢复就重新加载场景，或点「手工设点」）');
     },
     exportRun,
-    setRoute(r, startIdx) { engine.setRoute(r, startIdx); },
+    setRoute(r, startIdx) {
+      engine.setRoute(r, startIdx);
+      // 手工点的路线（T / toolbar「路线」/ 侧栏「手工设点」）——来源标记为"手工"
+      const km = ((r.length as unknown as number) / SIM_UNITS_PER_METER / 1000).toFixed(2);
+      ui.setRouteInfo('manual', `手工设点 · ${km}km`);
+      ui.setNotice('');
+    },
     setLivePaused(paused: boolean) { debug.paused = paused; },
   },
 });

@@ -37,7 +37,14 @@ export interface UiState {
   /** 相机跟随车辆（toolbar / F 键）。默认随地图：长条大世界（OSM 高速）默认开，
    *  小世界（径向赛道，整图取景）默认关——见 SCENARIO_CHANGED 的 followCamDefault */
   followCam: boolean;
+  /** 路线来源 + 摘要（"场景自带 · 节点 2→93 · 2.93km" / "手工 · 1.9km" / "无路线（车辆静止）"） */
+  routeInfo: { source: RouteSource; summary: string };
+  /** 世界变化的一次性说明（切地点清除了路线 / 场景带来了什么）；空串 = 不显示 */
+  notice: string;
 }
+
+/** 路线来源：无 / 场景自带 / 用户手工点选。让"为什么在跑、为什么静止"可读。 */
+export type RouteSource = 'none' | 'scenario' | 'manual';
 
 export type UiEvent =
   | { type: 'TOGGLE_PAUSE' }
@@ -57,7 +64,9 @@ export type UiEvent =
   | { type: 'TOGGLE_FRENET_TICKS' }
   | { type: 'TOGGLE_LIDAR' }
   | { type: 'TOGGLE_BASEMAP' }
-  | { type: 'TOGGLE_FOLLOW_CAM' };
+  | { type: 'TOGGLE_FOLLOW_CAM' }
+  | { type: 'ROUTE_INFO'; source: RouteSource; summary: string }
+  | { type: 'NOTICE'; text: string };
 
 export const INITIAL_UI_STATE: UiState = {
   mode: 'LIVE',
@@ -71,6 +80,8 @@ export const INITIAL_UI_STATE: UiState = {
   speedUnit: 'kmh',
   /** 走廊可视化（默认关；回放模式无数据，不显示） */
   corridorVisible: false,
+  routeInfo: { source: 'none', summary: '无路线（车辆静止）' },
+  notice: '',
   /** Frenet 刻度（默认开） */
   frenetTicksVisible: true,
   /** LiDAR 射线（默认开） */
@@ -134,6 +145,11 @@ export function reduce(state: UiState, e: UiEvent): UiState {
       return { ...state, lidarVisible: !state.lidarVisible };
     case 'TOGGLE_BASEMAP':
       return { ...state, basemapVisible: !state.basemapVisible };
+    case 'ROUTE_INFO':
+      return state.routeInfo.source === e.source && state.routeInfo.summary === e.summary
+        ? state : { ...state, routeInfo: { source: e.source, summary: e.summary } };
+    case 'NOTICE':
+      return state.notice === e.text ? state : { ...state, notice: e.text };
     case 'TOGGLE_FOLLOW_CAM':
       return { ...state, followCam: !state.followCam };
   }

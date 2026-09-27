@@ -17,6 +17,7 @@ import {
 } from '../env/renderer/scene.js';
 import { panDelta } from './cameraKeys.js';
 import { UiController } from './controller.js';
+import type { RouteSource } from './state.js';
 import { wireToolbar } from './toolbar.js';
 import { wireRunPicker, setRunPickerOpen } from './runList.js';
 import { wireInteractions } from './interactions.js';
@@ -70,9 +71,13 @@ export interface UiDeps {
     /** 加载场景 JSON；成功返回场景名，失败（已 alert）返回 null */
     loadScenario(json: unknown): string | null;
     /** 当前地图的浏览器默认随机场景 */
-    loadDefaultScenario(map: string): void;
-    /** 保留当前场景配置，仅换地图 */
-    switchMap(name: string): void;
+    loadDefaultScenario(map: string): boolean;
+    /** 换地点（地图）：**清除当前路线**（节点号/弧长只对原地图有意义）。返回是否成功 */
+    switchMap(name: string): boolean;
+    /** 当前地图的**产物 key**（不是显示名）——下拉回滚与"随机场景"要用它 */
+    currentMapKey(): string;
+    /** 清除路线（车辆将保持静止） */
+    clearRoute(): void;
     exportRun(): void;
     setRoute(route: Route, startIdx: number): void;
     setLivePaused(paused: boolean): void;
@@ -86,6 +91,10 @@ export interface UiDeps {
 export function setupUI(deps: UiDeps): {
   tick(dt: number): void; isCorridorVisible(): boolean; isFrenetTicksVisible(): boolean;
   isLidarVisible(): boolean; isBasemapVisible(): boolean; isPaused(): boolean; isFollowCamEnabled(): boolean;
+  /** 告诉界面"当前路线是什么、从哪来"（摘要文本由 main 生成：它知道场景/地图/路线） */
+  setRouteInfo(source: RouteSource, summary: string): void;
+  /** 世界变化的一次性说明（切地点清除了什么 / 场景带来了什么）；传空串即清除 */
+  setNotice(text: string): void;
 } {
   const { canvas, camera, controls } = deps;
 
@@ -136,7 +145,18 @@ export function setupUI(deps: UiDeps): {
     onLidarVisible: (v) => { renderLidarButton(v); deps.replay.showLidar = v; deps.replay.requestRedraw(); },
     onBasemapVisible: (v) => { renderBasemapButton(v); },
     onFollowCam: (on) => { renderFollowCamButton(on); },
-    onRoutePickPhase: (ph) => renderToggleButton('btn-route', ph !== 'idle'),
+    onRoutePickPhase: (ph) => {
+      renderToggleButton('btn-route', ph !== 'idle');
+      document.getElementById('btn-route-pick')?.classList.toggle('active', ph !== 'idle');
+    },
+    onRouteInfo: (info) => {
+      const el = document.getElementById('route-source');
+      if (el) el.textContent = info.summary;      // 摘要文本由 main 提供（它知道场景/地图/路线）
+    },
+    onNotice: (text) => {
+      const el = document.getElementById('world-notice');
+      if (el) el.textContent = text;
+    },
     onSpeedUnit: (unit) => { display.speedUnit = unit; },
   }, () => deps.engine.routeState);
 
@@ -190,6 +210,13 @@ export function setupUI(deps: UiDeps): {
   });
   document.getElementById('btn-route')?.addEventListener('click', () => {
     controller.dispatch({ type: 'TOGGLE_ROUTE_SET' });
+  });
+  // 路线行：手工设点（与 toolbar「路线」/ T 同一动作）与清除（清掉后车辆保持静止）
+  document.getElementById('btn-route-pick')?.addEventListener('click', () => {
+    controller.dispatch({ type: 'TOGGLE_ROUTE_SET' });
+  });
+  document.getElementById('btn-route-clear')?.addEventListener('click', () => {
+    deps.actions.clearRoute();
   });
 
   // 点击 HUD 速度 → 切换 km/h ↔ m/s（渲染层下一帧自动按新单位显示）
@@ -333,6 +360,8 @@ export function setupUI(deps: UiDeps): {
   controller.refresh();   // 初始化：同步暂停按钮/回放栏/inspect/提示条
 
   return {
+    setRouteInfo(source, summary) { controller.dispatch({ type: 'ROUTE_INFO', source, summary }); },
+    setNotice(text) { controller.dispatch({ type: 'NOTICE', text }); },
     tick(dt: number) {
       if (controller.state.debugOpen) updateInspectPanel(dt);
       renderPauseButton();   // 回放播放态可能由 Space/回放栏改变 → 每帧对齐图标（变化才写 DOM）

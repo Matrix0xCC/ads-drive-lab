@@ -82,7 +82,17 @@ requestAnimationFrame 主循环 (~60Hz)
 3. **传感器驱动** — 规划器只信任 LiDAR 做碰撞检测，禁止直接使用障碍物列表（真实系统中规划器不知道障碍物绝对坐标）
 4. **量纲安全** — `dimensions.ts` 品牌类型（Px, Radians, PxPerSec, DimLess...）编译时防量纲错误，编译后完全擦除。工厂函数（`px()`, `m()`, `rad()`...）是唯一 unsafe cast 点，只允许在模块边界使用
 5. **单位系统** — 所有物理量配置用 `m()` / `mps()` / `mps2()` 书写（`SIM_UNITS_PER_METER = 4`，改比例尺只需改这一个常量），不要硬编码 px 值
-6. **UI 状态单一来源** — 所有 UI 行为经 `ui/state.ts` 的纯函数 reduce 驱动，DOM 只是状态的渲染投影；`ui/controller.ts` 是"状态变化 → 副作用"的唯一边界；main 只通过 `UiDeps.actions` 改世界。布局：左侧菜单栏（分区**常展开**：世界/数据）+ **画布左缘纵向 toolbar**（暂停/视角/**跟随**/走廊/刻度/射线/路线，图标+两字标签，开关类高亮=开）+ 画布右上「信息」面板（详细遥测）+ 右下「调试」面板（Inspect，`infoOpen`/`debugOpen` 可折叠）+ 画布左上速度/状态精简行。快捷键：Space 暂停/回放播放、Esc 取消选点/退出回放、R 视角、F 相机跟随、I 折叠「调试」面板、C 走廊可视化、G Frenet 刻度、L LiDAR 射线、T 设路线、WASD 平移视角
+6. **UI 状态单一来源** — 所有 UI 行为经 `ui/state.ts` 的纯函数 reduce 驱动，DOM 只是状态的渲染投影；`ui/controller.ts` 是"状态变化 → 副作用"的唯一边界；main 只通过 `UiDeps.actions` 改世界。
+   **世界菜单是三层（地点 / 场景 / 路线），别把它们混成同级**：
+   · **地点**（`#map-dropdown`）= 只换地理；**切换即丢弃当前路线**（路线用**节点序号**或**弧长**表达，都是地图专属量——
+     硬套会爆 `Invalid array length` 或产出带 undefined 路点的路线；见 `js/test/sim/scenario-map-switch.test.ts`）
+     + 一行提示说明清了什么；失败**回滚下拉**（`actions.currentMapKey()`），绝不"下拉已跳、世界没变"。
+   · **场景**（`#scenario-dropdown`）= 一整个世界配方（地点+交通+路线，与 headless 同源）；加载后提示"地点 → X、路线 → Y"。
+     **"随机场景"必须传地图 key（下拉值）**，不能传 `engine.mapDef.name`（合成地图的 name 是显示名 `Oval`/`Tech Circuit`，
+     会被 `parseScenario` 拒绝 → 弹错误框；与底图 404 同一类"显示名当 key"的错，`world-menu.test.ts` 钉住）。
+   · **路线**（`#route-row`）= 来源（`场景自带` / `手工` / `无`）+ 摘要 + `[手工设点]`（= `T`）+ `[清除]`；
+     来源与摘要由 main 生成（`WorldAnnounce`）经 `ui.setRouteInfo/setNotice` 回填——**main 的 `applyScenario` 不许碰 `ui`**
+     （它在模块初始化阶段就被调用，会踩 TDZ；见 `js/test/ui/main-init-order.test.ts`）。布局：左侧菜单栏（分区**常展开**：世界/数据）+ **画布左缘纵向 toolbar**（暂停/视角/**跟随**/走廊/刻度/射线/路线，图标+两字标签，开关类高亮=开）+ 画布右上「信息」面板（详细遥测）+ 右下「调试」面板（Inspect，`infoOpen`/`debugOpen` 可折叠）+ 画布左上速度/状态精简行。快捷键：Space 暂停/回放播放、Esc 取消选点/退出回放、R 视角、F 相机跟随、I 折叠「调试」面板、C 走廊可视化、G Frenet 刻度、L LiDAR 射线、T 设路线、WASD 平移视角
   + **画布左下罗盘**（导航软件式）：圆环上的 **N/E/S/W 可点**（转到该方位）、**点圆心回正北**、下方 **2D/3D**
   （2D = 垂直俯视 1.5°、3D = 斜视 33.7° = `atan2(0.6,0.9)`，与 `frameLocal` 默认取景一致），
   圆环下方显示**方位文字**（`正北` / `北偏东 23°` …）。快捷键 **`N` 正北、`2` 2D、`3` 3D**（不与既有键冲突）。

@@ -38,6 +38,18 @@
     }
     .sb-body button:hover { background: #444; }
     .sb-label { display: block; color: #888; font-size: 11px; margin: 6px 0 2px; }
+    /* 路线行：来源摘要 + 两个小按钮（手工设点 / 清除） */
+    #route-row { display: flex; align-items: center; gap: 4px; margin-top: 8px; flex-wrap: wrap; }
+    #route-source { flex: 1 1 100%; color: #bbb; font-size: 11px; line-height: 1.4; }
+    .sb-mini {
+      background: #333; color: #ddd; border: 1px solid #555; border-radius: 4px;
+      padding: 3px 7px; font-family: inherit; font-size: 11px; cursor: pointer;
+    }
+    .sb-mini:hover { background: #3d3d3d; }
+    .sb-mini.active { border-color: #22dd77; color: #7ef0ab; }
+    /* 世界变化提示：淡黄一行，说明"刚才改了什么"（切地点清了路线 / 场景带来什么） */
+    #world-notice { color: #e8c86a; font-size: 11px; line-height: 1.45; margin-top: 6px; }
+    #world-notice:empty { display: none; }
     .sb-body select {
       width: 100%; background: #333; color: #fff; border: 1px solid #555;
       padding: 5px 8px; font-family: inherit; font-size: 12px; border-radius: 4px;
@@ -225,17 +237,25 @@
       <!-- 世界 -->
       <div class="sb-head">世界</div>
       <div class="sb-body" id="section-world">
-        <label class="sb-label">地图</label>
-        <select id="map-dropdown">
+        <label class="sb-label" title="只换地理（路网/经纬度）。切换会**清除当前路线**——路线用节点号/弧长表达，只对原地图有意义">地点</label>
+        <select id="map-dropdown" title="只换地理。切换会清除当前路线（原路线的节点号/弧长属于上一张地图）">
           <option value="oval">Oval</option>
           <option value="hairpin">Hairpin</option>
           <option value="highway">Highway</option>
           <option value="tech_circuit">Tech Circuit</option>
         </select>
-        <label class="sb-label">场景（与 headless 同源）</label>
-        <select id="scenario-dropdown" title="加载场景（与 headless 同源）">
+        <label class="sb-label" title="场景 = 一整个世界配方（地点 + 交通 + 路线），与 headless 同源">场景</label>
+        <select id="scenario-dropdown" title="加载场景（与 headless 同源）：它会同时设定**地点、交通与路线**">
           <option value="">随机场景</option>
         </select>
+        <!-- 路线：来源 + 摘要 + 两个动作。让"能不能跑/为什么静止"一眼可见 -->
+        <div id="route-row">
+          <span id="route-source">无路线（车辆静止）</span>
+          <button id="btn-route-pick" class="sb-mini" title="手工点选起点 → 终点 (T)">手工设点</button>
+          <button id="btn-route-clear" class="sb-mini" title="清除路线（车辆将保持静止）">清除</button>
+        </div>
+        <!-- 世界变化的一次性说明（切地点清除了什么、场景带来了什么） -->
+        <div id="world-notice"></div>
       </div>
 
       <!-- 数据 -->
