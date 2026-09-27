@@ -22,6 +22,7 @@
 //     若哪天把场景根的镜像去掉，这里会**立刻**变成镜像（文字反读）——`world-convention.test.ts` 钉住了这条。
 //     （渲染层其它平面用 -π/2 是因为它们先用 `Vector2(x, -y)` 做了镜像，别混。）
 import * as THREE from 'three';
+import { m } from '../../shared/dimensions.js';
 import { tileWorldRect, type LatLon } from '../../shared/geo.js';
 
 /** `maps/<name>.tiles.json` 的 schema（由 `npm run tiles` 生成） */
@@ -116,6 +117,18 @@ export async function fetchTileManifest(mapKey: string): Promise<TileManifest | 
  * 加载底图（异步、逐张）。返回 handle 供显示/隐藏/释放；没有清单时返回 null。
  * @param mapName 地图名（找 `maps/<name>.tiles.json`）
  */
+/**
+ * 米制瓦片矩形 → **场景（仿真像素）**矩形。
+ *
+ * `planBasemapQuads` 给的是米（地理量纲，便于与地图产物/经纬度对照），而场景里的
+ * 路面/障碍/雷达都用仿真像素（`SIM_UNITS_PER_METER = 4 px/m`）。**漏了换算就是
+ * "地图比跑道小 4 倍"**（实测踩过：跑道很长、底图只有一小块）。抽成纯函数是为了让
+ * `js/test/renderer/basemap.test.ts` 能直接钉住这条（旧测试只查了米制地理框 → 漏掉了这个 bug）。
+ */
+export function quadToSceneRect(q: BasemapQuad): { cx: number; cy: number; width: number; height: number } {
+  return { cx: m(q.cx) as number, cy: m(q.cy) as number, width: m(q.width) as number, height: m(q.height) as number };
+}
+
 export async function loadBasemap(mapKey: string, opts?: { dim?: number }): Promise<BasemapHandle | null> {
   const manifest = await fetchTileManifest(mapKey);
   if (!manifest) {
@@ -129,21 +142,34 @@ export async function loadBasemap(mapKey: string, opts?: { dim?: number }): Prom
   const material = (tex: THREE.Texture) => new THREE.MeshBasicMaterial({
     map: tex,
     color: new THREE.Color(dim, dim, dim),          // 乘法压暗（同时削弱"瓦片路面 vs 仿真路面"的双线感）
-    transparent: true, opacity: 0.95,
     side: THREE.FrontSide,                            // 法线朝上，正面可见（背面镜像的坑见文件头）
-    depthWrite: false,                               // 让上层路面/射线正常绘制
+    // 【关键】瓦片**不参与深度比较**：它与地面只差 0.05 仿真像素（1.25cm），
+    // 而相机视距 250m~2km，深度缓冲精度远不足以分辨 → 深色地面（0x111111）会成片"穿"出来，
+    // 表现为地图上大片**黑色乱纹**（缩放会改变深度分布，所以缩放后尤其明显）。实测踩过。
+    // 改为 `depthTest = false` + `depthWrite = false` + `renderOrder = -1`：在路面/网格之前画，
+    // 由它们正常覆盖瓦片——顺序由 renderOrder 决定，不再依赖深度精度。
+    depthTest: false,
+    depthWrite: false,
+    // 必须是**不透明**材质：半透明会被排到所有不透明物体（路面/网格）之后 → 反过来盖住路面。
+    // 压暗由上面的 color 乘法完成，不靠透明度。
+    transparent: false, opacity: 1,
   });
   const stats = { loaded: 0, total: manifest.tiles.length, failed: 0 };
   const geometries: THREE.BufferGeometry[] = [];
 
   // 逐张加载：先建平面（几何与位置是纯数学，立即完成），纹理就绪后再挂材质
   for (const q of planBasemapQuads(manifest)) {
-    const rect = q;
+    // 【单位】`planBasemapQuads` 给的是**米**（地理量纲，便于与地图产物/经纬度对照），
+    // 而场景（路面/障碍/雷达…）用的是**仿真像素**（SIM_UNITS_PER_METER = 4 px/m）。
+    // 必须在这里换算：漏了就是"地图比跑道小 4 倍"（实测踩过：跑道很长、地图只有一小块）。
+    const rect = quadToSceneRect(q);
     const t = { z: q.z, x: q.x, y: q.y };
     const geom = new THREE.PlaneGeometry(rect.width, rect.height);
     const mesh = new THREE.Mesh(geom, new THREE.MeshBasicMaterial({ visible: false }));
     mesh.rotation.x = -Math.PI / 2;                 // 法线朝上（看正面 → 不镜像）；上方朝北靠 flipY=false，见文件头
     mesh.position.set(rect.cx, BASEMAP_Y, rect.cy);
+    // 【绘制顺序】地面 -2 → 瓦片 -1 → 路面/网格/障碍/雷达 0（理由见下面 material 的 depthTest 注释）
+    mesh.renderOrder = -1;
     mesh.userData = { type: 'basemap', label: `底图瓦片 ${t.z}/${t.x}/${t.y}`, width: rect.width, height: 0, length: `${manifest.provider}` };
     group.add(mesh);
     geometries.push(geom);

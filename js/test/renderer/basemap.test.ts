@@ -12,7 +12,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as THREE from 'three';
 import { createHash } from 'node:crypto';
-import { planBasemapQuads, fetchTileManifest, BASEMAP_Y, type TileManifest } from '../../env/renderer/basemap.js';
+import { planBasemapQuads, fetchTileManifest, quadToSceneRect, BASEMAP_Y, type TileManifest } from '../../env/renderer/basemap.js';
+import { SIM_UNITS_PER_METER } from '../../shared/dimensions.js';
 import { MAP_PRESETS } from '../../env/mapDefinitions.js';
 import { tileResolutionMetersPerPx, tileBounds } from '../../shared/geo.js';
 
@@ -113,7 +114,10 @@ describe('basemap：朝向（三条不变量，缺一条就会镜像/翻转）',
     };
   }
 
-  const [q] = planBasemapQuads(manifest);
+  // 走**真实代码路径**取场景矩形（含"米 → 仿真像素"换算）：朝向与单位两件事一起被覆盖。
+  // 注意场景根还会做一次 z 镜像（见 world-convention.test.ts）——镜像对所有内容一视同仁，
+  // 所以这里在"地理帧"里的相对断言（图象上方 z 更大）在镜像后依然成立。
+  const [q] = planBasemapQuads(manifest).map(quadToSceneRect);
 
   it('① 法线朝上 → 从上方看到的是**正面**（法线朝下会看到背面 → 整张图左右镜像，文字反读）', () => {
     const { normal } = place(q);
@@ -187,4 +191,35 @@ describe('basemap：查找 key 的约定', () => {
     }
     assert.ok(radialWithDisplayName > 0, '应当存在径向（合成）地图，它们正是"没有底图"的那一类');
   });
+});
+
+// ─────────────────────────────────────────────────────────────
+// 单位换算：米（地图产物）→ 仿真像素（场景）—— 实测踩过"地图比跑道小 4 倍"
+// 旧测试只查了米制地理框，所以完全没发现摆放时漏了 ×4；这里补上场景量纲这一环。
+// ─────────────────────────────────────────────────────────────
+describe('basemap：单位换算（米 → 仿真像素）', () => {
+  const quads = planBasemapQuads(manifest);
+  const bbox = (rs: { cx: number; cy: number; width: number; height: number }[]) => ({
+    w: Math.max(...rs.map(r => r.cx + r.width / 2)) - Math.min(...rs.map(r => r.cx - r.width / 2)),
+    h: Math.max(...rs.map(r => r.cy + r.height / 2)) - Math.min(...rs.map(r => r.cy - r.height / 2)),
+  });
+
+  it('quadToSceneRect 恰好是米 × SIM_UNITS_PER_METER（不是"看着差不多"）', () => {
+    const r0 = quadToSceneRect(quads[0]), q0 = quads[0];
+    assert.strictEqual(r0.cx, q0.cx * SIM_UNITS_PER_METER);
+    assert.strictEqual(r0.cy, q0.cy * SIM_UNITS_PER_METER);
+    assert.strictEqual(r0.width, q0.width * SIM_UNITS_PER_METER);
+    assert.strictEqual(r0.height, q0.height * SIM_UNITS_PER_METER);
+  });
+
+  it('瓦片覆盖在**仿真像素**下与地图世界尺寸相当（差 4 倍就是那个 bug）', () => {
+    assert.strictEqual(SIM_UNITS_PER_METER, 4, '本测试的判据依赖 4 px/m');
+    const scene = bbox(quads.map(quadToSceneRect));
+    const worldW = (map.world.wM as number) * SIM_UNITS_PER_METER;
+    const worldH = (map.world.hM as number) * SIM_UNITS_PER_METER;
+    const ratioW = scene.w / worldW, ratioH = scene.h / worldH;
+    assert.ok(ratioW > 0.9 && ratioW < 1.6, `底图覆盖宽 ${scene.w.toFixed(0)}px vs 世界 ${worldW.toFixed(0)}px（比值 ${ratioW.toFixed(2)}）——小于 0.9 说明忘了换算单位`);
+    assert.ok(ratioH > 0.9 && ratioH < 1.6, `底图覆盖高 ${scene.h.toFixed(0)}px vs 世界 ${worldH.toFixed(0)}px（比值 ${ratioH.toFixed(2)}）`);
+  });
+
 });

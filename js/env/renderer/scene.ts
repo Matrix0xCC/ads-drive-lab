@@ -119,7 +119,10 @@ export function setWorldExtent(scene: THREE.Scene, worldW: number, worldH: numbe
     new THREE.MeshStandardMaterial({ color: 0x111111 }),
   );
   _ground.rotation.x = -Math.PI / 2;
-  _ground.position.set(cx, -0.1, cz);
+  // 【分层与绘制顺序】地面放得足够低（层间距要给深度精度留余量，见 basemap.ts 的 depthTest 说明），
+  // 并**最先绘制**（renderOrder 小于底图的 -1）→ 底图可以"不比深度"地覆在它上面。
+  _ground.position.set(cx, -5, cz);
+  _ground.renderOrder = -2;
   scene.add(_ground);
   _grid = new THREE.GridHelper(Math.max(2000, Math.max(worldW, worldH) * 2), 40, 0x333333, 0x222222);
   _grid.position.set(cx, 0, cz);
