@@ -9,6 +9,7 @@ import * as THREE from 'three';
 import { UiController } from './controller.js';
 import type { UiDeps } from './index.js';
 import { buildNetworkRoute, findRoute, findClosestPoint } from '../algo/routePlanner.js';
+import { worldZToSim } from '../env/renderer/scene.js';
 import { createRoute } from '../shared/types.js';
 import { px } from '../shared/dimensions.js';
 
@@ -27,7 +28,8 @@ export function wireInteractions(deps: UiDeps, ctl: UiController): void {
     const target = new THREE.Vector3();
     raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), target);
     if (!target) return null;
-    return findClosestPoint(target.x, target.z, pickPoints());
+    // 世界 z → 仿真 y（世界是场景镜像过的：北 = −Z，见 env/renderer/scene.ts 文件头）
+    return findClosestPoint(target.x, worldZToSim(target.z), pickPoints());
   }
 
   /** 拾取空间：**路网地图吸附到节点**（路由的端点就是节点），链式地图吸附到中心线采样点 */
