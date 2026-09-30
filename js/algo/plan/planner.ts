@@ -255,9 +255,45 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
   // 旧写法是 `min(全部射线距离)/2`：相邻车道/侧后方的命中也会限速 —— 旁边一辆车超车就把巡航目标
   // 钉到 17.5m/s（用户实测截图）。感知没给 hitS/hitL 时（老归档、合成扫描）退回旧口径，保证兼容。
   const laneCenters = (track.laneCenters ?? null) as number[] | null;
-  const laneGapAhead = inLaneGapAhead(lidarScan, fl.s as number, fl.l as number,
-    laneCenters ?? undefined, (track.laneWidth ?? m(3.75)) as number);
-  const minObsDist = laneGapAhead !== null ? laneGapAhead : Math.min(...lidarScan.distances);
+  const laneWidthU = (track.laneWidth ?? m(3.75)) as number;
+  const myLaneCenter = (laneCenters && laneCenters.length
+    ? laneCenters.reduce((best, c) => (Math.abs(c - (fl.l as number)) < Math.abs(best - (fl.l as number)) ? c : best), laneCenters[0])
+    : (track.laneOffset ?? 0)) as number;
+  // 车道带余量：只留 0.25m（兜住"骑线"的物体）。**不能给大**：单条射线的 Frenet 投影有 ~1m 级
+  // 外偏，余量 0.6m 会让带变成 2.475m ⇒ 相邻车道车辆的一批弱检测（实测横向差 2.4~2.5m）落进带内
+  // ⇒ 巡航目标被压到 ~24m/s ✗（用户实测"无法超车"的残余部分）。
+  const laneHalfU = laneWidthU / 2 + (m(0.25) as number);
+  // 【车道归属：优先用物体层，射线版只作后备】
+  // 为什么：**单条射线的 Frenet 投影有 ~1m 级外偏**（实测左侧相邻车道的车，近侧面应在 −2.75m，
+  // 投影却给出 −1.77m ⇒ 落进我这条车道的带内）⇒ 被当成"我前方 24m 有障碍" ⇒ 巡航目标钉到
+  // 17.5m/s ✗ —— 用户实测的"把别的车道的车当危险障碍、一直无法超车"就是这个。
+  // 物体层的 `l` 是**簇内均值**，抗单点噪声；而且它只包含真物体（不是每条射线各自判断）。
+  const trackGapAhead = (() => {
+    let best: number | null = null;
+    for (const t of getTracks()) {
+      if (!t.confirmed) continue;
+      let gap = t.s - (fl.s as number);
+      if (!routeActive && gap < -(frenetRef.totalS as number) / 2) gap += frenetRef.totalS as number;
+      if (gap <= 0) continue;
+      if (Math.abs(t.l - myLaneCenter) > laneHalfU) continue;      // 不在我这条车道
+      if (best === null || gap < best) best = gap;
+    }
+    return best;
+  })();
+  // 【有物体层数据就以它为准，**不退回射线版**】退回会立刻把问题带回来：射线版因为 ~1m 的投影外偏
+  // 会把相邻车道的车算成"本车道前方障碍"（实测退回后巡航目标仍被压到 18m/s ✗）。
+  // 射线版只服务"没有物体层"的场景：老归档、以及手工构造的合成扫描（单测用）。
+  const tracks = getTracks().filter(t => t.confirmed);
+  const laneGapAhead = tracks.length > 0
+    ? trackGapAhead
+    : inLaneGapAhead(lidarScan, fl.s as number, fl.l as number, laneCenters ?? undefined, laneWidthU);
+  // 【null 的含义取决于有没有物体层】
+  //  · 有物体层：null = "**我这条车道**前方没有障碍" ⇒ 不该再看全视野的最近射线
+  //    （那里面全是相邻车道的车 ⇒ 又会把巡航目标钉到 17.5 ✗，用户实测的"无法超车"就是这个）
+  //  · 没有物体层（老归档/合成扫描）：null = "射线里没找到本车道命中" ⇒ 退回旧口径（全视野最近）
+  const minObsDist = tracks.length > 0
+    ? (laneGapAhead ?? Infinity)
+    : (laneGapAhead !== null ? laneGapAhead : Math.min(...lidarScan.distances));
   let targetV = Math.min(mps(35) as number, Math.max(mps(17.5) as number, minObsDist / 2));
   // 地图限速（OSM maxspeed → vCap）：**语义来自地图**，与"前方障碍限速"取最小。
   // 位置必须在 17.5m/s 下限**之后**——地图限速是硬上限，低限速图（60km/h=16.7m/s）
