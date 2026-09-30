@@ -88,10 +88,14 @@ export function createTraffic(o: TrafficOptions): TrafficSystem {
   // 每车道一个固定速度：**按 |l|（离中心线的距离）排序**，越靠外侧越慢（"慢车靠外"的直觉）。
   // 不用车道下标排序：`laneCentersOf` 的左右符号约定不必让这里依赖（|l| 是稳的）。
   const maxAbsL = Math.max(...laneCenters.map(v => Math.abs(v)), 1e-9);
+  // 【量纲·踩过的坑】`o.speedLimit` 是**仿真单位（px/s）**——`TrackGeometry.speedLimitMps` 这个名字
+  // 有误导性，但它存的就是 px/s（规划器也一直这么用：G4 上是 133.33 px/s = 33.3m/s = 120km/h ✓）。
+  // 曾经这里写成 `mps((speedLimit/4)·t)`：对一个已经 px/s 的输入又乘了一次 4 ✗ ⇒ 车流实际以
+  // **60~93 m/s（216~335km/h）**飞驰，并从后面撞自车（用户实测反馈 ✓）。现在直接用倍率缩放。
   const laneSpeeds = laneCenters.map((lc) => {
     const outer = Math.abs(lc) / maxAbsL;                    // 1 = 最外侧、0 = 中心线
     const t = fHi - (fHi - fLo) * outer;
-    return mps(((o.speedLimit as number) / 4) * t) as PxPerSec;
+    return ((o.speedLimit as number) * t) as PxPerSec;
   });
 
   const vehicles: Vehicle[] = (o.initialVehicles ?? []).map(v => {
@@ -263,7 +267,8 @@ export function buildTrafficFor(
   return createTraffic({
     ref, length: px(length), closed,
     laneCenters: centers.map(c => px(c) as number),
-    speedLimit: mps(track.speedLimitMps ?? 25) as PxPerSec,
+    // 已是 px/s（见 createTraffic 里的量纲说明）；缺省 25m/s
+  speedLimit: (track.speedLimitMps ?? (mps(25) as number)) as PxPerSec,
     config: cfg, rng,
   });
 }

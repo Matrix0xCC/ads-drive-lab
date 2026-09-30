@@ -6,7 +6,7 @@
 //   ③ 同车道同速 + 等间距 → 永不追尾（方案 A 的核心取巧，也是它的边界）
 import { describe, it } from 'node:test';
 import assert from 'node:assert';
-import { createTraffic } from '../../env/traffic.js';
+import { createTraffic, buildTrafficFor } from '../../env/traffic.js';
 import { buildFrenetReference, frenetToCartesian, cartesianToFrenet } from '../../algo/plan/frenet.js';
 import { createRng, deriveSeed } from '../../shared/rng.js';
 import { px, m, mps, mps2, Px } from '../../shared/dimensions.js';
@@ -218,5 +218,34 @@ describe('交通流：车道横向口径自洽（与感知/规划同一套 Frene
       assert.ok(Math.abs((back.l as number) - lc) < 1,
         `车道 l=${(lc / 4).toFixed(2)}m 往返后变成 ${((back.l as number) / 4).toFixed(2)}m（口径不一致）`);
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────
+// 量纲回归：**由地图（TrackGeometry）建车流时，速度必须是米制的合理值**
+// ------------------------------------------------------------
+// 踩过的坑：`TrackGeometry.speedLimitMps` 这个名字有误导性——它存的是**仿真单位 px/s**
+// （G4 上是 133.33，规划器也一直按 px/s 用 ✓）。而车流装配曾经把它再当 m/s 换算一次
+// ⇒ 车流实际以 60~93 m/s（216~335km/h）飞驰，并从后面撞自车（用户实测反馈）。
+// 这条测试走**真实调用路径**（buildTrafficFor），用车流内部的 speed 断言米制速度，
+// 而不是拿测试自己造的 mps() 输入——后者恰好把两次换算抵消了，所以旧测试全绿也漏掉了这个 bug ✗。
+describe('交通流：由地图装配时的速度量纲（回归）', () => {
+  it('G4 限速 133.33（px/s = 120km/h）→ 车流速度落在 15~23.3 m/s', () => {
+    const ref = buildFrenetReference([{ x: px(0), y: px(0) }, { x: px(0), y: L }], false);
+    const t = buildTrafficFor(
+      { centerPoints: [{ x: px(0), y: px(0) }, { x: px(0), y: L }], closed: false,
+        halfWidth: m(5.6), laneWidth: m(3.75), speedLimitMps: mps(33.3) as number },
+      null,
+      { densityPerKm: 8, lanes: 3, speedFactorRange: [0.45, 0.7] },
+      7,
+    );
+    assert.ok(t, '应当建出车流');
+    const speeds = t!.vehicles().map(v => v.speed / 4);
+    assert.ok(speeds.length > 0);
+    for (const v of speeds) {
+      assert.ok(v >= 14 && v <= 24,
+        `车流速度必须是米制合理值（实测 ${v.toFixed(1)}m/s；量纲 bug 时是 60~93m/s）`);
+    }
+    assert.ok(Math.max(...speeds) > 20, '最快车道应接近 0.7×限速 ≈ 23m/s');
   });
 });
