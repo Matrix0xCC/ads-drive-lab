@@ -138,6 +138,9 @@ export function solvePathLayer(o: {
   /** 【A 方案】物体层给出的**已确认**轨迹（Frenet；px / px·s⁻¹）。有速度的物体用更小的侧向裕度
    *  （政策见 margin.ts 的 MARGIN_MOVING_EXTRA）——"超越/被超越"本来就是贴着过去的。 */
   objects?: { s: number; l: number; width: number; length: number; vS: number; vL: number }[];
+  /** 车道中心（px；缺省 → laneOffset）与车道宽（px）：判"物体在不在我这条车道"用 */
+  laneCenters?: number[];
+  laneWidth?: number;
   prevTargetL: number | null;
   /** 路线总弧长（开环）；传入后走廊视程截到路线剩余——mission 之外的障碍
    *  不参与规划（"路线终点之外"不是车要去的地方）。闭环（巡游）不传。 */
@@ -231,18 +234,37 @@ export function solvePathLayer(o: {
   // 【A 方案】移动物体的 Frenet 包围盒 + 它们用的膨胀量。判据：物体层说它在动（|v| > 1.5m/s）；
   // 静止/未知一律按静态障碍处理（保守）。
   const MOVING_MIN_V = mps(1.5) as number;
+  // 我这条车道的中心/半宽（判"物体在不在我车道"）
+  const myLaneCenter = (() => {
+    const lc = o.laneCenters;
+    if (!lc || lc.length === 0) return o.laneOffset as number;
+    let c = lc[0];
+    for (const v of lc) if (Math.abs(v - (o.l0 as number)) < Math.abs(c - (o.l0 as number))) c = v;
+    return c;
+  })();
+  const myLaneHalf = ((o.laneWidth ?? m(3.75)) as number) / 2;
   const movingBoxes = (MARGIN_MOVING_ENABLED ? (o.objects ?? []) : [])
     .filter(ob => Math.hypot(ob.vS, ob.vL) > MOVING_MIN_V)
-    .map(ob => ({
-      s1: ob.s - ob.length / 2 - (m(0.5) as number),
-      s2: ob.s + ob.length / 2 + (m(0.5) as number),
-      l1: ob.l - ob.width / 2 - (m(0.5) as number),
-      l2: ob.l + ob.width / 2 + (m(0.5) as number),
-    }));
+    .map(ob => {
+      // 【用户的硬要求】不在我这条车道、且**没有朝我这边动**的物体 ⇒ 它的阻塞带不许进我车道。
+      // "在我车道上"按物体中心判（±半车道 + 0.5m 余量）；"朝我这边动"看横向速度分量 vL ✓
+      // ⇒ **切入的车保留完整裕度**（安全不受影响 ✓），旁边同向行驶的车不再让我减速 ✓。
+      const inMyLane = Math.abs(ob.l - myLaneCenter) <= myLaneHalf + (m(0.5) as number);
+      const towardMe = Math.sign(ob.vL) === Math.sign(myLaneCenter - ob.l) && Math.abs(ob.vL) > (mps(0.5) as number);
+      return {
+        s1: ob.s - ob.length / 2 - (m(0.5) as number),
+        s2: ob.s + ob.length / 2 + (m(0.5) as number),
+        l1: ob.l - ob.width / 2 - (m(0.5) as number),
+        l2: ob.l + ob.width / 2 + (m(0.5) as number),
+        centerL: ob.l,
+        mayIntrude: inMyLane || towardMe,
+      };
+    });
   const mkCorridor = (extra: number, steps = Math.round(corridorHorizon / stepU), useCoverage = true) => buildCorridor({
     ref: o.ref, s0: o.s0, hits, hitSegs,
     inflate: halfW + extra, inflateLow: halfW + extra + (m(2.0) as number),
     moving: movingBoxes, movingInflate: halfW + (MARGIN_MOVING_EXTRA as number),
+    myLaneCenter, myLaneHalf,
     lMax: L_MAX, lMaxAt, horizon: corridorHorizon, steps,
     windowRel: COMMIT_WINDOW as number,
     coverage: useCoverage ? coverage : undefined,

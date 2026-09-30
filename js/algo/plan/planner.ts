@@ -345,6 +345,8 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
       laneOffset, prevTargetL: _prevBestTargetL,
       // 【A 方案】物体层（已确认轨迹）交给路径层：有速度的物体用更小的侧向裕度
       objects: getTracks().filter(t => t.confirmed).map(t => ({ s: t.s, l: t.l, width: t.width, length: t.length, vS: t.vS, vL: t.vL })),
+      laneCenters: laneCenters ?? undefined,
+      laneWidth: laneWidthU,
       sEnd: routeActive ? (frenetRef.totalS as number) : undefined,
       trackHalfWidth: snapshot.track.halfWidth,     // 规划域随地图半宽（OSM 3 车道比径向图窄）
       halfWidthAt: halfWidthAtFn(track, route),     // 逐段：匝道窄、主路宽

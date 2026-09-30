@@ -107,8 +107,20 @@ export function buildCorridor(o: {
   inflate: number; inflateLow: number;
   /** 【A 方案】**移动**物体的 Frenet 包围盒（px）。落在盒内的命中点用小裕度 `movingInflate`，
    *  其余（静态障碍/未知）用 inflate。政策见 margin.ts 的 MARGIN_MOVING_EXTRA。 */
-  moving?: { s1: number; s2: number; l1: number; l2: number }[];
+  moving?: {
+    s1: number; s2: number; l1: number; l2: number;
+    /** 物体中心横向位置（px） */
+    centerL: number;
+    /** 该物体**允不允许**把阻塞带伸进我这条车道：
+     *  false = 不在我车道上、也没有朝我这边动 ⇒ 膨胀不得越过我车道边界
+     *          （用户要求："不应该为相邻车道的车减速"）；
+     *  true  = 在我车道上或正在切入 ⇒ 完整裕度 */
+    mayIntrude: boolean;
+  }[];
   movingInflate?: number;
+  /** 我这条车道的中心与半宽（px）：配合 moving[].mayIntrude 划"不许越过的边界" */
+  myLaneCenter?: number;
+  myLaneHalf?: number;
   lMax: number; horizon: number; steps: number; windowRel: number;
   /** 可行驶域随 s 变化（逐段道路属性）：1 车道匝道的域比 4 车道主路窄得多。
    *  给了就**逐站**取域（走廊本来就是逐站求自由补集，接入点天然）；缺省用 lMax 常量。 */
@@ -120,27 +132,47 @@ export function buildCorridor(o: {
   interface Prim { s1: number; s2: number; l1: number; l2: number; infl: number }
   const prims: Prim[] = [];
   // 命中点是否落在某个**移动**物体的包围盒里（A 方案：移动物体用更小的侧向裕度）
-  const inMoving = (s: number, l: number): boolean => {
+  const matchMoving = (s: number, l: number) => {
     const mv = o.moving;
-    if (!mv || !mv.length) return false;
-    for (const b of mv) if (s >= b.s1 && s <= b.s2 && l >= b.l1 && l <= b.l2) return true;
-    return false;
+    if (!mv || !mv.length) return null;
+    for (const b of mv) if (s >= b.s1 && s <= b.s2 && l >= b.l1 && l <= b.l2) return b;
+    return null;
+  };
+  // 【用户的硬要求："不应该为相邻车道的车减速"的实现】
+  // 命中点落在"不许侵入我车道"的移动物体里时（不在我车道 + 没有朝我这边动），把它的横向位置
+  // **朝远离我车道的一侧**推到"我车道边界 + 膨胀半径"之外：
+  //     |l − myLaneCenter| ≥ myLaneHalf + infl
+  // ⇒ 它的阻塞带恰好**停在我车道边界上**（我这条车道保持可通行 ✓），
+  //   而它**自己那条车道**仍被完整阻塞 ✓（想变道进它那条车道照样被拦住 ✓）。
+  // 方向单调：只会把阻塞推离我车道 ⇒ **不可能削弱我这条车道的安全** ✓。
+  // 正在切入我车道的物体（mayIntrude=true）不走这条 ⇒ 保留完整裕度 ✓。
+  const clampAwayFromMyLane = (s: number, l: number): number => {
+    const b = matchMoving(s, l);
+    if (!b || b.mayIntrude === undefined || b.mayIntrude) return l;
+    if (o.myLaneCenter === undefined || o.myLaneHalf === undefined) return l;
+    const infl = (o.movingInflate ?? o.inflate) as number;
+    const minAbs = (o.myLaneHalf as number) + infl;
+    const rel = l - (o.myLaneCenter as number);
+    const sgn = rel !== 0 ? Math.sign(rel) : (b.centerL >= (o.myLaneCenter as number) ? 1 : -1);
+    return (o.myLaneCenter as number) + sgn * Math.max(Math.abs(rel), minAbs);
   };
   const inflOf = (s: number, l: number, low: boolean): number => {
-    if (inMoving(s, l)) return (o.movingInflate ?? o.inflate) + (low ? ((o.inflateLow as number) - (o.inflate as number)) : 0);
+    if (matchMoving(s, l)) return (o.movingInflate ?? o.inflate) + (low ? ((o.inflateLow as number) - (o.inflate as number)) : 0);
     return low ? o.inflateLow : o.inflate;
   };
   for (const h of o.hits) {
-    const fl = projectToRef(h.x, h.y, o.ref);
-    prims.push({ s1: fl.s, s2: fl.s, l1: fl.l, l2: fl.l, infl: inflOf(fl.s, fl.l, h.low) });
+    const f0 = projectToRef(h.x, h.y, o.ref);
+    const l0 = clampAwayFromMyLane(f0.s, f0.l);
+    prims.push({ s1: f0.s, s2: f0.s, l1: l0, l2: l0, infl: inflOf(f0.s, l0, h.low) });
   }
   for (const g of o.hitSegs) {
-    const fa = projectToRef(g.ax, g.ay, o.ref);
-    const fb = projectToRef(g.bx, g.by, o.ref);
-    const sMid = (fa.s + fb.s) / 2, lMid = (fa.l + fb.l) / 2;
+    const f0 = projectToRef(g.ax, g.ay, o.ref);
+    const f1 = projectToRef(g.bx, g.by, o.ref);
+    const la = clampAwayFromMyLane(f0.s, f0.l), lb = clampAwayFromMyLane(f1.s, f1.l);
+    const sMid = (f0.s + f1.s) / 2, lMid = (la + lb) / 2;
     prims.push({
-      s1: Math.min(fa.s, fb.s), s2: Math.max(fa.s, fb.s),
-      l1: Math.min(fa.l, fb.l), l2: Math.max(fa.l, fb.l),
+      s1: Math.min(f0.s, f1.s), s2: Math.max(f0.s, f1.s),
+      l1: Math.min(la, lb), l2: Math.max(la, lb),
       infl: inflOf(sMid, lMid, g.low),
     });
   }
