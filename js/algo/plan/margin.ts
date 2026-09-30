@@ -49,6 +49,9 @@ export const MARGIN_MAX = 1.2;
  */
 export const MARGIN_MOVING_EXTRA = m(0.6) as number;
 
+/** A 方案总开关（A/B 用）：关掉 = 移动物体也用静态障碍的裕度（等价于 A 之前的行为）。 */
+export const MARGIN_MOVING_ENABLED = true;
+
 export function marginFor(vMps: number): number {
   const v = Math.max(0, vMps);
   const last = MARGIN_TABLE[MARGIN_TABLE.length - 1];

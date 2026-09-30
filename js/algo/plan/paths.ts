@@ -26,7 +26,7 @@ import { solveQuintic } from './polynomial.js';
 import { frenetToCartesian } from './frenet.js';
 import { buildCorridor, deriveTargets, firstExit, coverageFromScan } from './corridor.js';
 import type { Corridor } from './corridor.js';
-import { marginFor, MARGIN_MOVING_EXTRA } from './margin.js';
+import { marginFor, MARGIN_MOVING_EXTRA, MARGIN_MOVING_ENABLED } from './margin.js';
 import { MAX_SENSOR_DIST } from '../perception.js';
 import { TRACK_HALF_WIDTH } from '../../env/track.js';
 import { boundsBufferFor } from '../../env/car.js';
@@ -231,7 +231,7 @@ export function solvePathLayer(o: {
   // 【A 方案】移动物体的 Frenet 包围盒 + 它们用的膨胀量。判据：物体层说它在动（|v| > 1.5m/s）；
   // 静止/未知一律按静态障碍处理（保守）。
   const MOVING_MIN_V = mps(1.5) as number;
-  const movingBoxes = (o.objects ?? [])
+  const movingBoxes = (MARGIN_MOVING_ENABLED ? (o.objects ?? []) : [])
     .filter(ob => Math.hypot(ob.vS, ob.vL) > MOVING_MIN_V)
     .map(ob => ({
       s1: ob.s - ob.length / 2 - (m(0.5) as number),
