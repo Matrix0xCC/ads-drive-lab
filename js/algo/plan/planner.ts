@@ -286,7 +286,9 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
   const tracks = getTracks().filter(t => t.confirmed);
   const laneGapAhead = tracks.length > 0
     ? trackGapAhead
-    : inLaneGapAhead(lidarScan, fl.s as number, fl.l as number, laneCenters ?? undefined, laneWidthU);
+    : inLaneGapAhead(lidarScan, fl.s as number, fl.l as number, laneCenters ?? undefined, laneWidthU,
+        // 近场交叉校验：只加约束（见 inlane.ts 的说明）
+        { x: car.x as number, y: car.y as number, angle: car.angle as number, halfWidth: (car.width as number) / 2 });
   // 【null 的含义取决于有没有物体层】
   //  · 有物体层：null = "**我这条车道**前方没有障碍" ⇒ 不该再看全视野的最近射线
   //    （那里面全是相邻车道的车 ⇒ 又会把巡航目标钉到 17.5 ✗，用户实测的"无法超车"就是这个）

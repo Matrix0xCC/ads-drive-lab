@@ -91,16 +91,49 @@ export function buildFrenetReference(centerPoints: Point2D[], closedLoop: boolea
 export function cartesianToFrenet(x: Px, y: Px, ref: FrenetReference): { s: number; l: Px; idx: number } {
   const nx = x as number;
   const ny = y as number;
-  let minDist = Infinity, bestIdx = 0;
-  for (let i = 0; i < ref.points.length; i++) {
-    const d = Math.hypot(nx - (ref.points[i].x as number), ny - (ref.points[i].y as number));
-    if (d < minDist) { minDist = d; bestIdx = i; }
+  const n = ref.points.length;
+
+  // 【逐**线段**投影 + 垂距】——这是本模块唯一的正确口径。
+  //
+  // 【踩过的坑（2026-09-27 幽灵刹车的根因）】旧实现先找**最近的顶点**，再把偏移投到**该顶点的法向量**上。
+  // 两个误差来源：① 最近的顶点未必在最近的位置上（Δs 可达点距的一半，G4 图重采样后 ~2.5m）；
+  // ② 用顶点法向量代替该处的切向法向量，弯道上进一步偏。
+  // 实测：68m 外的命中点横向偏差可达 **~1.2m** ⇒ 相邻车道的车被投影进我这条车道 ⇒ 物理走廊判
+  // 我这条车道过不去 ⇒ 提前急刹（用户实测的"幽灵刹车"）。近距离（12m）误差也有 0.2~0.7m。
+  //
+  // 【口径】与 frenetToCartesian 严格互逆：
+  //   t = clamp((p−a)·(b−a)/|b−a|², 0, 1)；q = a + t(b−a)；s = s_i + t·|b−a|
+  //   l = (p−q)·n(t)，其中 n(t) = normalize(lerp(n_i, n_{i+1}, t))（与反变换同一插值）
+  // ⇒ 往返误差只剩"线段对曲线的线性化"（几毫米级，见 frenet-project.test.ts）。
+  let bestD2 = Infinity, bestI = 0, bestT = 0;
+  const segs = ref.closedLoop ? n : n - 1;              // 闭环多一段"末点 → 首点"
+  for (let i = 0; i < segs; i++) {
+    const j = (i + 1) % n;
+    const ax = ref.points[i].x as number, ay = ref.points[i].y as number;
+    const bx = ref.points[j].x as number, by = ref.points[j].y as number;
+    const ex = bx - ax, ey = by - ay;
+    const len2 = ex * ex + ey * ey;
+    const t = len2 > 0 ? Math.max(0, Math.min(1, ((nx - ax) * ex + (ny - ay) * ey) / len2)) : 0;
+    const qx = ax + t * ex, qy = ay + t * ey;
+    const d2 = (nx - qx) * (nx - qx) + (ny - qy) * (ny - qy);
+    if (d2 < bestD2) { bestD2 = d2; bestI = i; bestT = t; }
   }
-  const dx = nx - (ref.points[bestIdx].x as number);
-  const dy = ny - (ref.points[bestIdx].y as number);
-  // 在法向量上的投影 = 横向偏移量
-  const lv = dx * ref.normals[bestIdx].x + dy * ref.normals[bestIdx].y;
-  return { s: ref.s[bestIdx], l: px(lv), idx: bestIdx };
+
+  const i = bestI, j = (i + 1) % n;
+  const segLen = (ref.s[j] as number) - (ref.s[i] as number) || (ref.s[1] as number) - (ref.s[0] as number);
+  let sAt = (ref.s[i] as number) + bestT * segLen;
+  if (i === n - 1) sAt = (ref.s[n - 1] as number) + bestT * ((ref.totalS as number) - (ref.s[n - 1] as number));
+  if (ref.closedLoop && sAt >= (ref.totalS as number)) sAt -= ref.totalS as number;   // 闭环绕接
+
+  const rx = (ref.points[i].x as number) + bestT * ((ref.points[j].x as number) - (ref.points[i].x as number));
+  const ry = (ref.points[i].y as number) + bestT * ((ref.points[j].y as number) - (ref.points[i].y as number));
+  const nxi = ref.normals[i].x + bestT * (ref.normals[j].x - ref.normals[i].x);
+  const nyi = ref.normals[i].y + bestT * (ref.normals[j].y - ref.normals[i].y);
+  const nLen = Math.hypot(nxi, nyi) || 1;
+  const lv = ((nx - rx) * nxi + (ny - ry) * nyi) / nLen;      // 与反变换同一法向约定
+
+  // idx 语义保持与原实现一致：给"该点所在参考线段起点"的序号（供调用方做局部搜索/可视化）
+  return { s: sAt, l: px(lv), idx: Math.min(i, n - 2) };
 }
 
 /**

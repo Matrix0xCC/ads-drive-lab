@@ -19,6 +19,7 @@
 // 【找不到任何命中时返回 null】调用方据此走"没有前方障碍"的分支（与旧行为一致：不额外限速）。
 
 import { Px } from '../../shared/dimensions.js';
+import { NEAR_FIELD, NEAR_BAND_MARGIN, nearFieldBlocking } from './bodyFrame.js';
 
 /** 车道判据的横向余量（px）：吸收投影误差与"骑线"的物体 */
 export const LANE_BAND_MARGIN = 1.4;   // 0.35m × 4
@@ -33,11 +34,15 @@ export const LANE_BAND_MARGIN = 1.4;   // 0.35m × 4
  * @param laneWidth   车道宽（px）
  */
 export function inLaneGapAhead(
-  scan: { hitS?: number[]; hitL?: number[] },
+  scan: { hitS?: number[]; hitL?: number[]; angles?: number[]; distances?: number[] },
   selfS: number,
   selfL: number,
   laneCenters: number[] | undefined,
   laneWidth: number,
+  /** 【本体坐标系近场交叉校验】给了 pose 才对**近场**命中额外做一次本体坐标判断。
+   *  方向是**只加约束**：近场里落在我车头窄带内的命中，即使 Frenet 判它不在我车道，也算前方障碍 ✓
+   *  （地图车道宽/参考线有误差时兜住近处真障碍；永远不会解除已判定的阻塞 ⇒ 不可能削弱安全 ✓）。 */
+  carPose?: { x: number; y: number; angle: number; halfWidth: number },
 ): number | null {
   const hs = scan.hitS, hl = scan.hitL;
   if (!hs || !hl) return null;                       // 感知没给位置（老归档/合成扫描）→ 调用方退回旧口径
@@ -55,7 +60,16 @@ export function inLaneGapAhead(
   for (let i = 0; i < n; i++) {
     const s = hs[i], l = hl[i];
     if (!Number.isFinite(s) || !Number.isFinite(l)) continue;   // 无命中/命中的是路缘
-    if (Math.abs(l - center) > half) continue;                  // ① 不在我这条车道
+    // ① 在不在我这条车道：道路坐标系（Frenet）为主；近场再用**本体坐标系**交叉校验一次（只加约束）
+    let inLane = Math.abs(l - center) <= half;
+    if (!inLane && carPose && scan.angles && scan.distances) {
+      const d = scan.distances[i] as number, a = scan.angles[i] as number;
+      if (Number.isFinite(d) && d > 0) {
+        const hx = carPose.x + Math.cos(a) * d, hy = carPose.y + Math.sin(a) * d;
+        inLane = nearFieldBlocking(carPose, hx, hy, carPose.halfWidth, NEAR_BAND_MARGIN, NEAR_FIELD);
+      }
+    }
+    if (!inLane) continue;
     const gap = s - selfS;
     if (gap <= 0) continue;                                     // ② 在我后方（后向传感器加上之后靠它排除）
     if (best === null || gap < best) best = gap;
