@@ -55,8 +55,11 @@ export function solveSpeedLayer(o: {
   // 判据用"阻塞点与雷达最近障碍的距离是否吻合"：吻合说明阻塞来自这辆会走的车；
   // 不吻合说明前面还有**静态**障碍（它才该决定停车线）→ 走老逻辑。
   const lead = o.follow;
+  // 判据：路径层的阻塞点**不早于**前车位置（允许 8m 容差）——即"挡路的就是这辆会走的车"。
+  // 若阻塞点比前车更近，说明前面还有**静态**障碍（它才该决定停车线）→ 走老逻辑。
+  // （旧写法要求两者距离差 <8m，过紧：走廊的阻塞点未必正好落在前车处 ⇒ 跟驰几乎不触发 ✗）
   if (ahead && lead && lead.leadSpeed > (FOLLOW_MIN_LEAD_SPEED as number)
-      && Math.abs(ahead.sMin - lead.gap) < (m(8) as number)) {
+      && ahead.sMin >= lead.gap - (m(8) as number)) {
     const gap = Math.max(0, lead.gap);
     // 安全速度 = 前车速度 + (富余间距 / 时距)：间距 = 最小车距时恰好等于前车速度（稳态跟车），
     // 间距更大时允许略快地接近（受 targetV 上限约束），更小时自动降到前车速度之下（拉开距离）。

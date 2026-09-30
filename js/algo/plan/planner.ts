@@ -29,9 +29,10 @@ import { debug } from '../../shared/debug.js';
 import type { PlanningViz } from '../../shared/debug.js';
 import { solvePathLayer, lateralSpeedCap, PATH_STEPS, PATH_HORIZON, TIGHT_SPEED, A_LAT_MAX } from './paths.js';
 import type { PathLayerResult } from './paths.js';
-import { updateLead, FOLLOW_ENABLED } from './closing.js';
+import { FOLLOW_ENABLED } from './closing.js';
 import { solveSpeedLayer, STObstacle } from './speed.js';
 import { inLaneGapAhead } from './inlane.js';
+import { selectFollowTarget } from './lead.js';
 import { getTracks } from '../objects.js';
 import { nextTight, INITIAL_TIGHT, TightMemory } from './tight.js';
 import { refCurvatureAt } from './margin.js';
@@ -391,11 +392,27 @@ export function plan(snapshot: WorldSnapshot, lidarScan: LidarScan, route?: Rout
     }
   }
   // 前车估计（雷达时序差分；方案 C）——规划器仍然只信任 LiDAR，不读障碍物的速度真值
-  const lead = updateLead(lidarScan, { angle: car.angle as number, speed: car.speed as number }, snapshot.track);
-  // 跟驰默认关（见 closing.ts 的 FOLLOW_ENABLED：逐帧差分估计质量还不够，实测无改善）
-  const follow = (FOLLOW_ENABLED && lead.gap !== null && lead.leadSpeed !== null)
-    ? { gap: lead.gap, leadSpeed: lead.leadSpeed }
-    : undefined;
+  // ─── 前车（跟驰）目标：来自**物体层**（聚类 + 跟踪），不再用射线逐帧差分 ───
+  // 为什么换：射线差分的前提是"同一根射线打同一个物体"，而最近射线会在障碍之间跳变
+  // （实测前车速度 p50=76m/s、可信帧 1% —— 见 closing.ts 的负结果记录）。物体层按**预测位置**
+  // 关联同一物体，实测 1713 个速度样本、量级合理、逐帧最大跳变 6.75m/s。
+  //
+  // 【选取规则】我的车道上、前方、已确认的物体里**最近**的那个。
+  // 【安全门】只有"间距显著大于当前速度的制动距离"时才允许跟驰——否则一个错误的测速就可能
+  // 取消本该发生的刹车（射线差分时代最容易犯的错）。这一条让 C 不能削弱安全。
+  const follow = (() => {
+    if (!FOLLOW_ENABLED) return undefined;
+    const lc = track.laneCenters;
+    const myLane = (lc && lc.length
+      ? lc.reduce((best, c) => (Math.abs(c - (fl.l as number)) < Math.abs(best - (fl.l as number)) ? c : best), lc[0])
+      : (track.laneOffset ?? 0)) as number;
+    const halfLane = ((track.laneWidth ?? m(3.75)) as number) / 2 + (m(0.6) as number);
+    return selectFollowTarget(
+      getTracks().map(t => ({ s: t.s, l: t.l, vS: t.vS, confirmed: t.confirmed })),
+      fl.s as number, fl.l as number, car.speed as number, car.acceleration as number,
+      myLane, halfLane, !routeActive, frenetRef.totalS as number,
+    ) ?? undefined;
+  })();
 
   const stObstacles: STObstacle[] = stopEngaged
     ? [{ sMin: stopLineS - fl.s, sMax: stopLineS - fl.s + (STOP_ASSUMED_LEN as number), tMin: 0, tMax: Infinity }]
