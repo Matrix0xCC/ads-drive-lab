@@ -257,3 +257,7 @@ Apollo 3.0 文档给了动机的具体数字：**Radar 10ms / Camera 33ms / LiDA
 - **以为 Guardian/Monitor 是"大厂才需要"**：它们的本质是"**故障时不依赖主链路**"。
   在单进程模拟器里，等价物是"一个独立的、极简的检查器"——你已经有了雏形：
   `js/headless/detector.ts` + `js/headless/checks/`。
+
+---
+
+**相关篇章**：[总览与学习路线](./README.md) · [02 地图标准-lanelet2-opendrive](./02-地图标准-lanelet2-opendrive.md) · [03 责任划分-rss](./03-责任划分-rss.md) · [04 预测-数据集与基准](./04-预测-数据集与基准.md) · [05 多目标跟踪-MOT](./05-多目标跟踪-MOT.md) · [06 规划与控制-业界参考](./06-规划与控制-业界参考.md)
