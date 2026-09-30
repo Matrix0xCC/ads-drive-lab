@@ -1,8 +1,7 @@
 # 02 · 地图标准：Lanelet2 / OpenDRIVE（车道级地图与"车道归属"）
 
-> 读者画像：编程经验丰富、算法初学者（本仓库作者）。
-> 本文所有概念都尽量回连到你自己写过的代码：`js/mapgen/`、`js/env/track.ts`、
-> `js/algo/plan/frenet.ts`、`js/algo/plan/inlane.ts`、`js/algo/objects.ts`。
+> 读者画像：编程经验丰富、算法初学者（本仓库作者）。所有概念都尽量回连到你写过的代码：
+> `js/mapgen/`、`js/env/track.ts`、`js/algo/plan/frenet.ts`、`js/algo/plan/inlane.ts`、`js/algo/objects.ts`。
 
 ---
 
@@ -18,15 +17,15 @@
 - 路口里**谁接谁**（左转/直行/右转分别连到哪条车道）？**谁优先**？
 - 前方 60m 那辆车：它和我**同车道**，还是只是"横向离得近"？
 
-你在本仓库实测过的两个症状都指向这一层：
+你在本仓库实测过的两个症状都指向这一层：**幽灵刹车/无法超车**（`js/algo/plan/inlane.ts` 用
+"命中点的 |l| ≤ 车道半宽 + 0.35m"判断归属，`js/algo/plan/paths.ts` 的走廊又把邻车道车的膨胀
+算进我的车道 ⇒ 邻车道的车被我当成了**我这条车道上的障碍**）与**幽灵双胞胎**（物体层把一辆车
+裂成两个物体，其中一个碎片落在"我车道内"）。
 
-- **幽灵刹车 / 无法超车**：`js/algo/plan/inlane.ts` 用"命中点的 |l| ≤ 车道半宽 + 0.35m"
-  判断归属，`js/algo/plan/paths.ts` 的走廊又把邻车道车的膨胀算进我的车道 ⇒ 邻车道的车
-  被我当成了**我这条车道上的障碍**。
-- **幽灵双胞胎**：物体层把一辆车裂成两个物体，其中一个碎片落在"我车道内"。
-
-**根因**：地图没有"车道"，只有"离中心线多远"。归属判断只能从几何**反推**，而几何反推
-对投影误差、车道宽度误差、弯道都很敏感。
+**根因**：地图没有"车道"，只有"离中心线多远" —— 归属判断只能从几何**反推**，而反推对
+投影误差、车道宽度误差、弯道都很敏感。（好消息：投影口径已在 `frenet.ts` 修成"逐线段"，
+走廊也已加了一道"邻车道不阻塞我"的钳制 —— 但那仍是**几何近似**；本文讲的是把它变成
+**地图查询**的业界做法。）
 
 ---
 
@@ -37,8 +36,7 @@
 | Lanelet | 车道段 | Lanelet2 | **原子**车道段（沿它交通规则不变化）；由一条左边界 + 一条右边界 LineString 围成 |
 | Point / LineString / Polygon / Area | 点 / 折线 / 多边形 / 面 | Lanelet2 | 六原语中的几何基元；Area 表示"面状可行驶区域"（路口、停车场） |
 | RegulatoryElement | 规则元素 | Lanelet2 | 交通规则（限速、红绿灯、**路权**、交通标志）；被 Lanelet/Area **引用** |
-| left / right | 左邻 / 右邻（可变道） | Lanelet2 routing | 与该车道共享一条边界 ⇒ 允许变道 |
-| adjacent left / right | 左/右侧邻（**不可**变道） | Lanelet2 routing | 相邻但不共享边界（例如中间有实线/护栏） |
+| left / right（可变道）· adjacent left / right（相邻但**不可**变道） | 左/右邻 | Lanelet2 routing | 共享一条边界 ⇒ 可变道；只是相邻（实线/护栏）⇒ 不可变道 |
 | succeeding | 后继 | Lanelet2 routing | 沿行驶方向的下一个 Lanelet（不是变道关系） |
 | conflicting | 冲突 | Lanelet2 routing | 几何相交但无拓扑连接（路口里最常见）⇒ **责任划分的输入** |
 | LaneletMap / RoutingGraph / TrafficRules | 地图容器 / 路由图 / 交通规则 | Lanelet2 | 一个路由图只对**一种参与者**（车/行人/自行车）有效 |
@@ -158,22 +156,21 @@ l   = (p − q) · n(t)
   折线 —— 所以**点距越密、投影越准**，这是它和 OpenDRIVE 的取舍之一）。
 - 投影必须与反变换**严格互逆**（你的 `frenetToCartesian` 用同一套插值法向 ⇒ 往返误差只剩
   "线段对曲线的线性化"，mm 级；守卫测试：`js/test/plan/frenet-project.test.ts` 三条断言）。
-- **近场不要用 Frenet**：`js/algo/plan/bodyFrame.ts` 的车辆本体坐标系（x 前 / y 左）定义即精确，
-  不依赖地图与投影；它只用来**加约束**（近场窄带内的命中一律算障碍），**永不解除**已判定的阻塞。
-- 经纬度 ↔ 局部米：全走 `js/shared/geo.ts`（`latLonToLocalMeters` / `localMetersToLatLon` /
-  `scaleFactors`，含 1/cos φ 的纬度因子）；地图里 `geometry.origin` 是**投影原点**，
-  `geometry.originWorld` 才是**世界 (0,0) 的经纬度** —— 底图/瓦片/任何换算都用后者。
+- **近场不要用 Frenet**：`js/algo/plan/bodyFrame.ts` 的本体坐标系（x 前 / y 左）定义即精确、不依赖
+  地图与投影；它只用来**加约束**（近场窄带内的命中一律算障碍），**永不解除**已判定的阻塞。
+- 经纬度 ↔ 局部米：走 `js/shared/geo.ts`（`latLonToLocalMeters` / `scaleFactors`，含 1/cos φ）；
+  地图里 `geometry.origin` 是**投影原点**、`geometry.originWorld` 才是**世界 (0,0) 的经纬度**
+  —— 底图/瓦片/任何换算都用后者。
 
 ### 4.5 OpenDRIVE：车道编号与路口（最容易踩的符号约定）
 
 - 车道挂在**道路参考线**（reference line）上；`<laneSection s="0.0">` 按 s 切横断面。
-- **lane id**：中心车道 = `0`（**无宽度**，只放最内侧标线）；**正 id 在左（+t 方向）、负 id 在右（−t 方向）**；
-  编号从中心向外连续、无缺口。宽度是 s 的多项式
-  `<width sOffset="0.0" a="4.0" b="0.0" c="0.0" d="0.0"/>` ⇒ 逐段变宽是**天然**表达
-  （你的 `taperedHalfWidthAt` 是"30m 线性过渡"的简化版 ✓）。
-- 路口：`<connection connectingRoad="28" incomingRoad="4" contactPoint="start">` +
-  `<laneLink from="-3" to="1"/>` ⇒ **车道级**通路；连接道路是 OpenDRIVE 中**唯一允许路面重叠**的道路。
-- 路权：`<priority high="1" low="4"/>`，**只在没有信号灯/标志可推时才写**。
+- **lane id**：中心车道 = `0`（**无宽度**）；**正 id 在左（+t）、负 id 在右（−t）**，从中心向外连续无缺口；
+  宽度是 s 的多项式 `<width sOffset="0.0" a="4.0" …/>` ⇒ 逐段变宽天然表达（你的 `taperedHalfWidthAt`
+  是"30m 线性过渡"的简化版 ✓）。
+- 路口：`<connection connectingRoad inward…>` + `<laneLink from="-3" to="1"/>` ⇒ **车道级**通路；
+  连接道路是 OpenDRIVE 中**唯一允许路面重叠**的道路；路权用 `<priority high low>`，
+  **只在没有信号灯/标志可推时才写**。
 
 ### 4.6 Apollo：逐字段可直接抄的 schema
 
@@ -188,8 +185,7 @@ l   = (p − q) · n(t)
 | `central_curve` | 车道中心线（**参考轨迹**，不保证几何正中） | `centerPoints`（但你是**道路**中心线，不是每条车道） |
 | `left_boundary` / `right_boundary` | 左右边界（各自是 `Curve` + 边界类型 + `virtual` 标记） | 无（你只有整条路的 `outerBoundary`） |
 | `speed_limit` | 车道限速（**m/s**） | `AttrSpan.maxspeedKph`（**km/h**，你另存 `speedLimitMps` 时注意是 px/s！） |
-| `length` | 车道长度 | `attrSpans` 的 `s0/s1` |
-| `predecessor_id` / `successor_id` | 前后继车道 | `netEdges` + `buildNetworkRoute` |
+| `length` · `predecessor_id` / `successor_id` | 车道长度 · 前后继车道 | `attrSpans` 的 `s0/s1`；`netEdges` + `buildNetworkRoute` |
 | `left/right_neighbor_forward_lane_id` | **同向**左右邻 | 无 ⇒ 你的"邻车道"只能按 l 猜 |
 | `left/right_neighbor_reverse_lane_id` | **反向**左右邻 | 无 |
 | `junction_id` | 属于哪个路口 | 无 |
@@ -210,8 +206,7 @@ l   = (p − q) · n(t)
 | left / right / adjacent / succeeding / conflicting | 只有节点级可达性：`netNodes` / `netEdges`：[`../../js/env/track.ts`](../../js/env/track.ts) | **车道级**关系（尤其 `left/right` 与 `conflicting`） |
 | Matching（确定性/概率 + 规则过滤） | `inLaneGapAhead`（"点在带内"）：[`../../js/algo/plan/inlane.ts`](../../js/algo/plan/inlane.ts)；近场交叉校验：[`../../js/algo/plan/bodyFrame.ts`](../../js/algo/plan/bodyFrame.ts) | **物体框 vs 车道带**、**置信度/迟滞**、**协方差**（`js/algo/objects.ts` 目前无协方差） |
 | RegulatoryElement（限速/路权/信号） | 只有限速：`AttrSpan.maxspeedKph` + `attrsAtS` + `speedLimitMps`：[`../../js/env/track.ts`](../../js/env/track.ts) | **路权/红绿灯/停车标志**这类"规则"元素（你的收费站是写死的 `tollgates` 桩号） |
-| OpenDRIVE lane id 正负 | `laneCentersOf(halfW, laneWidth)`（**按 l 排序**，故意不引入左右符号）：[`../../js/env/track.ts`](../../js/env/track.ts) | 一旦要表达"左侧车道/对向车道"，就需要**显式 id 约定** |
-| OpenDRIVE `<width>` 多项式 | `taperedHalfWidthAt`（30m 过渡段）：[`../../js/env/track.ts`](../../js/env/track.ts) | 多项式精度（你用台阶+线性，够用） |
+| OpenDRIVE lane id 正负 + `<width>` 多项式 | `laneCentersOf(halfW, laneWidth)`（**按 l 排序**，故意不引入左右符号）+ `taperedHalfWidthAt`（30m 过渡段）：[`../../js/env/track.ts`](../../js/env/track.ts) | 车道**方向语义**（左/右/对向）需显式 id 约定；宽度用多项式（你用台阶+线性，够用） |
 | junction connecting roads / laneLink | `netNodes/netEdges` + `buildNetworkRoute`（Dijkstra）：[`../../js/algo/routePlanner.ts`](../../js/algo/routePlanner.ts) | **车道级**连接（左转/直行各连哪条车道）、路口内优先级 |
 | Apollo PNCJunction / Passage | 无 | 路口让行的语义输入（未来做"无保护左转"必备） |
 | Projector / 经纬度↔米 | `latLonToLocalMeters` / `scaleFactors`：[`../../js/shared/geo.ts`](../../js/shared/geo.ts)；OSM 侧投影：[`../../js/mapgen/osm.ts`](../../js/mapgen/osm.ts)（`projectOntoPath`） | 基本对齐 ✓（注意 `origin` 与 `originWorld` 别混） |
@@ -222,7 +217,9 @@ l   = (p − q) · n(t)
 
 ### 练习 A（推荐，3~4 小时）：把"车道归属"从"点在带内"升级成"框 vs 车道带"
 
-**目标**：让"邻车道的车"**不再**影响我这条车道的巡航目标 —— 你实测的幽灵刹车就是这个。
+**目标**：让"邻车道的车"**不再**影响我这条车道的巡航目标。仓库里已有第一版**几何近似**
+（走廊里的"邻车道不阻塞我"钳制 + `js/test/plan/neighbor-lane.test.ts` 两条验收），
+本练习要做的是它的一般化：**归属查询**本身，而不是在每个消费点各打一次补丁。
 
 1. 在 [`../../js/env/track.ts`](../../js/env/track.ts) 加 `laneBandsOf(halfWidth, laneWidth)`：
    返回每条车道的 `{ id, lMin, lMax, center }`（从最左到最右编号，**只用于归属，不引入左右驾驶语义**）。
@@ -238,15 +235,13 @@ l   = (p − q) · n(t)
 **可量化验收**：
 
 - `npx tsc && node --test dist/js/test/plan/lane-ownership.test.js` 全绿；
-- `npm run sim -- --scenario scenarios/bj-g4-dujiakan-traffic.json` 与当前基线**同种子**对比：
-  用你自己的硬减速判据（0.5s 内掉 >1.5m/s）统计采样点，**不高于**基线（预期下降）；
-- 全量 `npm test` 不回归（尤其 `js/test/plan/lead.test.ts`、`js/test/perception/rig.test.ts`）。
+- `npm run sim -- --scenario scenarios/bj-g4-dujiakan-traffic.json` 与当前基线**同种子**对比：用你自己的
+  硬减速判据（0.5s 内掉 >1.5m/s）统计采样点，**不高于**基线（预期下降）；全量 `npm test` 不回归。
 
 ### 练习 B（选做，2~3 小时）：给地图产物加"车道多边形"
 
-在 `js/mapgen` 的地图产物里加 `road.lanePolygons`（每条车道的左右边界点列，机械生成：
-沿中心线按 `laneCenters` 偏移 ±`laneWidth/2`），并写 `pointInLane(p, polygon)` + 3 条单测
-（车道内 / 车道外 / 骑线）。
+在 `js/mapgen` 产物里加 `road.lanePolygons`（沿中心线按 `laneCenters` 偏移 ±`laneWidth/2` 生成
+每条车道的左右边界点列），并写 `pointInLane(p, polygon)` + 3 条单测（车道内 / 外 / 骑线）。
 
 **验收**：`maps/bj-g4-dujiakan.json` 重新生成后**逐字节稳定**（你的 mapgen 有"重新生成结果一致"的约定）；
 `pointInLane` 单测全绿；`npm test` 不回归。
@@ -270,11 +265,10 @@ l   = (p − q) · n(t)
    Apollo/Lanelet2 用**显式字段**表达左右邻。三套约定的符号方向不同，混用必错。
 6. **Lanelet2 的 centerline 缓存** ✗：改了左右边界，Lanelet 返回的 centerline **不会自动更新**
    （LaneletMap 的最近点树同样不会自动重建）。
-7. **概率匹配需要协方差** ✗：没有协方差只剩确定性匹配。你的 `js/algo/objects.ts` 现在没协方差。
-8. **经纬度与字段覆盖率的两个陷阱**：Web Mercator 的"米"不是米（纬度 φ 处 1/cos φ，北京 ≈1.30）——
-   别把瓦片像素当米，世界坐标换算一律用 `geometry.originWorld`（不是 `geometry.origin`）；
-   另外 OSM 上 `maxspeed` 几乎为空、匝道几乎没有 `lanes` ⇒ 地图里的限速/车道数多为**派生值**
-   （你的 `AttrSource = 'osm' | 'derived:class'` 就是在标注这件事，别把它读成真值）。
+7. **概率匹配需要协方差；Lanelet2 的 centerline 与最近点树都是缓存的** ✗（见 03/05 篇与 Architecture 页）。
+8. **经纬度与字段覆盖率的两个陷阱**：Web Mercator 的"米"不是米（纬度 φ 处 1/cos φ，北京 ≈1.30），
+   世界坐标换算一律用 `geometry.originWorld`；且 OSM 上 `maxspeed` 几乎为空、匝道几乎没有 `lanes`
+   ⇒ 地图里的限速/车道数多为**派生值**（你的 `AttrSource = 'osm' | 'derived:class'` 就在标注这件事）。
 10. **"有车道级地图"不等于"归属就对了"** ✗：地图只给你**几何/拓扑**；"这辆车算不算我的障碍"
     还要**责任划分**（03 篇）与**不确定性**（05 篇）。
 
@@ -289,8 +283,8 @@ l   = (p − q) · n(t)
   `github.com/fzi-forschungszentrum-informatik/Lanelet2` 的 raw README（200）。
 - Autoware：`autoware_lanelet2_extension` 的 `README.md`、`docs/lanelet2_format_extension.md`、
   `docs/extra_regulatory_elements.md`（都是 `raw.githubusercontent.com`，200）。
-- ASAM OpenDRIVE：标准页 `asam.net/standards/detail/opendrive/`、规范在线版索引（v1.9.0）、
-  `11_lanes/11_01_introduction.html`、`12_junctions/12_04_connecting_roads.html`（均 200）。
+- ASAM OpenDRIVE：标准页、规范在线版索引（v1.9.0）、`11_lanes/11_01_introduction.html`、
+  `12_junctions/12_04_connecting_roads.html`（均 200）。
 - Apollo：`apollo.baidu.com/docs/apollo/10.x/md_modules_2map_2README__cn.html`（200，中文全文）。
 
 **核实不通过 / 未能核实的链接，一律没有写进本文**：

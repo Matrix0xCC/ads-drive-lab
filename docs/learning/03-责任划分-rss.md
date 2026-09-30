@@ -172,8 +172,8 @@ Definition 5 定义 `μ`-lateral-velocity）。它管的就是**切入（cut-in�
 | 纵向恰当响应（proper response） | ST 速度层：`cruise` / `stop` / `emergency`：[`../../js/algo/plan/speed.ts`](../../js/algo/plan/speed.ts)；状态机：[`../../js/algo/plan/states.ts`](../../js/algo/plan/states.ts) | 响应是**按几何**选的（过得去/过不去），不是按**责任**选的 |
 | 纵向安全距离 `d_min` | `marginFor(v)` 标定表：[`../../js/algo/plan/margin.ts`](../../js/algo/plan/margin.ts) | **无前车速度项**；RSS 是解析式、可证明，你的表是实测拟合 |
 | 跟驰（追尾义务） | `selectFollowTarget`：[`../../js/algo/plan/lead.ts`](../../js/algo/plan/lead.ts)；follow 分支 `min(targetV, vLead + (gap−6m)/1.4s)`：[`../../js/algo/plan/speed.ts`](../../js/algo/plan/speed.ts) | 安全门是"降不到前车速度就**不许跟**"⇒ 门槛外退回**停车线**（对会走的车用要停住的方式规划）。建议：把安全门交给**紧急制动层**兜底，跟驰公式本身在间距不足时已经会给出更低速度 |
-| "不在我的车道 ⇒ 我无让行义务" | **没有**。走廊膨胀把邻车道车算进来：[`../../js/algo/plan/paths.ts`](../../js/algo/plan/paths.ts) + [`../../js/algo/plan/corridor.ts`](../../js/algo/plan/corridor.ts) + A 方案 `MARGIN_MOVING_EXTRA = 0.6m`：[`../../js/algo/plan/margin.ts`](../../js/algo/plan/margin.ts) | **车道归属门**（物体中心不在我车道 ⇒ 不参与我车道阻塞）—— 这是幽灵刹车/无法超车的正解 |
-| 横向恰当响应 / cut-in | 只有"让位"的观感修正（候选排序 + 限幅让位，未完成）：[`../../js/algo/plan/paths.ts`](../../js/algo/plan/paths.ts) | **切入检测**（横向速度 + 跨线趋势 + 责任转移时刻） |
+| "不在我的车道 ⇒ 我无让行义务" | **第一版已落地**（几何近似）：走廊对"中心不在我车道、且没有朝我这边动"的物体，把阻塞带**钳到远离我车道的一侧**（`clampAwayFromMyLane` / `mayIntrude`）：[`../../js/algo/plan/corridor.ts`](../../js/algo/plan/corridor.ts)、[`../../js/algo/plan/paths.ts`](../../js/algo/plan/paths.ts)；A 方案裕度：[`../../js/algo/plan/margin.ts`](../../js/algo/plan/margin.ts) | 升级成**地图级归属查询**（车道带/多边形 + 物体框 + 迟滞）；把"正在切入"判得更细（规则化，而不是靠横向速度阈值） |
+| 横向恰当响应 / cut-in | 只有几何近似：走廊的"邻车道不阻塞我"钳制带 `mayIntrude` 例外：[`../../js/algo/plan/paths.ts`](../../js/algo/plan/paths.ts)、[`../../js/algo/plan/corridor.ts`](../../js/algo/plan/corridor.ts)（"限幅让位"的候选排序仍未完成） | **切入检测**（横向安全距离 + 跨线趋势 + 责任转移时刻），而不是横向速度阈值 |
 | 路权（right of way） | 地图侧只有 `netEdges.oneway`：[`../../js/env/track.ts`](../../js/env/track.ts) | **让行偏序**（谁 yield 谁）—— Autoware 的 `right_of_way`+yield lanes、OpenDRIVE 的 `priority(high/low)` |
 | "conflicting lanes 里哪些可忽略目标检测" | 无 | 生产级的责任过滤：**该忽略的邻车道不参与感知/决策**（Autoware 明确这么写） |
 | 遮挡谨慎（§3.9） | `UNKNOWN_HANDLING = 'speed'` + `coverageFromScan`：[`../../js/algo/plan/paths.ts`](../../js/algo/plan/paths.ts)；`docs/domain.md` P13 | 方向一致 ✓；可再补"按可见距离限速"的显式记账（你的 S4） |
@@ -220,20 +220,27 @@ Definition 5 定义 `μ`-lateral-velocity）。它管的就是**切入（cut-in�
 **可量化验收**：`npx tsc && node --test dist/js/test/plan/rss.test.js` 全绿；
 `npm test` 全量不回归（本练习是纯新增，不应改变任何行为）。
 
-### 练习 B（进阶，3~4 小时）：给走廊加"车道归属门"（**改行为，需要 A/B**）
+### 练习 B（进阶）：走廊的"车道归属门"—— **第一版已落地，下面是继续做的三件事**
 
-1. 在 [`../../js/algo/plan/paths.ts`](../../js/algo/plan/paths.ts) 构造移动物体盒时，先算每个物体中心
-   落在哪条车道带（用 02 篇练习 A 的 `laneBandsOf`）。**中心不在我这条车道**的物体：
-   它的命中点**不参与"我这条车道"的阻塞判定**（仍参与它自己车道的阻塞，也仍参与**紧急制动**层）。
-2. 两条单测（新建 `js/test/plan/lane-responsibility.test.ts`）：
-   - **邻车道车不阻塞我**：物体中心 `l=3.75m` ⇒ 我这条车道的候选不再被它判 `blockedHard`；
-   - **本车道车照样阻塞我（安全不回归）**：物体中心 `l=0` ⇒ 与改动前**逐位一致**。
-3. 同种子 A/B（`scenarios/bj-g4-dujiakan-traffic.json`），记录三组数：
-   硬减速采样点、EMERGENCY 帧数、`collision_true` 帧数。
+仓库里已经有了第一版（几何近似，见上表）：`clampAwayFromMyLane`（走廊侧）+ `mayIntrude`（切入侧），
+验收测试在 `js/test/plan/neighbor-lane.test.ts`（两条：邻车道**平行行驶** ⇒ 规划目标与"没有这辆车"
+的基线只差 1.1m/s，修复前是 5.9m/s；**已压线且朝我这边动** ⇒ 必须减速，实测 33.4 → 30.0m/s）。
+端到端（G4 交通、同种子）：到达 77.6s、碰撞 **0**、抖动 **14 → 7**。
 
-**可量化验收**：① 两条单测全绿 + 全量 `npm test` 不回归；② 硬减速采样点**下降**；
-③ `collision_true` **不增加**（这条是否决项）；④ 把三组数写进 `docs/domain.md` 或 `CLAUDE.md`。
-若 ③ 不满足 ⇒ **回滚**（你在这个仓库已经有过一次这样的教训：不够格的改动不进仓库）。
+接下来按 RSS 的语义把它做"正"（每一步都要 A/B，且 `collision_true` 不增加是否决项）：
+
+1. **把"归属"从每个消费点各打一次补丁，抽成一次查询**：用 02 篇练习 A 的 `laneBandsOf`，
+   在物体层输出 `laneId`（含迟滞：连续 N 帧才改判），走廊/速度层/vCap 都读同一个字段。
+2. **把"切入"规则化**：现在是"横向速度 > 阈值就保留完整裕度"；RSS 的做法是**横向恰当响应**
+   —— 判据用"横向距离 < 横向安全距离"（双方横向速度 + ρ），并定义**责任转移时刻**
+   （它压线多久/横向速度多大 ⇒ 从"我无义务"转为"我必须让"）。
+3. **给让行加路权输入**：把地图侧的 `oneway`（[`../../js/env/track.ts`](../../js/env/track.ts)）
+   扩展成让行偏序，对齐 Autoware `right_of_way`+yield lanes 与 OpenDRIVE `priority(high/low)`
+   —— 这是"路口无保护左转"的前置条件。
+
+**可量化验收**（延续你已有的做法）：① 新增判据要有单测；② 同种子 A/B 记录
+"硬减速采样点 / EMERGENCY / `collision_true`"三组数；③ 写进 `docs/domain.md` 或 `CLAUDE.md`；
+④ `collision_true` 上升 ⇒ **回滚**（不够格的改动不进仓库 —— 你已经有过一次这样的教训）。
 
 ---
 
